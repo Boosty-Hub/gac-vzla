@@ -12,6 +12,10 @@ export default {
         "2xl": "1400px",
       },
     },
+    fontFamily: {
+      sans: ['Inter', 'system-ui', 'sans-serif'],
+      display: ['Space Grotesk', 'Inter', 'sans-serif'],
+    },
     extend: {
       colors: {
         border: "hsl(var(--border))",
@@ -56,6 +60,16 @@ export default {
           "accent-foreground": "hsl(var(--sidebar-accent-foreground))",
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
+        },
+        gac: {
+          red: "hsl(var(--gac-red))",
+          "red-light": "hsl(var(--gac-red-light))",
+          charcoal: "hsl(var(--gac-charcoal))",
+          dark: "hsl(var(--gac-dark))",
+          silver: "hsl(var(--gac-silver))",
+          surface: "hsl(var(--gac-surface))",
+          success: "hsl(var(--gac-success))",
+          warning: "hsl(var(--gac-warning))",
         },
       },
       borderRadius: {
