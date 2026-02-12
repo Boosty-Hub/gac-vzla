@@ -7,20 +7,532 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
-      [_ in never]: never
+      dealerships: {
+        Row: {
+          id: string
+          name: string
+          city: string | null
+          state: string | null
+          address: string | null
+          phone: string | null
+          schedule: string | null
+          daily_capacity: number
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          city?: string | null
+          state?: string | null
+          address?: string | null
+          phone?: string | null
+          schedule?: string | null
+          daily_capacity?: number
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          city?: string | null
+          state?: string | null
+          address?: string | null
+          phone?: string | null
+          schedule?: string | null
+          daily_capacity?: number
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      reservations: {
+        Row: {
+          id: string
+          dealership_id: string
+          client_id: string | null
+          vehicle_id: string | null
+          reservation_date: string
+          reservation_time: string
+          service_type: string
+          current_mileage: number
+          status: string
+          notes: string | null
+          walkin_client_name: string | null
+          walkin_client_phone: string | null
+          walkin_plate: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          dealership_id: string
+          client_id?: string | null
+          vehicle_id?: string | null
+          reservation_date: string
+          reservation_time: string
+          service_type: string
+          current_mileage?: number
+          status?: string
+          notes?: string | null
+          walkin_client_name?: string | null
+          walkin_client_phone?: string | null
+          walkin_plate?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          dealership_id?: string
+          client_id?: string | null
+          vehicle_id?: string | null
+          reservation_date?: string
+          reservation_time?: string
+          service_type?: string
+          current_mileage?: number
+          status?: string
+          notes?: string | null
+          walkin_client_name?: string | null
+          walkin_client_phone?: string | null
+          walkin_plate?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservations_dealership_id_fkey"
+            columns: ["dealership_id"]
+            isOneToOne: false
+            referencedRelation: "dealerships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservations_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prospects: {
+        Row: {
+          id: string
+          dealership_id: string
+          name: string
+          phone: string | null
+          email: string | null
+          model_interest: string | null
+          source: string
+          status: string
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          dealership_id: string
+          name: string
+          phone?: string | null
+          email?: string | null
+          model_interest?: string | null
+          source?: string
+          status?: string
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          dealership_id?: string
+          name?: string
+          phone?: string | null
+          email?: string | null
+          model_interest?: string | null
+          source?: string
+          status?: string
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospects_dealership_id_fkey"
+            columns: ["dealership_id"]
+            isOneToOne: false
+            referencedRelation: "dealerships"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dealership_users: {
+        Row: {
+          id: string
+          dealership_id: string
+          profile_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          dealership_id: string
+          profile_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          dealership_id?: string
+          profile_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dealership_users_dealership_id_fkey"
+            columns: ["dealership_id"]
+            isOneToOne: false
+            referencedRelation: "dealerships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dealership_users_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      client_users: {
+        Row: {
+          id: string
+          client_id: string
+          profile_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          client_id: string
+          profile_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          client_id?: string
+          profile_id?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_users_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_users_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      clients: {
+        Row: {
+          address: string | null
+          cedula: string | null
+          city: string | null
+          created_at: string
+          email: string | null
+          full_name: string
+          id: string
+          is_active: boolean
+          phone: string | null
+          profile_id: string | null
+          state: string | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          cedula?: string | null
+          city?: string | null
+          created_at?: string
+          email?: string | null
+          full_name: string
+          id?: string
+          is_active?: boolean
+          phone?: string | null
+          profile_id?: string | null
+          state?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          cedula?: string | null
+          city?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string
+          id?: string
+          is_active?: boolean
+          phone?: string | null
+          profile_id?: string | null
+          state?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "clients_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      permissions: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          module: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          module: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          module?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          is_active: boolean
+          role_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          email: string
+          full_name?: string | null
+          id: string
+          is_active?: boolean
+          role_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string
+          full_name?: string | null
+          id?: string
+          is_active?: boolean
+          role_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_role_id_fkey"
+            columns: ["role_id"]
+            isOneToOne: false
+            referencedRelation: "roles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      role_permissions: {
+        Row: {
+          created_at: string
+          id: string
+          permission_id: string
+          role_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          permission_id: string
+          role_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          permission_id?: string
+          role_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "role_permissions_permission_id_fkey"
+            columns: ["permission_id"]
+            isOneToOne: false
+            referencedRelation: "permissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "role_permissions_role_id_fkey"
+            columns: ["role_id"]
+            isOneToOne: false
+            referencedRelation: "roles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      roles: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      vehicle_models: {
+        Row: {
+          brand: string
+          created_at: string
+          engine: string | null
+          id: string
+          image_url: string | null
+          is_active: boolean
+          name: string
+          transmission: string | null
+          year: number | null
+        }
+        Insert: {
+          brand?: string
+          created_at?: string
+          engine?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean
+          name: string
+          transmission?: string | null
+          year?: number | null
+        }
+        Update: {
+          brand?: string
+          created_at?: string
+          engine?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean
+          name?: string
+          transmission?: string | null
+          year?: number | null
+        }
+        Relationships: []
+      }
+      vehicles: {
+        Row: {
+          client_id: string
+          color: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          mileage: number
+          model_id: string
+          plate: string | null
+          purchase_date: string | null
+          updated_at: string
+          vin: string | null
+          warranty_active: boolean
+          year: number
+        }
+        Insert: {
+          client_id: string
+          color?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          mileage?: number
+          model_id: string
+          plate?: string | null
+          purchase_date?: string | null
+          updated_at?: string
+          vin?: string | null
+          warranty_active?: boolean
+          year: number
+        }
+        Update: {
+          client_id?: string
+          color?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          mileage?: number
+          model_id?: string
+          plate?: string | null
+          purchase_date?: string | null
+          updated_at?: string
+          vin?: string | null
+          warranty_active?: boolean
+          year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicles_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicles_model_id_fkey"
+            columns: ["model_id"]
+            isOneToOne: false
+            referencedRelation: "vehicle_models"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_user_role: { Args: never; Returns: string }
+      is_admin_user: { Args: never; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
