@@ -6,13 +6,19 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Plus, Search, Users, Phone, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
+
+interface VehicleModel {
+  id: string;
+  name: string;
+  brand: string;
+}
 
 interface Prospect {
   id: string;
@@ -24,6 +30,7 @@ interface Prospect {
   source: string;
   status: string;
   notes: string | null;
+  salesperson: string | null;
   created_at: string;
 }
 
@@ -50,6 +57,7 @@ const PROSPECT_STATUSES = [
 const DealershipProspectos = () => {
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Search/filter
@@ -67,6 +75,17 @@ const DealershipProspectos = () => {
   const [pSource, setPSource] = useState('presencial');
   const [pStatus, setPStatus] = useState('nuevo');
   const [pNotes, setPNotes] = useState('');
+  const [pSalesperson, setPSalesperson] = useState('');
+
+  const fetchModels = async () => {
+    const { data } = await supabase
+      .from('vehicle_models')
+      .select('id, name, brand')
+      .eq('is_active', true)
+      .order('brand')
+      .order('name');
+    if (data) setVehicleModels(data as VehicleModel[]);
+  };
 
   const fetchProspects = async () => {
     if (!selectedDealership) return;
@@ -80,7 +99,13 @@ const DealershipProspectos = () => {
     setLoading(false);
   };
 
-  useEffect(() => { if (selectedDealership) fetchProspects(); }, [selectedDealership]);
+  useEffect(() => { fetchModels(); }, []);
+
+  useEffect(() => {
+    if (loadingAccess) return;
+    if (selectedDealership) { fetchProspects(); }
+    else { setLoading(false); }
+  }, [selectedDealership, loadingAccess]);
 
   const filteredProspects = prospects.filter(p => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
@@ -94,7 +119,7 @@ const DealershipProspectos = () => {
 
   const openDialog = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
-    setPSource('presencial'); setPStatus('nuevo'); setPNotes('');
+    setPSource('presencial'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setDialogOpen(true);
   };
 
@@ -106,10 +131,11 @@ const DealershipProspectos = () => {
       name: pName.trim(),
       phone: pPhone.trim() || null,
       email: pEmail.trim() || null,
-      model_interest: pModel.trim() || null,
+      model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
       source: pSource,
       status: pStatus,
       notes: pNotes.trim() || null,
+      salesperson: pSalesperson.trim() || null,
     });
     if (error) { toast.error('Error al crear prospecto'); console.error(error); }
     else { toast.success('Prospecto creado'); setDialogOpen(false); fetchProspects(); }
@@ -185,6 +211,7 @@ const DealershipProspectos = () => {
                 <TableHead>Nombre</TableHead>
                 <TableHead>Contacto</TableHead>
                 <TableHead>Modelo</TableHead>
+                <TableHead>Vendedor</TableHead>
                 <TableHead>Fuente</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead>Fecha</TableHead>
@@ -202,6 +229,7 @@ const DealershipProspectos = () => {
                       {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                     </TableCell>
                     <TableCell>{p.model_interest || '-'}</TableCell>
+                    <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
                     </TableCell>
@@ -252,7 +280,20 @@ const DealershipProspectos = () => {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Modelo de interés</Label>
-                <Input value={pModel} onChange={e => setPModel(e.target.value)} placeholder="Ej: GS8, Emkoo" className="h-8 text-xs" />
+                <Select value={pModel} onValueChange={setPModel}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {Array.from(new Set(vehicleModels.map(m => m.brand))).map(brand => (
+                      <SelectGroup key={brand}>
+                        <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
+                        {vehicleModels.filter(m => m.brand === brand).map(m => (
+                          <SelectItem key={m.id} value={`${m.brand} ${m.name}`}>{m.brand} {m.name}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Fuente</Label>
@@ -262,6 +303,10 @@ const DealershipProspectos = () => {
                     {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Vendedor</Label>
+                <Input value={pSalesperson} onChange={e => setPSalesperson(e.target.value)} placeholder="Nombre del vendedor" className="h-8 text-xs" />
               </div>
               <div className="space-y-1 col-span-2">
                 <Label className="text-xs">Estado</Label>

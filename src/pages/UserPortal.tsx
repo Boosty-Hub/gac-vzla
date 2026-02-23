@@ -8,7 +8,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
+import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -35,7 +37,27 @@ interface Vehicle {
   mileage: number;
   vin: string | null;
   warranty_active: boolean;
+  purchase_date: string | null;
   vehicle_models: { name: string; brand: string } | null;
+}
+
+interface WarrantyCondition {
+  max_km: number;
+  max_months: number;
+  service_interval_km: number;
+  name: string;
+}
+
+interface VehicleServiceRecord {
+  id: string;
+  reservation_date: string;
+  reservation_time: string;
+  service_type: string;
+  current_mileage: number;
+  status: string;
+  service_notes: string | null;
+  completed_at: string | null;
+  dealerships: { name: string } | null;
 }
 
 interface Dealership {
@@ -47,6 +69,12 @@ interface Dealership {
   address: string | null;
 }
 
+interface ServiceType {
+  id: number;
+  name: string;
+  duration_minutes: number;
+}
+
 interface Reservation {
   id: string;
   reservation_date: string;
@@ -55,14 +83,12 @@ interface Reservation {
   current_mileage: number;
   status: string;
   notes: string | null;
+  service_notes: string | null;
+  completed_at: string | null;
   dealerships: { name: string } | null;
   vehicles: { plate: string; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
 
-const SERVICE_TYPES = [
-  'Mantenimiento Preventivo', 'Mantenimiento Correctivo', 'Revisión General',
-  'Cambio de Aceite', 'Alineación y Balanceo', 'Diagnóstico', 'Garantía', 'Otro',
-];
 
 const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
   const h = Math.floor(i / 2) + 8;
@@ -85,16 +111,31 @@ const UserPortal = () => {
   const [clientData, setClientData] = useState<ClientData | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [detailRes, setDetailRes] = useState<Reservation | null>(null);
+
+  // Warranty & vehicle history
+  const [warrantyCond, setWarrantyCond] = useState<WarrantyCondition | null>(null);
+  const [selectedVehDetail, setSelectedVehDetail] = useState<Vehicle | null>(null);
+  const [vehHistory, setVehHistory] = useState<VehicleServiceRecord[]>([]);
+  const [loadingVehHistory, setLoadingVehHistory] = useState(false);
+  const [vehServiceCounts, setVehServiceCounts] = useState<Record<string, number>>({});
 
   // Views
-  const [vista, setVista] = useState<'inicio' | 'reservar' | 'mis-reservas' | 'perfil'>('inicio');
+  const validVistas = ['inicio', 'reservar', 'mis-reservas', 'mis-vehiculos', 'perfil'] as const;
+  type Vista = typeof validVistas[number];
+  const storedVista = localStorage.getItem('userportal_vista') as Vista | null;
+  const [vista, setVistaState] = useState<Vista>(storedVista && validVistas.includes(storedVista) ? storedVista : 'inicio');
+  const setVista = (v: Vista) => { setVistaState(v); localStorage.setItem('userportal_vista', v); };
 
   // Reservation flow
   const [paso, setPaso] = useState(1);
   const [reservaConfirmada, setReservaConfirmada] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [filterState, setFilterState] = useState('');
+  const [filterCity, setFilterCity] = useState('');
   const [selectedDealership, setSelectedDealership] = useState('');
   const [selectedVehicle, setSelectedVehicle] = useState('');
   const [selectedService, setSelectedService] = useState('');
@@ -142,7 +183,7 @@ const UserPortal = () => {
       if (clientId) {
         const { data: vehs } = await supabase
           .from('vehicles')
-          .select('id, plate, year, color, mileage, vin, warranty_active, vehicle_models(name, brand)')
+          .select('id, plate, year, color, mileage, vin, warranty_active, purchase_date, vehicle_models(name, brand)')
           .eq('client_id', clientId)
           .eq('is_active', true)
           .order('year', { ascending: false });
@@ -151,7 +192,7 @@ const UserPortal = () => {
         // Fetch reservations for this client
         const { data: res } = await supabase
           .from('reservations')
-          .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+          .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
           .eq('client_id', clientId)
           .order('reservation_date', { ascending: false })
           .limit(50);
@@ -166,10 +207,76 @@ const UserPortal = () => {
         .order('name');
       setDealerships((deals || []) as Dealership[]);
 
+      // Fetch service types
+      const { data: stData } = await supabase
+        .from('service_types')
+        .select('id, name, duration_minutes')
+        .eq('is_active', true)
+        .order('name');
+      setServiceTypes((stData || []) as ServiceType[]);
+
+      // Fetch warranty conditions
+      const { data: wcData } = await supabase
+        .from('warranty_conditions')
+        .select('name, max_km, max_months, service_interval_km')
+        .eq('is_active', true)
+        .limit(1);
+      if (wcData && wcData.length > 0) setWarrantyCond(wcData[0] as WarrantyCondition);
+
       setLoading(false);
     };
     load();
   }, [user]);
+
+  // Fetch completed service counts per vehicle for warranty evaluation
+  useEffect(() => {
+    if (vehicles.length === 0) return;
+    (async () => {
+      const { data } = await supabase
+        .from('reservations')
+        .select('vehicle_id')
+        .eq('status', 'completada')
+        .in('vehicle_id', vehicles.map(v => v.id));
+      const counts: Record<string, number> = {};
+      (data || []).forEach((r: any) => { counts[r.vehicle_id] = (counts[r.vehicle_id] || 0) + 1; });
+      setVehServiceCounts(counts);
+    })();
+  }, [vehicles]);
+
+  const evaluateVehicleWarranty = (v: Vehicle) => {
+    if (!warrantyCond) return { active: false, reason: 'Sin condiciones configuradas', monthsRemaining: 0, kmRemaining: 0, servicesExpected: 0, servicesCompleted: 0, nextServiceKm: 0 };
+    const cond = warrantyCond;
+    const reasons: string[] = [];
+    const kmRemaining = cond.max_km - v.mileage;
+    if (v.mileage > cond.max_km) reasons.push(`Excede ${cond.max_km.toLocaleString()} km`);
+    let monthsRemaining = cond.max_months;
+    if (v.purchase_date) {
+      const purchase = new Date(v.purchase_date);
+      const now = new Date();
+      const elapsed = (now.getFullYear() - purchase.getFullYear()) * 12 + (now.getMonth() - purchase.getMonth());
+      monthsRemaining = cond.max_months - elapsed;
+      if (elapsed > cond.max_months) reasons.push(`Excede ${cond.max_months} meses`);
+    }
+    const servicesExpected = cond.service_interval_km > 0 ? Math.floor(v.mileage / cond.service_interval_km) : 0;
+    const servicesCompleted = vehServiceCounts[v.id] || 0;
+    if (servicesCompleted < servicesExpected) reasons.push(`Servicios: ${servicesCompleted}/${servicesExpected}`);
+    const nextServiceKm = cond.service_interval_km > 0 ? (Math.floor(v.mileage / cond.service_interval_km) + 1) * cond.service_interval_km : 0;
+    return { active: reasons.length === 0, reason: reasons.join(' · '), monthsRemaining: Math.max(0, monthsRemaining), kmRemaining: Math.max(0, kmRemaining), servicesExpected, servicesCompleted, nextServiceKm };
+  };
+
+  const openVehicleDetail = async (v: Vehicle) => {
+    setSelectedVehDetail(v);
+    setVehHistory([]);
+    setLoadingVehHistory(true);
+    const { data } = await supabase
+      .from('reservations')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, completed_at, dealerships(name)')
+      .eq('vehicle_id', v.id)
+      .order('reservation_date', { ascending: false })
+      .limit(50);
+    setVehHistory((data || []) as VehicleServiceRecord[]);
+    setLoadingVehHistory(false);
+  };
 
   const iniciarReserva = (dealershipId: string) => {
     setSelectedDealership(dealershipId);
@@ -205,7 +312,7 @@ const UserPortal = () => {
       // Refresh reservations
       const { data: res } = await supabase
         .from('reservations')
-        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
         .eq('client_id', clientData.id)
         .order('reservation_date', { ascending: false })
         .limit(50);
@@ -261,6 +368,7 @@ const UserPortal = () => {
         {[
           { id: 'inicio' as const, label: 'Agendar', icon: MapPin },
           { id: 'mis-reservas' as const, label: 'Mis Citas', icon: CalendarDays },
+          { id: 'mis-vehiculos' as const, label: 'Vehículos', icon: Car },
           { id: 'perfil' as const, label: 'Mi Perfil', icon: User },
         ].map(tab => (
           <button
@@ -279,41 +387,88 @@ const UserPortal = () => {
 
       <main className="pb-20 px-4 pt-4">
         {/* Inicio: Lista de Concesionarios */}
-        {vista === 'inicio' && (
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-xl font-display font-bold">Agendar Servicio</h2>
-              <p className="text-sm text-muted-foreground">Selecciona un concesionario</p>
-            </div>
+        {vista === 'inicio' && (() => {
+          const states = Array.from(new Set(dealerships.map(d => d.state).filter(Boolean) as string[])).sort();
+          const cities = Array.from(new Set(
+            dealerships
+              .filter(d => !filterState || d.state === filterState)
+              .map(d => d.city)
+              .filter(Boolean) as string[]
+          )).sort();
+          const filteredDealerships = dealerships.filter(d => {
+            if (filterState && d.state !== filterState) return false;
+            if (filterCity && d.city !== filterCity) return false;
+            return true;
+          });
 
-            {vehicles.length === 0 && (
-              <Card className="border-amber-200 bg-amber-50">
-                <CardContent className="p-4 text-xs text-amber-800">
-                  <p className="font-semibold">No tienes vehículos registrados</p>
-                  <p>Contacta a tu concesionario para vincular tus vehículos.</p>
-                </CardContent>
-              </Card>
-            )}
+          return (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-xl font-display font-bold">Agendar Servicio</h2>
+                <p className="text-sm text-muted-foreground">Selecciona tu ubicación y concesionario</p>
+              </div>
 
-            {dealerships.map(d => (
-              <Card key={d.id} className="overflow-hidden gac-shadow hover:gac-shadow-lg transition-shadow cursor-pointer" onClick={() => vehicles.length > 0 && iniciarReserva(d.id)}>
-                <div className="h-24 bg-gac-charcoal flex items-center justify-center">
-                  <Car className="w-10 h-10 text-gac-silver" />
+              {vehicles.length === 0 && (
+                <Card className="border-amber-200 bg-amber-50">
+                  <CardContent className="p-4 text-xs text-amber-800">
+                    <p className="font-semibold">No tienes vehículos registrados</p>
+                    <p>Contacta a tu concesionario para vincular tus vehículos.</p>
+                  </CardContent>
+                </Card>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Estado</Label>
+                  <Select value={filterState} onValueChange={v => { setFilterState(v === '__all' ? '' : v); setFilterCity(''); }}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Todos los estados" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all">Todos los estados</SelectItem>
+                      {states.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <CardContent className="p-4">
-                  <h3 className="font-display font-semibold text-base">{d.name}</h3>
-                  <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                    {d.city && <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-primary shrink-0" />{d.city}{d.state ? `, ${d.state}` : ''}</div>}
-                    {d.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 text-primary shrink-0" />{d.phone}</div>}
-                  </div>
-                  <Button className="w-full mt-3 gac-gradient text-primary-foreground" size="sm" disabled={vehicles.length === 0}>
-                    Agendar Servicio
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Ciudad</Label>
+                  <Select value={filterCity} onValueChange={v => setFilterCity(v === '__all' ? '' : v)} disabled={cities.length === 0}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Todas las ciudades" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all">Todas las ciudades</SelectItem>
+                      {cities.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {filteredDealerships.length === 0 ? (
+                <Card>
+                  <CardContent className="p-6 text-center">
+                    <MapPin className="w-10 h-10 text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">No hay concesionarios en esta ubicación</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                filteredDealerships.map(d => (
+                  <Card key={d.id} className="overflow-hidden gac-shadow hover:gac-shadow-lg transition-shadow cursor-pointer" onClick={() => vehicles.length > 0 && iniciarReserva(d.id)}>
+                    <div className="h-24 bg-gac-charcoal flex items-center justify-center">
+                      <Car className="w-10 h-10 text-gac-silver" />
+                    </div>
+                    <CardContent className="p-4">
+                      <h3 className="font-display font-semibold text-base">{d.name}</h3>
+                      <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+                        {d.city && <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-primary shrink-0" />{d.city}{d.state ? `, ${d.state}` : ''}</div>}
+                        {d.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 text-primary shrink-0" />{d.phone}</div>}
+                      </div>
+                      <Button className="w-full mt-3 gac-gradient text-primary-foreground" size="sm" disabled={vehicles.length === 0}>
+                        Agendar Servicio
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          );
+        })()}
 
         {/* Flujo de Reserva */}
         {vista === 'reservar' && selectedDealershipData && (
@@ -350,7 +505,7 @@ const UserPortal = () => {
                   <Select value={selectedService} onValueChange={setSelectedService}>
                     <SelectTrigger className="mt-1"><SelectValue placeholder="Selecciona el servicio" /></SelectTrigger>
                     <SelectContent>
-                      {SERVICE_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                      {serviceTypes.map(t => <SelectItem key={t.id} value={t.name}>{t.name} ({t.duration_minutes >= 60 ? `${Math.floor(t.duration_minutes / 60)}h${t.duration_minutes % 60 > 0 ? ` ${t.duration_minutes % 60}min` : ''}` : `${t.duration_minutes}min`})</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -470,7 +625,7 @@ const UserPortal = () => {
               reservations.map(r => {
                 const st = STATUS_CONFIG[r.status] || STATUS_CONFIG.pendiente;
                 return (
-                  <Card key={r.id} className="gac-shadow">
+                  <Card key={r.id} className="gac-shadow cursor-pointer hover:shadow-md transition-shadow" onClick={() => setDetailRes(r)}>
                     <CardContent className="p-4">
                       <div className="flex justify-between items-start mb-2">
                         <h3 className="font-semibold text-sm">{r.service_type}</h3>
@@ -486,6 +641,11 @@ const UserPortal = () => {
                         )}
                         {r.dealerships && <p>{r.dealerships.name}</p>}
                         <p>{r.reservation_date} a las {r.reservation_time?.slice(0, 5)}</p>
+                        {r.status === 'completada' && r.service_notes && (
+                          <p className="text-green-700 font-medium flex items-center gap-1 mt-1">
+                            <ClipboardList className="w-3 h-3" /> Servicio ejecutado - toca para ver detalles
+                          </p>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -494,6 +654,238 @@ const UserPortal = () => {
             )}
           </div>
         )}
+
+        {/* RESERVATION DETAIL DIALOG */}
+        <Dialog open={!!detailRes} onOpenChange={() => setDetailRes(null)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="font-display flex items-center gap-2 text-base">
+                <Wrench className="w-4 h-4" /> {detailRes?.service_type}
+              </DialogTitle>
+            </DialogHeader>
+            {detailRes && (() => {
+              const st = STATUS_CONFIG[detailRes.status] || STATUS_CONFIG.pendiente;
+              return (
+                <div className="space-y-4 py-1">
+                  <Badge className={cn("text-xs px-2 py-0.5", st.color)}>{st.label}</Badge>
+
+                  <div className="space-y-2.5 text-sm">
+                    {detailRes.vehicles && (
+                      <div className="flex items-center gap-2">
+                        <Car className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span>{detailRes.vehicles.vehicle_models?.brand} {detailRes.vehicles.vehicle_models?.name} {detailRes.vehicles.year} — {detailRes.vehicles.plate}</span>
+                      </div>
+                    )}
+                    {detailRes.dealerships && (
+                      <div className="flex items-center gap-2">
+                        <Building className="w-4 h-4 text-muted-foreground shrink-0" />
+                        <span>{detailRes.dealerships.name}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <CalendarDays className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <span>{detailRes.reservation_date} a las {detailRes.reservation_time?.slice(0, 5)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <span>{detailRes.current_mileage.toLocaleString()} km</span>
+                    </div>
+                    {detailRes.notes && (
+                      <div className="text-xs text-muted-foreground bg-muted/50 rounded-md p-2.5">
+                        <p className="font-semibold text-foreground mb-1">Notas de la cita</p>
+                        {detailRes.notes}
+                      </div>
+                    )}
+                    {detailRes.status === 'completada' && detailRes.service_notes && (
+                      <div className="bg-green-50 border border-green-200 rounded-md p-2.5 text-xs">
+                        <p className="font-semibold text-green-800 mb-1 flex items-center gap-1">
+                          <ClipboardList className="w-3.5 h-3.5" /> Trabajo realizado
+                        </p>
+                        <p className="text-green-700 whitespace-pre-wrap">{detailRes.service_notes}</p>
+                        {detailRes.completed_at && (
+                          <p className="text-green-600 mt-2 text-[10px]">
+                            Completado: {new Date(detailRes.completed_at).toLocaleString('es-VE')}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {detailRes.status === 'cancelada' && (
+                      <div className="bg-red-50 border border-red-200 rounded-md p-2.5 text-xs text-red-700">
+                        Esta cita fue cancelada.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+          </DialogContent>
+        </Dialog>
+
+        {/* Mis Vehículos */}
+        {vista === 'mis-vehiculos' && !selectedVehDetail && (
+          <div className="space-y-4">
+            <h2 className="text-xl font-display font-bold">Mis Vehículos</h2>
+            {warrantyCond && (
+              <p className="text-xs text-muted-foreground">{warrantyCond.name}: {(warrantyCond.max_months / 12).toFixed(0)} años o {warrantyCond.max_km.toLocaleString()} km</p>
+            )}
+            {vehicles.length === 0 ? (
+              <Card className="gac-shadow">
+                <CardContent className="p-8 text-center">
+                  <Car className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">No tienes vehículos registrados</p>
+                </CardContent>
+              </Card>
+            ) : (
+              vehicles.map(v => {
+                const w = evaluateVehicleWarranty(v);
+                return (
+                  <Card key={v.id} className={cn("gac-shadow border-l-4 cursor-pointer hover:shadow-md transition-shadow", w.active ? "border-l-green-500" : "border-l-red-500")} onClick={() => openVehicleDetail(v)}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 rounded-lg bg-primary/10">
+                            <Car className="w-6 h-6 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</p>
+                            <p className="text-xs text-muted-foreground">{v.plate} · {v.mileage.toLocaleString()} km{v.color ? ` · ${v.color}` : ''}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                            {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                            {w.active ? 'Activa' : 'Inactiva'}
+                          </Badge>
+                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                        </div>
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-muted rounded-lg p-1.5">
+                          <p className="text-sm font-bold">{w.servicesCompleted}/{w.servicesExpected}</p>
+                          <p className="text-[10px] text-muted-foreground">Servicios</p>
+                        </div>
+                        <div className="bg-muted rounded-lg p-1.5">
+                          <p className="text-sm font-bold">{w.kmRemaining > 0 ? `${(w.kmRemaining / 1000).toFixed(0)}k` : '0'}</p>
+                          <p className="text-[10px] text-muted-foreground">Km rest.</p>
+                        </div>
+                        <div className="bg-muted rounded-lg p-1.5">
+                          <p className="text-sm font-bold">{w.monthsRemaining > 0 ? `${w.monthsRemaining}m` : '0'}</p>
+                          <p className="text-[10px] text-muted-foreground">Meses rest.</p>
+                        </div>
+                      </div>
+                      {!w.active && w.reason && (
+                        <p className="mt-2 text-[10px] text-red-600 font-medium">⚠ {w.reason}</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {/* Vehicle Detail */}
+        {vista === 'mis-vehiculos' && selectedVehDetail && (() => {
+          const v = selectedVehDetail;
+          const w = evaluateVehicleWarranty(v);
+          return (
+            <div className="space-y-4">
+              <button onClick={() => setSelectedVehDetail(null)} className="flex items-center gap-1 text-sm text-primary">
+                <ArrowLeft className="w-4 h-4" /> Volver a mis vehículos
+              </button>
+
+              <Card className={cn("gac-shadow border-l-4", w.active ? "border-l-green-500" : "border-l-red-500")}>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-display font-bold">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
+                      <p className="text-xs text-muted-foreground">{v.plate}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
+                    </div>
+                    <Badge className={cn("text-xs flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                      {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                      {w.active ? 'Garantía Activa' : 'Garantía Inactiva'}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Hash className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Kilometraje</p><p className="font-medium">{v.mileage.toLocaleString()} km</p></div></div>
+                    <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><ShieldCheck className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Garantía</p><p className={cn("font-medium", w.active ? "text-green-700" : "text-red-600")}>{w.active ? 'Activa' : 'Vencida'}</p></div></div>
+                    {v.color && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Car className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Color</p><p className="font-medium">{v.color}</p></div></div>}
+                    {v.purchase_date && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Compra</p><p className="font-medium">{v.purchase_date}</p></div></div>}
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    <div className="bg-muted rounded-lg p-1.5">
+                      <p className="text-sm font-bold">{w.servicesCompleted}</p>
+                      <p className="text-[10px] text-muted-foreground">Realizados</p>
+                    </div>
+                    <div className="bg-muted rounded-lg p-1.5">
+                      <p className="text-sm font-bold">{w.servicesExpected}</p>
+                      <p className="text-[10px] text-muted-foreground">Esperados</p>
+                    </div>
+                    <div className="bg-muted rounded-lg p-1.5">
+                      <p className="text-sm font-bold">{w.nextServiceKm > 0 ? `${(w.nextServiceKm / 1000).toFixed(0)}k` : '-'}</p>
+                      <p className="text-[10px] text-muted-foreground">Próximo km</p>
+                    </div>
+                    <div className="bg-muted rounded-lg p-1.5">
+                      <p className="text-sm font-bold">{w.monthsRemaining > 0 ? `${w.monthsRemaining}m` : '0'}</p>
+                      <p className="text-[10px] text-muted-foreground">Meses rest.</p>
+                    </div>
+                  </div>
+
+                  {!w.active && w.reason && (
+                    <div className="bg-red-50 border border-red-200 rounded-md p-2.5 text-xs">
+                      <p className="font-semibold text-red-800 mb-1">Razón</p>
+                      <p className="text-red-700">{w.reason}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <h3 className="font-semibold text-sm">Historial de Servicios</h3>
+              {loadingVehHistory ? (
+                <div className="text-center py-6">
+                  <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">Cargando historial...</p>
+                </div>
+              ) : vehHistory.length === 0 ? (
+                <Card className="gac-shadow">
+                  <CardContent className="p-6 text-center">
+                    <Wrench className="w-10 h-10 text-muted-foreground mx-auto mb-2 opacity-30" />
+                    <p className="text-xs text-muted-foreground">Sin servicios registrados</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                vehHistory.map(h => {
+                  const isCompleted = h.status === 'completada';
+                  return (
+                    <Card key={h.id} className="gac-shadow">
+                      <CardContent className="p-3 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-xs">{h.service_type}</span>
+                          <Badge className={cn("text-[10px] px-1.5 py-0", isCompleted ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800")}>{h.status}</Badge>
+                        </div>
+                        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                          <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{h.reservation_date}</span>
+                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{h.reservation_time?.slice(0, 5)}</span>
+                          <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
+                        </div>
+                        {h.dealerships && <div className="flex items-center gap-1 text-[10px] text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>}
+                        {h.service_notes && (
+                          <div className="bg-green-50 border border-green-200 rounded p-2 text-xs">
+                            <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardList className="w-3 h-3" /> Trabajo realizado:</p>
+                            <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
+                            {h.completed_at && <p className="text-green-600 text-[10px] mt-1">Completado: {new Date(h.completed_at).toLocaleString('es-VE')}</p>}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })
+              )}
+            </div>
+          );
+        })()}
 
         {/* Perfil */}
         {vista === 'perfil' && (

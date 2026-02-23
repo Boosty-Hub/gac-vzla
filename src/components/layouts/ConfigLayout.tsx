@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, Users, Shield, KeyRound, Settings, LogOut } from 'lucide-react';
+import { ArrowLeft, Users, Shield, KeyRound, Settings, LogOut, Wrench, ShieldCheck } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 interface ConfigLayoutProps {
@@ -15,6 +15,8 @@ const configMenu = [
   { label: 'Usuarios', icon: Users, path: '/admin/configuracion/usuarios' },
   { label: 'Roles', icon: Shield, path: '/admin/configuracion/roles' },
   { label: 'Permisos', icon: KeyRound, path: '/admin/configuracion/permisos' },
+  { label: 'Servicios', icon: Wrench, path: '/admin/configuracion/servicios' },
+  { label: 'Garantías', icon: ShieldCheck, path: '/admin/configuracion/garantias' },
 ];
 
 export default function ConfigLayout({ children }: ConfigLayoutProps) {

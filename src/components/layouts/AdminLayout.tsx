@@ -57,6 +57,7 @@ const menuItems = [
     group: 'Gestión',
     items: [
       { label: 'Clientes', icon: UserCheck, path: '/admin/clientes' },
+      { label: 'Prospectos', icon: Users, path: '/admin/prospectos' },
       { label: 'Modelos', icon: BookOpen, path: '/admin/modelos' },
       { label: 'Concesionarios', icon: MapPin, path: '/admin/concesionarios' },
       { label: 'Vehículos', icon: Car, path: '/admin/vehiculos' },

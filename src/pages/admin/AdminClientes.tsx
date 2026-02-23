@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -44,6 +44,18 @@ interface ClientUser {
     email: string;
     full_name: string | null;
   } | null;
+}
+
+interface ServiceRecord {
+  id: string;
+  reservation_date: string;
+  reservation_time: string;
+  service_type: string;
+  current_mileage: number;
+  status: string;
+  service_notes: string | null;
+  completed_at: string | null;
+  dealerships: { name: string } | null;
 }
 
 interface Client {
@@ -109,6 +121,27 @@ const AdminClientes = () => {
   const [cuFullName, setCuFullName] = useState('');
   const [cuShowPassword, setCuShowPassword] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
+
+  // Vehicle detail dialog
+  const [vDetailOpen, setVDetailOpen] = useState(false);
+  const [vDetailVehicle, setVDetailVehicle] = useState<Vehicle | null>(null);
+  const [vDetailHistory, setVDetailHistory] = useState<ServiceRecord[]>([]);
+  const [vDetailLoading, setVDetailLoading] = useState(false);
+
+  const openVehicleDetail = async (v: Vehicle) => {
+    setVDetailVehicle(v);
+    setVDetailHistory([]);
+    setVDetailOpen(true);
+    setVDetailLoading(true);
+    const { data } = await supabase
+      .from('reservations')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, completed_at, dealerships(name)')
+      .eq('vehicle_id', v.id)
+      .order('reservation_date', { ascending: false })
+      .limit(50);
+    setVDetailHistory((data || []) as ServiceRecord[]);
+    setVDetailLoading(false);
+  };
 
   const fetchClients = async () => {
     setLoading(true);
@@ -467,7 +500,7 @@ const AdminClientes = () => {
                         ) : (
                           <div className="space-y-2">
                             {clientVehicles[c.id].map(v => (
-                              <div key={v.id} className="flex items-center justify-between bg-background rounded-lg p-3 border">
+                              <div key={v.id} className="flex items-center justify-between bg-background rounded-lg p-3 border cursor-pointer hover:shadow-md transition-shadow" onClick={() => openVehicleDetail(v)}>
                                 <div className="flex items-center gap-3">
                                   <Car className="w-5 h-5 text-muted-foreground" />
                                   <div>
@@ -488,7 +521,7 @@ const AdminClientes = () => {
                                   <Badge variant={v.warranty_active ? "default" : "secondary"} className="text-xs">
                                     {v.warranty_active ? 'Garantía' : 'Sin garantía'}
                                   </Badge>
-                                  <Button variant="ghost" size="sm" onClick={() => openEditVehicle(v)}>
+                                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditVehicle(v); }}>
                                     <Pencil className="w-3 h-3" />
                                   </Button>
                                 </div>
@@ -668,6 +701,78 @@ const AdminClientes = () => {
               {creatingUser ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <><UserPlus className="w-3.5 h-3.5 mr-1" /> Crear y vincular usuario</>}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Vehicle Detail Dialog */}
+      <Dialog open={vDetailOpen} onOpenChange={setVDetailOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Car className="w-4 h-4" /> Detalle del Vehículo
+            </DialogTitle>
+          </DialogHeader>
+          {vDetailVehicle && (() => {
+            const v = vDetailVehicle;
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-display font-bold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
+                    <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
+                  </div>
+                  <Badge className={cn("text-xs flex items-center gap-1", v.warranty_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                    {v.warranty_active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                    {v.warranty_active ? 'Garantía' : 'Sin Garantía'}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Hash className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Kilometraje</p><p className="font-medium">{v.mileage.toLocaleString()} km</p></div></div>
+                  {v.color && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Car className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Color</p><p className="font-medium">{v.color}</p></div></div>}
+                  {v.purchase_date && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Compra</p><p className="font-medium">{v.purchase_date}</p></div></div>}
+                </div>
+
+                <Separator />
+                <h4 className="font-semibold text-xs">Historial de Servicios ({vDetailHistory.length})</h4>
+
+                {vDetailLoading ? (
+                  <div className="text-center py-4">
+                    <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                    <p className="text-xs text-muted-foreground">Cargando historial...</p>
+                  </div>
+                ) : vDetailHistory.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-4">Sin servicios registrados</p>
+                ) : (
+                  <div className="space-y-2">
+                    {vDetailHistory.map(h => {
+                      const isCompleted = h.status === 'completada';
+                      return (
+                        <div key={h.id} className="border rounded-md p-2.5 text-xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">{h.service_type}</span>
+                            <Badge className={cn("text-[10px] px-1.5 py-0", isCompleted ? "bg-green-100 text-green-800" : h.status === 'cancelada' ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800")}>{h.status}</Badge>
+                          </div>
+                          <div className="flex items-center gap-3 text-muted-foreground">
+                            <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{h.reservation_date}</span>
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{h.reservation_time?.slice(0, 5)}</span>
+                            <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
+                          </div>
+                          {h.dealerships && <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>}
+                          {h.service_notes && (
+                            <div className="bg-green-50 border border-green-200 rounded p-1.5">
+                              <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo realizado:</p>
+                              <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

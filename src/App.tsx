@@ -18,12 +18,16 @@ import AdminGarantias from "./pages/admin/AdminGarantias";
 import AdminHistorial from "./pages/admin/AdminHistorial";
 import AdminConcesionarios from "./pages/admin/AdminConcesionarios";
 import AdminVehiculos from "./pages/admin/AdminVehiculos";
-import AdminUsuarios from "./pages/admin/AdminUsuarios";
 import AdminModelos from "./pages/admin/AdminModelos";
 import AdminClientes from "./pages/admin/AdminClientes";
+import AdminProspectos from "./pages/admin/AdminProspectos";
+import AdminUsuarios from "./pages/admin/AdminUsuarios";
 import AdminRoles from "./pages/admin/config/AdminRoles";
 import AdminPermisos from "./pages/admin/config/AdminPermisos";
+import AdminServicios from './pages/admin/config/AdminServicios';
+import AdminCondicionesGarantia from './pages/admin/config/AdminCondicionesGarantia';
 import ConfigLayout from "./components/layouts/ConfigLayout";
+import PublicReserva from "./pages/PublicReserva";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +54,7 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<RedirectByRole />} />
+            <Route path="/reservar" element={<PublicReserva />} />
 
             {/* Cliente routes */}
             <Route path="/usuario" element={
@@ -72,10 +77,13 @@ const App = () => (
             <Route path="/admin/vehiculos" element={<AdminRoute><AdminVehiculos /></AdminRoute>} />
             <Route path="/admin/modelos" element={<AdminRoute><AdminModelos /></AdminRoute>} />
             <Route path="/admin/clientes" element={<AdminRoute><AdminClientes /></AdminRoute>} />
+            <Route path="/admin/prospectos" element={<AdminRoute><AdminProspectos /></AdminRoute>} />
             <Route path="/admin/configuracion" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminUsuarios /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/usuarios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminUsuarios /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/roles" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminRoles /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/permisos" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminPermisos /></ConfigLayout></ProtectedRoute>} />
+            <Route path="/admin/configuracion/servicios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminServicios /></ConfigLayout></ProtectedRoute>} />
+            <Route path="/admin/configuracion/garantias" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminCondicionesGarantia /></ConfigLayout></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

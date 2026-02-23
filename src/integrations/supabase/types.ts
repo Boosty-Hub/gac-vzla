@@ -21,8 +21,13 @@ export type Database = {
           address: string | null
           phone: string | null
           schedule: string | null
-          daily_capacity: number
+          bays: number
           is_active: boolean
+          brand: string
+          type: string
+          email: string | null
+          instagram: string | null
+          website: string | null
           created_at: string
           updated_at: string
         }
@@ -34,8 +39,13 @@ export type Database = {
           address?: string | null
           phone?: string | null
           schedule?: string | null
-          daily_capacity?: number
+          bays?: number
           is_active?: boolean
+          brand?: string
+          type?: string
+          email?: string | null
+          instagram?: string | null
+          website?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -47,8 +57,13 @@ export type Database = {
           address?: string | null
           phone?: string | null
           schedule?: string | null
-          daily_capacity?: number
+          bays?: number
           is_active?: boolean
+          brand?: string
+          type?: string
+          email?: string | null
+          instagram?: string | null
+          website?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -69,6 +84,8 @@ export type Database = {
           walkin_client_name: string | null
           walkin_client_phone: string | null
           walkin_plate: string | null
+          service_notes: string | null
+          completed_at: string | null
           created_at: string
           updated_at: string
         }
@@ -86,6 +103,8 @@ export type Database = {
           walkin_client_name?: string | null
           walkin_client_phone?: string | null
           walkin_plate?: string | null
+          service_notes?: string | null
+          completed_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -103,6 +122,8 @@ export type Database = {
           walkin_client_name?: string | null
           walkin_client_phone?: string | null
           walkin_plate?: string | null
+          service_notes?: string | null
+          completed_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -141,6 +162,7 @@ export type Database = {
           source: string
           status: string
           notes: string | null
+          salesperson: string | null
           created_at: string
           updated_at: string
         }
@@ -154,6 +176,7 @@ export type Database = {
           source?: string
           status?: string
           notes?: string | null
+          salesperson?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -167,6 +190,7 @@ export type Database = {
           source?: string
           status?: string
           notes?: string | null
+          salesperson?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -525,6 +549,69 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      service_types: {
+        Row: {
+          id: number
+          name: string
+          duration_minutes: number
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          name: string
+          duration_minutes?: number
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          name?: string
+          duration_minutes?: number
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      warranty_conditions: {
+        Row: {
+          id: number
+          name: string
+          max_km: number
+          max_months: number
+          service_interval_km: number
+          description: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          name: string
+          max_km: number
+          max_months: number
+          service_interval_km?: number
+          description?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          name?: string
+          max_km?: number
+          max_months?: number
+          service_interval_km?: number
+          description?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {

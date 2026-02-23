@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Search, Plus, Pencil, Car } from 'lucide-react';
+import { Search, Plus, Pencil, Car, ImagePlus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface VehicleModel {
@@ -41,6 +41,10 @@ const AdminModelos = () => {
   const [formEngine, setFormEngine] = useState('');
   const [formTransmission, setFormTransmission] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
+  const [formImageFile, setFormImageFile] = useState<File | null>(null);
+  const [formImagePreview, setFormImagePreview] = useState<string | null>(null);
+  const [removeImage, setRemoveImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchModels = async () => {
     setLoading(true);
@@ -71,6 +75,9 @@ const AdminModelos = () => {
     setFormEngine('');
     setFormTransmission('');
     setFormIsActive(true);
+    setFormImageFile(null);
+    setFormImagePreview(null);
+    setRemoveImage(false);
     setDialogOpen(true);
   };
 
@@ -82,7 +89,26 @@ const AdminModelos = () => {
     setFormEngine(model.engine || '');
     setFormTransmission(model.transmission || '');
     setFormIsActive(model.is_active);
+    setFormImageFile(null);
+    setFormImagePreview(model.image_url || null);
+    setRemoveImage(false);
     setDialogOpen(true);
+  };
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error('La imagen no debe superar 5 MB'); return; }
+    setFormImageFile(file);
+    setFormImagePreview(URL.createObjectURL(file));
+    setRemoveImage(false);
+    e.target.value = '';
+  };
+
+  const handleRemoveImage = () => {
+    setFormImageFile(null);
+    setFormImagePreview(null);
+    setRemoveImage(true);
   };
 
   const handleSave = async () => {
@@ -92,7 +118,28 @@ const AdminModelos = () => {
     }
     setSaving(true);
 
-    const payload = {
+    let imageUrl: string | null | undefined = undefined;
+
+    // Upload new image if selected
+    if (formImageFile) {
+      const ext = formImageFile.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const filePath = `${formBrand.toLowerCase()}/${Date.now()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from('vehicle-models')
+        .upload(filePath, formImageFile, { upsert: true });
+      if (uploadError) {
+        toast.error('Error al subir imagen');
+        console.error(uploadError);
+        setSaving(false);
+        return;
+      }
+      const { data: urlData } = supabase.storage.from('vehicle-models').getPublicUrl(filePath);
+      imageUrl = urlData.publicUrl;
+    } else if (removeImage) {
+      imageUrl = null;
+    }
+
+    const base = {
       name: formName.trim(),
       brand: formBrand,
       year: formYear ? parseInt(formYear) : null,
@@ -100,6 +147,7 @@ const AdminModelos = () => {
       transmission: formTransmission.trim() || null,
       is_active: formIsActive,
     };
+    const payload = imageUrl !== undefined ? { ...base, image_url: imageUrl } : base;
 
     if (editingModel) {
       const { error } = await supabase
@@ -173,6 +221,7 @@ const AdminModelos = () => {
           <Table className="text-xs">
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                <TableHead className="w-12">Foto</TableHead>
                 <TableHead>Marca</TableHead>
                 <TableHead>Modelo</TableHead>
                 <TableHead>Motor</TableHead>
@@ -184,6 +233,15 @@ const AdminModelos = () => {
             <TableBody>
               {filteredModels.map(m => (
                 <TableRow key={m.id} className="[&>td]:py-1.5">
+                  <TableCell>
+                    {m.image_url ? (
+                      <img src={m.image_url} alt={m.name} className="w-10 h-10 rounded-md object-cover border" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-md bg-muted flex items-center justify-center">
+                        <Car className="w-5 h-5 text-muted-foreground" />
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{m.brand}</Badge>
                   </TableCell>
@@ -240,6 +298,35 @@ const AdminModelos = () => {
                 <Input id="modelTransmission" value={formTransmission} onChange={e => setFormTransmission(e.target.value)} placeholder="Ej: Automática 7DCT" />
               </div>
             </div>
+            {/* Image upload */}
+            <div className="space-y-2">
+              <Label>Imagen del Modelo</Label>
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={handleImageSelect} />
+              {formImagePreview ? (
+                <div className="relative w-full h-40 rounded-lg border overflow-hidden bg-muted">
+                  <img src={formImagePreview} alt="Preview" className="w-full h-full object-contain" />
+                  <div className="absolute top-1.5 right-1.5 flex gap-1">
+                    <Button type="button" size="icon" variant="secondary" className="h-7 w-7 rounded-full shadow" onClick={() => fileInputRef.current?.click()}>
+                      <ImagePlus className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button type="button" size="icon" variant="destructive" className="h-7 w-7 rounded-full shadow" onClick={handleRemoveImage}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full h-28 rounded-lg border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-1.5 hover:border-primary/50 hover:bg-primary/5 transition-colors"
+                >
+                  <ImagePlus className="w-6 h-6 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">Clic para subir imagen</span>
+                  <span className="text-[10px] text-muted-foreground">JPG, PNG, WebP · Máx 5 MB</span>
+                </button>
+              )}
+            </div>
+
             <div className="flex items-center justify-between">
               <div>
                 <Label>Estado</Label>

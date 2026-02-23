@@ -5,7 +5,9 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Car } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Separator } from '@/components/ui/separator';
+import { Search, Car, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, Wrench, ClipboardCheck, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Vehicle {
@@ -22,6 +24,18 @@ interface Vehicle {
   clients: { full_name: string; cedula: string | null } | null;
 }
 
+interface ServiceRecord {
+  id: string;
+  reservation_date: string;
+  reservation_time: string;
+  service_type: string;
+  current_mileage: number;
+  status: string;
+  service_notes: string | null;
+  completed_at: string | null;
+  dealerships: { name: string } | null;
+}
+
 const AdminVehiculos = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +44,12 @@ const AdminVehiculos = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
+
+  // Detail dialog
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailVehicle, setDetailVehicle] = useState<Vehicle | null>(null);
+  const [detailHistory, setDetailHistory] = useState<ServiceRecord[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
 
   const fetchVehicles = async () => {
     setLoading(true);
@@ -71,6 +91,21 @@ const AdminVehiculos = () => {
   useEffect(() => {
     fetchVehicles();
   }, [page, busqueda, brandFilter, pageSize]);
+
+  const openDetail = async (v: Vehicle) => {
+    setDetailVehicle(v);
+    setDetailHistory([]);
+    setDetailOpen(true);
+    setLoadingDetail(true);
+    const { data } = await supabase
+      .from('reservations')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, completed_at, dealerships(name)')
+      .eq('vehicle_id', v.id)
+      .order('reservation_date', { ascending: false })
+      .limit(50);
+    setDetailHistory((data || []) as ServiceRecord[]);
+    setLoadingDetail(false);
+  };
 
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return '-';
@@ -153,7 +188,7 @@ const AdminVehiculos = () => {
             </TableHeader>
             <TableBody>
               {vehicles.map(v => (
-                <TableRow key={v.id} className="[&>td]:py-1.5">
+                <TableRow key={v.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(v)}>
                   <TableCell>
                     <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">
                       {v.vehicle_models?.brand || '-'}
@@ -207,6 +242,78 @@ const AdminVehiculos = () => {
           </div>
         </div>
       )}
+      {/* DETAIL DIALOG */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Car className="w-4 h-4" /> Detalle del Vehículo
+            </DialogTitle>
+          </DialogHeader>
+          {detailVehicle && (() => {
+            const v = detailVehicle;
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-display font-bold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
+                    <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
+                  </div>
+                  <Badge className={cn("text-xs flex items-center gap-1", v.warranty_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                    {v.warranty_active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                    {v.warranty_active ? 'Garantía Activa' : 'Sin Garantía'}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><User className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Cliente</p><p className="font-medium">{v.clients?.full_name || '-'}</p></div></div>
+                  <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Hash className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Kilometraje</p><p className="font-medium">{v.mileage.toLocaleString()} km</p></div></div>
+                  {v.color && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Car className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Color</p><p className="font-medium">{v.color}</p></div></div>}
+                  {v.purchase_date && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Compra</p><p className="font-medium">{formatDate(v.purchase_date)}</p></div></div>}
+                </div>
+
+                <Separator />
+                <h4 className="font-semibold text-xs">Historial de Servicios ({detailHistory.length})</h4>
+
+                {loadingDetail ? (
+                  <div className="text-center py-4">
+                    <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                    <p className="text-xs text-muted-foreground">Cargando historial...</p>
+                  </div>
+                ) : detailHistory.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-4">Sin servicios registrados</p>
+                ) : (
+                  <div className="space-y-2">
+                    {detailHistory.map(h => {
+                      const isCompleted = h.status === 'completada';
+                      return (
+                        <div key={h.id} className="border rounded-md p-2.5 text-xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">{h.service_type}</span>
+                            <Badge className={cn("text-[10px] px-1.5 py-0", isCompleted ? "bg-green-100 text-green-800" : h.status === 'cancelada' ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800")}>{h.status}</Badge>
+                          </div>
+                          <div className="flex items-center gap-3 text-muted-foreground">
+                            <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{h.reservation_date}</span>
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{h.reservation_time?.slice(0, 5)}</span>
+                            <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
+                          </div>
+                          {h.dealerships && <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>}
+                          {h.service_notes && (
+                            <div className="bg-green-50 border border-green-200 rounded p-1.5">
+                              <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo realizado:</p>
+                              <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
