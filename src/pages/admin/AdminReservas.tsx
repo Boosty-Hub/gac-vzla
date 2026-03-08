@@ -172,17 +172,32 @@ const AdminReservas = () => {
     fetchReservations();
   }, [view, selectedDate, filtroConc]);
 
-  // Client search with debounce
+  // Client search with debounce (by name, cedula, or vehicle plate)
   useEffect(() => {
     if (fClientSearch.trim().length < 2) { setClientResults([]); return; }
     const timer = setTimeout(async () => {
       setSearchingClients(true);
-      const { data } = await supabase
+      // Search by name or cedula
+      const { data: directClients } = await supabase
         .from('clients')
         .select('id, full_name, cedula')
         .or(`full_name.ilike.%${fClientSearch}%,cedula.ilike.%${fClientSearch}%`)
         .limit(10);
-      setClientResults(data || []);
+
+      // Search by vehicle plate
+      const { data: vehicleMatches } = await supabase
+        .from('vehicles')
+        .select('client_id, plate, clients(id, full_name, cedula)')
+        .ilike('plate', `%${fClientSearch}%`)
+        .limit(10);
+
+      const results = new Map<string, ClientOption>();
+      (directClients || []).forEach(c => results.set(c.id, c));
+      (vehicleMatches || []).forEach((v: any) => {
+        if (v.clients) results.set(v.clients.id, v.clients);
+      });
+
+      setClientResults(Array.from(results.values()));
       setSearchingClients(false);
     }, 300);
     return () => clearTimeout(timer);
@@ -594,7 +609,7 @@ const AdminReservas = () => {
                 <Input
                   value={fClientSearch}
                   onChange={e => { setFClientSearch(e.target.value); if (fClientId) { setFClientId(''); setFVehicleId(''); } }}
-                  placeholder="Buscar por nombre o cédula..."
+                  placeholder="Buscar por nombre, cédula o placa..."
                 />
                 {clientResults.length > 0 && !fClientId && (
                   <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-40 overflow-y-auto">
