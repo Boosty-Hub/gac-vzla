@@ -210,6 +210,20 @@ const AdminProspectos = () => {
     setDetailOpen(true);
   };
 
+  const confirmDelete = (p: Prospect) => {
+    setDeleteTarget(p);
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const { error } = await supabase.from('prospects').delete().eq('id', deleteTarget.id);
+    if (error) { toast.error('Error al eliminar prospecto'); console.error(error); }
+    else { toast.success('Prospecto eliminado'); setDeleteOpen(false); setDeleteTarget(null); fetchProspects(); }
+    setDeleting(false);
+  };
+
   // CSV Template download
   const downloadTemplate = () => {
     const headers = 'nombre,telefono,email,modelo_interes,fuente,estado,notas';
