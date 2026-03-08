@@ -117,6 +117,20 @@ const UserPortal = () => {
   const [loading, setLoading] = useState(true);
   const [detailRes, setDetailRes] = useState<Reservation | null>(null);
 
+  // Edit reservation
+  const [editOpen, setEditOpen] = useState(false);
+  const [editRes, setEditRes] = useState<Reservation | null>(null);
+  const [editDate, setEditDate] = useState<Date | undefined>(undefined);
+  const [editTime, setEditTime] = useState('');
+  const [editService, setEditService] = useState('');
+  const [editMileage, setEditMileage] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Cancel reservation
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<Reservation | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   // Warranty & vehicle history
   const [warrantyCond, setWarrantyCond] = useState<WarrantyCondition | null>(null);
   const [selectedVehDetail, setSelectedVehDetail] = useState<Vehicle | null>(null);
