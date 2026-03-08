@@ -1,0 +1,1 @@
+DROP POLICY "Admins can manage prospects" ON public.prospects;
