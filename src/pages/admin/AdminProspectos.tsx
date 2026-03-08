@@ -98,6 +98,11 @@ const AdminProspectos = () => {
   const [importing, setImporting] = useState(false);
   const [importDealership, setImportDealership] = useState('');
 
+  // Delete confirmation
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const fetchDealerships = async () => {
     const { data } = await supabase
       .from('dealerships')
