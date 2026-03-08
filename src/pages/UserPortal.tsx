@@ -8,9 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
-import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight } from 'lucide-react';
+import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -116,6 +117,20 @@ const UserPortal = () => {
   const [loading, setLoading] = useState(true);
   const [detailRes, setDetailRes] = useState<Reservation | null>(null);
 
+  // Edit reservation
+  const [editOpen, setEditOpen] = useState(false);
+  const [editRes, setEditRes] = useState<Reservation | null>(null);
+  const [editDate, setEditDate] = useState<Date | undefined>(undefined);
+  const [editTime, setEditTime] = useState('');
+  const [editService, setEditService] = useState('');
+  const [editMileage, setEditMileage] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Cancel reservation
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<Reservation | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   // Warranty & vehicle history
   const [warrantyCond, setWarrantyCond] = useState<WarrantyCondition | null>(null);
   const [selectedVehDetail, setSelectedVehDetail] = useState<Vehicle | null>(null);
@@ -325,6 +340,111 @@ const UserPortal = () => {
     setVista('inicio');
     setReservaConfirmada(false);
     setPaso(1);
+  };
+
+  const refreshReservations = async () => {
+    if (!clientData) return;
+    const { data: res } = await supabase
+      .from('reservations')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+      .eq('client_id', clientData.id)
+      .order('reservation_date', { ascending: false })
+      .limit(50);
+    setReservations((res || []) as Reservation[]);
+  };
+
+  const openEditReservation = (r: Reservation) => {
+    setEditRes(r);
+    setEditDate(new Date(r.reservation_date + 'T12:00:00'));
+    setEditTime(r.reservation_time?.slice(0, 5) || '');
+    setEditService(r.service_type);
+    setEditMileage(String(r.current_mileage || 0));
+    setEditNotes(r.notes || '');
+    setDetailRes(null);
+    setEditOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editRes || !editDate || !editTime || !editService) return;
+    setEditSaving(true);
+    const { error } = await supabase.from('reservations').update({
+      reservation_date: format(editDate, 'yyyy-MM-dd'),
+      reservation_time: editTime,
+      service_type: editService,
+      current_mileage: parseInt(editMileage) || 0,
+      notes: editNotes.trim() || null,
+    }).eq('id', editRes.id);
+    if (error) { toast.error('Error al actualizar la cita'); console.error(error); }
+    else { toast.success('Cita actualizada'); setEditOpen(false); refreshReservations(); }
+    setEditSaving(false);
+  };
+
+  const openCancelConfirm = (r: Reservation) => {
+    setCancelTarget(r);
+    setDetailRes(null);
+    setCancelOpen(true);
+  };
+
+  const handleCancelReservation = async () => {
+    if (!cancelTarget || !clientData) return;
+    setCancelling(true);
+    const { error } = await supabase.from('reservations').update({ status: 'cancelada' }).eq('id', cancelTarget.id);
+    if (error) {
+      toast.error('Error al cancelar la cita');
+      console.error(error);
+    } else {
+      // Send notification to admin profiles
+      const { data: adminProfiles } = await supabase
+        .from('profiles')
+        .select('id, roles(name)')
+        .in('role_id', (await supabase.from('roles').select('id').in('name', ['superadmin', 'admin'])).data?.map(r => r.id) || []);
+
+      const vehicleInfo = cancelTarget.vehicles
+        ? `${cancelTarget.vehicles.vehicle_models?.brand} ${cancelTarget.vehicles.vehicle_models?.name} ${cancelTarget.vehicles.year} (${cancelTarget.vehicles.plate})`
+        : '';
+      const notifTitle = 'Cita Cancelada';
+      const notifMessage = `${clientData.full_name} canceló su cita de ${cancelTarget.service_type} para el ${cancelTarget.reservation_date} a las ${cancelTarget.reservation_time?.slice(0, 5)}. Vehículo: ${vehicleInfo}. Concesionario: ${cancelTarget.dealerships?.name || 'N/A'}.`;
+
+      const notifications: any[] = [];
+
+      // Notify admin users
+      if (adminProfiles) {
+        adminProfiles.forEach((p: any) => {
+          notifications.push({
+            recipient_profile_id: p.id,
+            type: 'cancelacion',
+            title: notifTitle,
+            message: notifMessage,
+            metadata: { reservation_id: cancelTarget.id },
+          });
+        });
+      }
+
+      // Notify dealership
+      if (cancelTarget.dealerships) {
+        // Find dealership_id from reservations
+        const { data: resData } = await supabase.from('reservations').select('dealership_id').eq('id', cancelTarget.id).single();
+        if (resData) {
+          notifications.push({
+            recipient_dealership_id: resData.dealership_id,
+            type: 'cancelacion',
+            title: notifTitle,
+            message: notifMessage,
+            metadata: { reservation_id: cancelTarget.id },
+          });
+        }
+      }
+
+      if (notifications.length > 0) {
+        await supabase.from('notifications').insert(notifications);
+      }
+
+      toast.success('Cita cancelada');
+      setCancelOpen(false);
+      setCancelTarget(null);
+      refreshReservations();
+    }
+    setCancelling(false);
   };
 
   const selectedDealershipData = dealerships.find(d => d.id === selectedDealership);
@@ -714,12 +834,108 @@ const UserPortal = () => {
                         Esta cita fue cancelada.
                       </div>
                     )}
+
+                    {/* Edit/Cancel buttons for pending/confirmed reservations */}
+                    {['pendiente', 'confirmada'].includes(detailRes.status) && (
+                      <div className="flex gap-2 pt-2">
+                        <Button size="sm" variant="outline" className="flex-1 gap-1" onClick={() => openEditReservation(detailRes)}>
+                          <Pencil className="w-3.5 h-3.5" /> Editar
+                        </Button>
+                        <Button size="sm" variant="destructive" className="flex-1 gap-1" onClick={() => openCancelConfirm(detailRes)}>
+                          <XCircle className="w-3.5 h-3.5" /> Cancelar
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })()}
           </DialogContent>
         </Dialog>
+
+        {/* EDIT RESERVATION DIALOG */}
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="font-display">Editar Cita</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <Label className="text-xs">Tipo de Servicio</Label>
+                <Select value={editService} onValueChange={setEditService}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {serviceTypes.map(t => <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Fecha</Label>
+                <div className="mt-1 flex justify-center">
+                  <Calendar
+                    mode="single"
+                    selected={editDate}
+                    onSelect={setEditDate}
+                    locale={es}
+                    disabled={(date) => date < new Date() || date.getDay() === 0}
+                    className="rounded-lg border p-2 pointer-events-auto"
+                  />
+                </div>
+              </div>
+              {editDate && (
+                <div>
+                  <Label className="text-xs">Hora</Label>
+                  <div className="grid grid-cols-4 gap-1.5 mt-1">
+                    {TIME_SLOTS.map(h => (
+                      <button
+                        key={h}
+                        onClick={() => setEditTime(h)}
+                        className={cn(
+                          "py-1.5 text-xs rounded-lg border transition-all font-medium",
+                          editTime === h ? "gac-gradient text-primary-foreground border-transparent" : "hover:border-primary"
+                        )}
+                      >
+                        {h}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <Label className="text-xs">Kilometraje Actual</Label>
+                <Input className="mt-1" type="number" value={editMileage} onChange={e => setEditMileage(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Notas</Label>
+                <Textarea className="mt-1 text-xs" rows={2} value={editNotes} onChange={e => setEditNotes(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditOpen(false)}>Cancelar</Button>
+              <Button onClick={handleEditSave} disabled={editSaving || !editDate || !editTime || !editService} className="gac-gradient text-primary-foreground">
+                {editSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Guardar Cambios'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* CANCEL CONFIRMATION */}
+        <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Cancelar esta cita?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Se cancelará tu cita de <strong>{cancelTarget?.service_type}</strong> programada para el {cancelTarget?.reservation_date} a las {cancelTarget?.reservation_time?.slice(0, 5)}. Se notificará al concesionario y al administrador.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={cancelling}>Volver</AlertDialogCancel>
+              <AlertDialogAction onClick={handleCancelReservation} disabled={cancelling} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                {cancelling ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Sí, cancelar cita'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Mis Vehículos */}
         {vista === 'mis-vehiculos' && !selectedVehDetail && (
