@@ -472,9 +472,14 @@ const AdminProspectos = () => {
                       {new Date(p.created_at).toLocaleDateString('es-VE')}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
-                        Editar
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
+                          Editar
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-[10px] h-6 px-1.5 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); confirmDelete(p); }}>
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
