@@ -342,6 +342,111 @@ const UserPortal = () => {
     setPaso(1);
   };
 
+  const refreshReservations = async () => {
+    if (!clientData) return;
+    const { data: res } = await supabase
+      .from('reservations')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+      .eq('client_id', clientData.id)
+      .order('reservation_date', { ascending: false })
+      .limit(50);
+    setReservations((res || []) as Reservation[]);
+  };
+
+  const openEditReservation = (r: Reservation) => {
+    setEditRes(r);
+    setEditDate(new Date(r.reservation_date + 'T12:00:00'));
+    setEditTime(r.reservation_time?.slice(0, 5) || '');
+    setEditService(r.service_type);
+    setEditMileage(String(r.current_mileage || 0));
+    setEditNotes(r.notes || '');
+    setDetailRes(null);
+    setEditOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!editRes || !editDate || !editTime || !editService) return;
+    setEditSaving(true);
+    const { error } = await supabase.from('reservations').update({
+      reservation_date: format(editDate, 'yyyy-MM-dd'),
+      reservation_time: editTime,
+      service_type: editService,
+      current_mileage: parseInt(editMileage) || 0,
+      notes: editNotes.trim() || null,
+    }).eq('id', editRes.id);
+    if (error) { toast.error('Error al actualizar la cita'); console.error(error); }
+    else { toast.success('Cita actualizada'); setEditOpen(false); refreshReservations(); }
+    setEditSaving(false);
+  };
+
+  const openCancelConfirm = (r: Reservation) => {
+    setCancelTarget(r);
+    setDetailRes(null);
+    setCancelOpen(true);
+  };
+
+  const handleCancelReservation = async () => {
+    if (!cancelTarget || !clientData) return;
+    setCancelling(true);
+    const { error } = await supabase.from('reservations').update({ status: 'cancelada' }).eq('id', cancelTarget.id);
+    if (error) {
+      toast.error('Error al cancelar la cita');
+      console.error(error);
+    } else {
+      // Send notification to admin profiles
+      const { data: adminProfiles } = await supabase
+        .from('profiles')
+        .select('id, roles(name)')
+        .in('role_id', (await supabase.from('roles').select('id').in('name', ['superadmin', 'admin'])).data?.map(r => r.id) || []);
+
+      const vehicleInfo = cancelTarget.vehicles
+        ? `${cancelTarget.vehicles.vehicle_models?.brand} ${cancelTarget.vehicles.vehicle_models?.name} ${cancelTarget.vehicles.year} (${cancelTarget.vehicles.plate})`
+        : '';
+      const notifTitle = 'Cita Cancelada';
+      const notifMessage = `${clientData.full_name} canceló su cita de ${cancelTarget.service_type} para el ${cancelTarget.reservation_date} a las ${cancelTarget.reservation_time?.slice(0, 5)}. Vehículo: ${vehicleInfo}. Concesionario: ${cancelTarget.dealerships?.name || 'N/A'}.`;
+
+      const notifications: any[] = [];
+
+      // Notify admin users
+      if (adminProfiles) {
+        adminProfiles.forEach((p: any) => {
+          notifications.push({
+            recipient_profile_id: p.id,
+            type: 'cancelacion',
+            title: notifTitle,
+            message: notifMessage,
+            metadata: { reservation_id: cancelTarget.id },
+          });
+        });
+      }
+
+      // Notify dealership
+      if (cancelTarget.dealerships) {
+        // Find dealership_id from reservations
+        const { data: resData } = await supabase.from('reservations').select('dealership_id').eq('id', cancelTarget.id).single();
+        if (resData) {
+          notifications.push({
+            recipient_dealership_id: resData.dealership_id,
+            type: 'cancelacion',
+            title: notifTitle,
+            message: notifMessage,
+            metadata: { reservation_id: cancelTarget.id },
+          });
+        }
+      }
+
+      if (notifications.length > 0) {
+        await supabase.from('notifications').insert(notifications);
+      }
+
+      toast.success('Cita cancelada');
+      setCancelOpen(false);
+      setCancelTarget(null);
+      refreshReservations();
+    }
+    setCancelling(false);
+  };
+
   const selectedDealershipData = dealerships.find(d => d.id === selectedDealership);
   const selectedVehicleData = vehicles.find(v => v.id === selectedVehicle);
 
