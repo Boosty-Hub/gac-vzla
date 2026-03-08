@@ -609,7 +609,7 @@ const AdminReservas = () => {
                 <Input
                   value={fClientSearch}
                   onChange={e => { setFClientSearch(e.target.value); if (fClientId) { setFClientId(''); setFVehicleId(''); } }}
-                  placeholder="Buscar por nombre o cédula..."
+                  placeholder="Buscar por nombre, cédula o placa..."
                 />
                 {clientResults.length > 0 && !fClientId && (
                   <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-40 overflow-y-auto">
