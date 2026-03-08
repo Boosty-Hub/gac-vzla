@@ -8,9 +8,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -96,6 +97,11 @@ const AdminProspectos = () => {
   const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; model: string; source: string; status: string; dealership: string; notes: string; errors: string[] }>>([]); 
   const [importing, setImporting] = useState(false);
   const [importDealership, setImportDealership] = useState('');
+
+  // Delete confirmation
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchDealerships = async () => {
     const { data } = await supabase
@@ -207,6 +213,20 @@ const AdminProspectos = () => {
   const openDetail = (p: Prospect) => {
     setDetailProspect(p);
     setDetailOpen(true);
+  };
+
+  const confirmDelete = (p: Prospect) => {
+    setDeleteTarget(p);
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const { error } = await supabase.from('prospects').delete().eq('id', deleteTarget.id);
+    if (error) { toast.error('Error al eliminar prospecto'); console.error(error); }
+    else { toast.success('Prospecto eliminado'); setDeleteOpen(false); setDeleteTarget(null); fetchProspects(); }
+    setDeleting(false);
   };
 
   // CSV Template download
@@ -457,9 +477,14 @@ const AdminProspectos = () => {
                       {new Date(p.created_at).toLocaleDateString('es-VE')}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
-                        Editar
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
+                          Editar
+                        </Button>
+                        <Button size="sm" variant="ghost" className="text-[10px] h-6 px-1.5 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); confirmDelete(p); }}>
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -686,6 +711,24 @@ const AdminProspectos = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* DELETE CONFIRMATION */}
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar prospecto?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará permanentemente al prospecto <strong>{deleteTarget?.name}</strong>. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
