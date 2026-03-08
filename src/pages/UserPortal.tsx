@@ -834,12 +834,108 @@ const UserPortal = () => {
                         Esta cita fue cancelada.
                       </div>
                     )}
+
+                    {/* Edit/Cancel buttons for pending/confirmed reservations */}
+                    {['pendiente', 'confirmada'].includes(detailRes.status) && (
+                      <div className="flex gap-2 pt-2">
+                        <Button size="sm" variant="outline" className="flex-1 gap-1" onClick={() => openEditReservation(detailRes)}>
+                          <Pencil className="w-3.5 h-3.5" /> Editar
+                        </Button>
+                        <Button size="sm" variant="destructive" className="flex-1 gap-1" onClick={() => openCancelConfirm(detailRes)}>
+                          <XCircle className="w-3.5 h-3.5" /> Cancelar
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })()}
           </DialogContent>
         </Dialog>
+
+        {/* EDIT RESERVATION DIALOG */}
+        <Dialog open={editOpen} onOpenChange={setEditOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="font-display">Editar Cita</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <Label className="text-xs">Tipo de Servicio</Label>
+                <Select value={editService} onValueChange={setEditService}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {serviceTypes.map(t => <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Fecha</Label>
+                <div className="mt-1 flex justify-center">
+                  <Calendar
+                    mode="single"
+                    selected={editDate}
+                    onSelect={setEditDate}
+                    locale={es}
+                    disabled={(date) => date < new Date() || date.getDay() === 0}
+                    className="rounded-lg border p-2 pointer-events-auto"
+                  />
+                </div>
+              </div>
+              {editDate && (
+                <div>
+                  <Label className="text-xs">Hora</Label>
+                  <div className="grid grid-cols-4 gap-1.5 mt-1">
+                    {TIME_SLOTS.map(h => (
+                      <button
+                        key={h}
+                        onClick={() => setEditTime(h)}
+                        className={cn(
+                          "py-1.5 text-xs rounded-lg border transition-all font-medium",
+                          editTime === h ? "gac-gradient text-primary-foreground border-transparent" : "hover:border-primary"
+                        )}
+                      >
+                        {h}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <Label className="text-xs">Kilometraje Actual</Label>
+                <Input className="mt-1" type="number" value={editMileage} onChange={e => setEditMileage(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Notas</Label>
+                <Textarea className="mt-1 text-xs" rows={2} value={editNotes} onChange={e => setEditNotes(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditOpen(false)}>Cancelar</Button>
+              <Button onClick={handleEditSave} disabled={editSaving || !editDate || !editTime || !editService} className="gac-gradient text-primary-foreground">
+                {editSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Guardar Cambios'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* CANCEL CONFIRMATION */}
+        <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Cancelar esta cita?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Se cancelará tu cita de <strong>{cancelTarget?.service_type}</strong> programada para el {cancelTarget?.reservation_date} a las {cancelTarget?.reservation_time?.slice(0, 5)}. Se notificará al concesionario y al administrador.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={cancelling}>Volver</AlertDialogCancel>
+              <AlertDialogAction onClick={handleCancelReservation} disabled={cancelling} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                {cancelling ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Sí, cancelar cita'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* Mis Vehículos */}
         {vista === 'mis-vehiculos' && !selectedVehDetail && (
