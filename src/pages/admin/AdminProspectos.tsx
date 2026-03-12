@@ -720,6 +720,18 @@ const AdminProspectos = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Vendedor</Label>
+                <Select value={pSalesperson} onValueChange={setPSalesperson}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin asignar</SelectItem>
+                    {salespersons.map(sp => (
+                      <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1 col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
