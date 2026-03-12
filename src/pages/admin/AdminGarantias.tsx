@@ -89,6 +89,9 @@ const AdminGarantias = () => {
     const cond = conditions[0];
     const reasons: string[] = [];
 
+    // Check manual warranty flag
+    if (!v.warranty_active) reasons.push('Garantía desactivada manualmente');
+
     // Check km
     const kmRemaining = cond.max_km - v.mileage;
     if (v.mileage > cond.max_km) reasons.push(`Excede ${cond.max_km.toLocaleString()} km (actual: ${v.mileage.toLocaleString()} km)`);
