@@ -36,8 +36,12 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && role && !allowedRoles.includes(role.name)) {
-    return <Navigate to={getRedirectPath(role)} replace />;
+  if (allowedRoles && role) {
+    const portal = role.redirect_portal || role.name;
+    const hasAccess = allowedRoles.includes(role.name) || allowedRoles.includes(portal as UserRole);
+    if (!hasAccess) {
+      return <Navigate to={getRedirectPath(role)} replace />;
+    }
   }
 
   return <>{children}</>;
