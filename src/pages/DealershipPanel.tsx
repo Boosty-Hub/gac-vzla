@@ -136,6 +136,7 @@ const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
 const DealershipPanel = () => {
   const navigate = useNavigate();
   const { signOut } = useAuth();
+  const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
 
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [selectedDealership, setSelectedDealership] = useState<string>('');
