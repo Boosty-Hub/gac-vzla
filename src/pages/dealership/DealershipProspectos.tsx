@@ -213,7 +213,7 @@ const DealershipProspectos = () => {
             </TableHeader>
             <TableBody>
               {filteredProspects.map(p => {
-                const st = PROSPECT_STATUSES.find(s => s.value === p.status) || PROSPECT_STATUSES[0];
+                const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
                 const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                 return (
                   <TableRow key={p.id} className="[&>td]:py-1.5">
