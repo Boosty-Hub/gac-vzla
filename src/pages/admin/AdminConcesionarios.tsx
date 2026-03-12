@@ -33,6 +33,9 @@ interface Dealership {
 }
 
 const AdminConcesionarios = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('concesionarios.create');
+  const canEdit = hasPermission('concesionarios.edit');
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
