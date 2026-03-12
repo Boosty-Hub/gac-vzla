@@ -62,8 +62,7 @@ export function RedirectByRole() {
   }
 
   if (role) {
-    const redirect = roleRedirectMap[role.name] || '/usuario';
-    return <Navigate to={redirect} replace />;
+    return <Navigate to={getRedirectPath(role)} replace />;
   }
 
   return <Navigate to="/usuario" replace />;

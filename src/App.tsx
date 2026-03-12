@@ -54,6 +54,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/magic-login" element={<MagicLogin />} />
             <Route path="/" element={<RedirectByRole />} />
             <Route path="/reservar" element={<PublicReserva />} />
 
