@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff } from 'lucide-react';
+import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
