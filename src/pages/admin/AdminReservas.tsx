@@ -87,6 +87,9 @@ const STATUS_LABELS: Record<string, string> = {
 
 
 const AdminReservas = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('reservas.create');
+  const canEdit = hasPermission('reservas.edit');
   const [view, setView] = useState<'table' | 'matrix'>('table');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
