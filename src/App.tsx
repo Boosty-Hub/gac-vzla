@@ -34,7 +34,7 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const AdminRoute = ({ children }: { children: React.ReactNode }) => (
-  <ProtectedRoute allowedRoles={['superadmin', 'admin']}>
+  <ProtectedRoute allowedRoles={['superadmin', 'admin', 'admin' as any]}>
     <AdminLayout>{children}</AdminLayout>
   </ProtectedRoute>
 );
