@@ -216,11 +216,11 @@ const AdminClientes = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [busqueda, pageSize]);
+  }, [busqueda, pageSize, filterStatus, filterWarranty, filterCity]);
 
   useEffect(() => {
     fetchClients();
-  }, [page, busqueda, pageSize]);
+  }, [page, busqueda, pageSize, filterStatus, filterWarranty, filterCity]);
 
   useEffect(() => {
     fetchModels();
