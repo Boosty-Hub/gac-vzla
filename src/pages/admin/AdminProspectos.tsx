@@ -586,7 +586,9 @@ const AdminProspectos = () => {
                   </div>
                 )}
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); openEdit(detailProspect); }}>Editar</Button>
+                  {canEdit && (
+                    <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); openEdit(detailProspect); }}>Editar</Button>
+                  )}
                 </div>
               </div>
             );
