@@ -7,6 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute, RedirectByRole } from "@/components/ProtectedRoute";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import Login from "./pages/Login";
+import MagicLogin from "./pages/MagicLogin";
 import UserPortal from "./pages/UserPortal";
 import DealershipLayout from "./components/layouts/DealershipLayout";
 import DealershipDashboard from "./pages/dealership/DealershipDashboard";
