@@ -281,6 +281,20 @@ const AdminRoles = () => {
               <Label>Descripción</Label>
               <Input value={formDescription} onChange={e => setFormDescription(e.target.value)} placeholder="Descripción del rol" />
             </div>
+            <div className="space-y-2">
+              <Label>Portal de Redirección</Label>
+              <Select value={formRedirectPortal} onValueChange={setFormRedirectPortal}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="concesionario">Concesionario</SelectItem>
+                  <SelectItem value="cliente">Cliente</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Define a qué portal será redirigido el usuario al iniciar sesión</p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
