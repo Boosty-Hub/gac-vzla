@@ -482,6 +482,9 @@ const AdminProspectos = () => {
                         {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                       </TableCell>
                       <TableCell>{p.model_interest || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {salespersons.find(sp => sp.name === (p as any).salesperson)?.name || (p as any).salesperson || '-'}
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <MapPin className="w-2.5 h-2.5 text-muted-foreground" />
