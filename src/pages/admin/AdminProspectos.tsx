@@ -499,7 +499,7 @@ const AdminProspectos = () => {
             </DialogTitle>
           </DialogHeader>
           {detailProspect && (() => {
-            const st = PROSPECT_STATUSES.find(s => s.value === detailProspect.status) || PROSPECT_STATUSES[0];
+            const st = PROSPECT_STATUSES.find(s => s.name === detailProspect.status) || PROSPECT_STATUSES[0];
             const src = PROSPECT_SOURCES.find(s => s.value === detailProspect.source);
             return (
               <div className="space-y-4 py-1">
