@@ -728,6 +728,13 @@ const AdminProspectos = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* STATUS MANAGER */}
+      <ProspectStatusManager
+        open={statusManagerOpen}
+        onOpenChange={setStatusManagerOpen}
+        onStatusesChanged={refetchStatuses}
+      />
     </div>
   );
 };
