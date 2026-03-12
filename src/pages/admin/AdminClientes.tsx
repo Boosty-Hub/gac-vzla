@@ -423,11 +423,36 @@ const AdminClientes = () => {
         </Button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[180px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Buscar nombre, cédula, correo, teléfono..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
         </div>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-[120px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos</SelectItem>
+            <SelectItem value="activo">Activos</SelectItem>
+            <SelectItem value="inactivo">Inactivos</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterWarranty} onValueChange={setFilterWarranty}>
+          <SelectTrigger className="w-[150px] h-8 text-xs"><SelectValue placeholder="Garantía" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todas las garantías</SelectItem>
+            <SelectItem value="activa">Garantía activa</SelectItem>
+            <SelectItem value="inactiva">Sin garantía activa</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterCity} onValueChange={setFilterCity}>
+          <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Ciudad" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todas las ciudades</SelectItem>
+            {Array.from(new Set(clients.map(c => c.city).filter(Boolean))).sort().map(city => (
+              <SelectItem key={city!} value={city!}>{city}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
           <SelectTrigger className="w-[100px] h-8 text-xs">
             <SelectValue />
