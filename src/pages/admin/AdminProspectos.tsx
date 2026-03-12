@@ -20,6 +20,8 @@ import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import ProspectStatusManager from '@/components/ProspectStatusManager';
 import SalespersonManager from '@/components/SalespersonManager';
 import { useSalespersons } from '@/hooks/useSalespersons';
+import { useAuth } from '@/contexts/AuthContext';
+import { useSalespersons } from '@/hooks/useSalespersons';
 
 interface VehicleModel {
   id: string;
