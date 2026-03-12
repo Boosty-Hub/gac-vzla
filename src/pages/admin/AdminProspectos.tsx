@@ -56,6 +56,7 @@ const PROSPECT_SOURCES = [
 ];
 
 // Statuses are now loaded from DB via useProspectStatuses hook
+const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 'bg-gray-100 text-gray-800', sort_order: 0, is_active: true };
 
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
@@ -460,7 +461,7 @@ const AdminProspectos = () => {
               </TableHeader>
               <TableBody>
                 {displayedProspects.map(p => {
-                  const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
+                  const st = PROSPECT_STATUSES.find(s => s.name === p.status) || FALLBACK_STATUS;
                   const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                   return (
                     <TableRow key={p.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(p)}>
@@ -524,7 +525,7 @@ const AdminProspectos = () => {
             </DialogTitle>
           </DialogHeader>
           {detailProspect && (() => {
-            const st = PROSPECT_STATUSES.find(s => s.name === detailProspect.status) || PROSPECT_STATUSES[0];
+            const st = PROSPECT_STATUSES.find(s => s.name === detailProspect.status) || FALLBACK_STATUS;
             const src = PROSPECT_SOURCES.find(s => s.value === detailProspect.source);
             return (
               <div className="space-y-4 py-1">
@@ -618,7 +619,7 @@ const AdminProspectos = () => {
                         <TableCell>{r.email || '-'}</TableCell>
                         <TableCell>{r.model || '-'}</TableCell>
                         <TableCell><Badge variant="outline" className="text-[10px] px-1 py-0">{PROSPECT_SOURCES.find(s => s.value === r.source)?.label || r.source}</Badge></TableCell>
-                        <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.name === r.status)?.color)}>{PROSPECT_STATUSES.find(s => s.name === r.status)?.label || r.status}</Badge></TableCell>
+                        <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.name === r.status)?.color || FALLBACK_STATUS.color)}>{PROSPECT_STATUSES.find(s => s.name === r.status)?.label || r.status}</Badge></TableCell>
                         <TableCell className="max-w-[120px] truncate" title={r.notes}>{r.notes || '-'}</TableCell>
                         <TableCell>
                           <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" onClick={() => removeImportRow(idx)}>
