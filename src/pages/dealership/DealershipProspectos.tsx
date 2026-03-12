@@ -45,15 +45,7 @@ const PROSPECT_SOURCES = [
   { value: 'otro', label: 'Otro' },
 ];
 
-const PROSPECT_STATUSES = [
-  { value: 'nuevo', label: 'Nuevo', color: 'bg-blue-100 text-blue-800' },
-  { value: 'contactado', label: 'Contactado', color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'interesado', label: 'Interesado', color: 'bg-purple-100 text-purple-800' },
-  { value: 'cotizado', label: 'Cotizado', color: 'bg-indigo-100 text-indigo-800' },
-  { value: 'negociacion', label: 'Negociación', color: 'bg-orange-100 text-orange-800' },
-  { value: 'ganado', label: 'Ganado', color: 'bg-green-100 text-green-800' },
-  { value: 'perdido', label: 'Perdido', color: 'bg-red-100 text-red-800' },
-];
+// Statuses loaded from DB
 
 const DealershipProspectos = () => {
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
