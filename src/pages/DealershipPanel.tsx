@@ -15,6 +15,7 @@ import { CalendarDays, Plus, LogOut, ClipboardList, Search, CheckCircle, Car, Us
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { toast } from 'sonner';
 
 interface Dealership {
@@ -135,6 +136,7 @@ const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
 const DealershipPanel = () => {
   const navigate = useNavigate();
   const { signOut } = useAuth();
+  const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
 
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [selectedDealership, setSelectedDealership] = useState<string>('');
@@ -228,14 +230,21 @@ const DealershipPanel = () => {
     setLoading(false);
   };
 
-  const fetchProspects = async () => {
+  const fetchProspects = async (salespersonName?: string | null) => {
     if (!selectedDealership) return;
     setLoadingProspects(true);
-    const { data } = await supabase
+    let query = supabase
       .from('prospects')
       .select('*')
       .eq('dealership_id', selectedDealership)
       .order('created_at', { ascending: false });
+
+    // If a salesperson name is provided, filter by it
+    if (salespersonName) {
+      query = query.eq('salesperson', salespersonName);
+    }
+
+    const { data } = await query;
     setProspects((data || []) as Prospect[]);
     setLoadingProspects(false);
   };
@@ -253,9 +262,9 @@ const DealershipPanel = () => {
   useEffect(() => {
     if (selectedDealership) {
       fetchReservations();
-      fetchProspects();
+      fetchProspects(isSalesperson ? currentSalesperson?.name : null);
     }
-  }, [selectedDealership]);
+  }, [selectedDealership, currentSalesperson]);
 
   // Stats
   const pendientes = reservations.filter(r => r.status === 'pendiente').length;

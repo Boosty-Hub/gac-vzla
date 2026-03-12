@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useSalespersons } from '@/hooks/useSalespersons';
+import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 interface VehicleModel {
@@ -52,6 +53,7 @@ const DealershipProspectos = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { salespersons } = useSalespersons();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
+  const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
   const isMobile = useIsMobile();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
@@ -85,11 +87,18 @@ const DealershipProspectos = () => {
   const fetchProspects = async () => {
     if (!selectedDealership) return;
     setLoading(true);
-    const { data } = await supabase
+    let query = supabase
       .from('prospects')
       .select('*')
       .eq('dealership_id', selectedDealership)
       .order('created_at', { ascending: false });
+
+    // If user is a linked salesperson, only show their assigned prospects
+    if (isSalesperson && currentSalesperson) {
+      query = query.eq('salesperson', currentSalesperson.name);
+    }
+
+    const { data } = await query;
     setProspects((data || []) as Prospect[]);
     setLoading(false);
   };
@@ -100,7 +109,7 @@ const DealershipProspectos = () => {
     if (loadingAccess) return;
     if (selectedDealership) { fetchProspects(); }
     else { setLoading(false); }
-  }, [selectedDealership, loadingAccess]);
+  }, [selectedDealership, loadingAccess, currentSalesperson]);
 
   const filteredProspects = prospects.filter(p => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
