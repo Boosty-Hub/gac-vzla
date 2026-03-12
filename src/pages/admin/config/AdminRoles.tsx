@@ -98,6 +98,7 @@ const AdminRoles = () => {
     setEditingRole(null);
     setFormName('');
     setFormDescription('');
+    setFormRedirectPortal('cliente');
     setDialogOpen(true);
   };
 
@@ -105,6 +106,7 @@ const AdminRoles = () => {
     setEditingRole(role);
     setFormName(role.name);
     setFormDescription(role.description || '');
+    setFormRedirectPortal((role as any).redirect_portal || 'cliente');
     setDialogOpen(true);
   };
 
