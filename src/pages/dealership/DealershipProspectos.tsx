@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useSalespersons } from '@/hooks/useSalespersons';
+import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 interface VehicleModel {
