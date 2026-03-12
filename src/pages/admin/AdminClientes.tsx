@@ -58,6 +58,11 @@ interface ServiceRecord {
   dealerships: { name: string } | null;
 }
 
+interface ClientVehicleInfo {
+  id: string;
+  warranty_active: boolean;
+}
+
 interface Client {
   id: string;
   full_name: string;
@@ -69,7 +74,7 @@ interface Client {
   state: string | null;
   is_active: boolean;
   created_at: string;
-  vehicles: { count: number }[];
+  vehicles: ClientVehicleInfo[];
   client_users: { count: number }[];
 }
 
@@ -81,6 +86,11 @@ const AdminClientes = () => {
   const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Filters
+  const [filterStatus, setFilterStatus] = useState('todos');
+  const [filterWarranty, setFilterWarranty] = useState('todos');
+  const [filterCity, setFilterCity] = useState('todos');
 
   // Client dialog
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
@@ -147,10 +157,17 @@ const AdminClientes = () => {
     setLoading(true);
     let query = supabase
       .from('clients')
-      .select('*, vehicles(count), client_users(count)', { count: 'exact' });
+      .select('*, vehicles(id, warranty_active), client_users(count)', { count: 'exact' });
 
     if (busqueda.trim()) {
       query = query.or(`full_name.ilike.%${busqueda}%,cedula.ilike.%${busqueda}%,email.ilike.%${busqueda}%,phone.ilike.%${busqueda}%`);
+    }
+
+    if (filterStatus !== 'todos') {
+      query = query.eq('is_active', filterStatus === 'activo');
+    }
+    if (filterCity !== 'todos') {
+      query = query.eq('city', filterCity);
     }
 
     const { data, error, count } = await query
@@ -161,8 +178,16 @@ const AdminClientes = () => {
       toast.error('Error al cargar clientes');
       console.error(error);
     } else {
-      setClients(data || []);
-      setTotalCount(count || 0);
+      let filtered = data || [];
+      // Client-side warranty filter since it depends on nested vehicles
+      if (filterWarranty !== 'todos') {
+        filtered = filtered.filter(c => {
+          const hasActiveWarranty = c.vehicles?.some((v: any) => v.warranty_active);
+          return filterWarranty === 'activa' ? hasActiveWarranty : !hasActiveWarranty;
+        });
+      }
+      setClients(filtered as Client[]);
+      setTotalCount(filterWarranty !== 'todos' ? filtered.length : (count || 0));
     }
     setLoading(false);
   };
@@ -191,11 +216,11 @@ const AdminClientes = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [busqueda, pageSize]);
+  }, [busqueda, pageSize, filterStatus, filterWarranty, filterCity]);
 
   useEffect(() => {
     fetchClients();
-  }, [page, busqueda, pageSize]);
+  }, [page, busqueda, pageSize, filterStatus, filterWarranty, filterCity]);
 
   useEffect(() => {
     fetchModels();
@@ -398,11 +423,36 @@ const AdminClientes = () => {
         </Button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[180px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Buscar nombre, cédula, correo, teléfono..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
         </div>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-[120px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos</SelectItem>
+            <SelectItem value="activo">Activos</SelectItem>
+            <SelectItem value="inactivo">Inactivos</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterWarranty} onValueChange={setFilterWarranty}>
+          <SelectTrigger className="w-[150px] h-8 text-xs"><SelectValue placeholder="Garantía" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todas las garantías</SelectItem>
+            <SelectItem value="activa">Garantía activa</SelectItem>
+            <SelectItem value="inactiva">Sin garantía activa</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterCity} onValueChange={setFilterCity}>
+          <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Ciudad" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todas las ciudades</SelectItem>
+            {Array.from(new Set(clients.map(c => c.city).filter(Boolean))).sort().map(city => (
+              <SelectItem key={city!} value={city!}>{city}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
           <SelectTrigger className="w-[100px] h-8 text-xs">
             <SelectValue />
@@ -437,6 +487,7 @@ const AdminClientes = () => {
                 <TableHead>Correo</TableHead>
                 <TableHead>Ciudad</TableHead>
                 <TableHead>Veh.</TableHead>
+                <TableHead>Garantía</TableHead>
                 <TableHead>Usr.</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-right">Acc.</TableHead>
@@ -458,8 +509,21 @@ const AdminClientes = () => {
                     <TableCell>{c.city || '-'}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
-                        <Car className="w-2.5 h-2.5" /> {c.vehicles?.[0]?.count ?? 0}
+                        <Car className="w-2.5 h-2.5" /> {c.vehicles?.length ?? 0}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {c.vehicles?.length > 0 ? (
+                        c.vehicles.some(v => v.warranty_active) ? (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-800 gap-0.5">
+                            <ShieldCheck className="w-2.5 h-2.5" /> Activa
+                          </Badge>
+                        ) : (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-800 gap-0.5">
+                            <ShieldX className="w-2.5 h-2.5" /> Inactiva
+                          </Badge>
+                        )
+                      ) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       <Button variant="ghost" size="icon" className="h-6 w-6 relative" onClick={() => openUsersDialog(c)} title="Gestionar usuarios">
