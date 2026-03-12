@@ -391,116 +391,129 @@ const AdminProspectos = () => {
         </Card>
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[180px] max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input placeholder="Buscar nombre, teléfono, email, modelo..." className="pl-8 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-        <Select value={dealershipFilter} onValueChange={setDealershipFilter}>
-          <SelectTrigger className="w-[170px] h-8 text-xs"><SelectValue placeholder="Concesionario" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los concesionarios</SelectItem>
-            {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los estados</SelectItem>
-            {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={sourceFilter} onValueChange={setSourceFilter}>
-          <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Fuente" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todas las fuentes</SelectItem>
-            {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      <Tabs value={activeTab} onValueChange={v => setActiveTab(v as 'abiertos' | 'cerrados')} className="space-y-3">
+        <TabsList>
+          <TabsTrigger value="abiertos" className="text-xs gap-1">
+            Abiertos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{openProspects.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="cerrados" className="text-xs gap-1">
+            Cerrados <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{closedProspects.length}</Badge>
+          </TabsTrigger>
+        </TabsList>
 
-      {/* Table */}
-      <Card className="gac-shadow">
-        {loading ? (
-          <CardContent className="p-8 text-center">
-            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">Cargando prospectos...</p>
-          </CardContent>
-        ) : filteredProspects.length === 0 ? (
-          <CardContent className="p-8 text-center">
-            <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">No hay prospectos</p>
-          </CardContent>
-        ) : (
-          <Table className="text-xs">
-            <TableHeader>
-              <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
-                <TableHead>Nombre</TableHead>
-                <TableHead>Contacto</TableHead>
-                <TableHead>Modelo</TableHead>
-                <TableHead>Concesionario</TableHead>
-                <TableHead>Fuente</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Fecha</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredProspects.map(p => {
-                const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
-                const src = PROSPECT_SOURCES.find(s => s.value === p.source);
-                return (
-                  <TableRow key={p.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(p)}>
-                    <TableCell className="font-medium">{p.name}</TableCell>
-                    <TableCell>
-                      {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
-                      {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
-                    </TableCell>
-                    <TableCell>{p.model_interest || '-'}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <MapPin className="w-2.5 h-2.5 text-muted-foreground" />
-                        <span>{p.dealerships?.name || '-'}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Select value={p.status} onValueChange={v => { updateStatus(p.id, v); }}>
-                        <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent" onClick={e => e.stopPropagation()}>
-                          <Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PROSPECT_STATUSES.map(s => (
-                            <SelectItem key={s.name} value={s.name}>
-                              <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(p.created_at).toLocaleDateString('es-VE')}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
-                          Editar
-                        </Button>
-                        <Button size="sm" variant="ghost" className="text-[10px] h-6 px-1.5 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); confirmDelete(p); }}>
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+        {/* Filters */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[180px] max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input placeholder="Buscar nombre, teléfono, email, modelo..." className="pl-8 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
+          </div>
+          <Select value={dealershipFilter} onValueChange={setDealershipFilter}>
+            <SelectTrigger className="w-[170px] h-8 text-xs"><SelectValue placeholder="Concesionario" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los concesionarios</SelectItem>
+              {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los estados</SelectItem>
+              {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+            <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Fuente" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todas las fuentes</SelectItem>
+              {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Table shared across tabs */}
+        <Card className="gac-shadow">
+          {loading ? (
+            <CardContent className="p-8 text-center">
+              <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">Cargando prospectos...</p>
+            </CardContent>
+          ) : displayedProspects.length === 0 ? (
+            <CardContent className="p-8 text-center">
+              <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">
+                {activeTab === 'abiertos' ? 'No hay prospectos abiertos' : 'No hay prospectos cerrados'}
+              </p>
+            </CardContent>
+          ) : (
+            <Table className="text-xs">
+              <TableHeader>
+                <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Contacto</TableHead>
+                  <TableHead>Modelo</TableHead>
+                  <TableHead>Concesionario</TableHead>
+                  <TableHead>Fuente</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {displayedProspects.map(p => {
+                  const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
+                  const src = PROSPECT_SOURCES.find(s => s.value === p.source);
+                  return (
+                    <TableRow key={p.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(p)}>
+                      <TableCell className="font-medium">{p.name}</TableCell>
+                      <TableCell>
+                        {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
+                        {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
+                      </TableCell>
+                      <TableCell>{p.model_interest || '-'}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <MapPin className="w-2.5 h-2.5 text-muted-foreground" />
+                          <span>{p.dealerships?.name || '-'}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Select value={p.status} onValueChange={v => { updateStatus(p.id, v); }}>
+                          <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent" onClick={e => e.stopPropagation()}>
+                            <Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PROSPECT_STATUSES.map(s => (
+                              <SelectItem key={s.name} value={s.name}>
+                                <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {new Date(p.created_at).toLocaleDateString('es-VE')}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
+                            Editar
+                          </Button>
+                          <Button size="sm" variant="ghost" className="text-[10px] h-6 px-1.5 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); confirmDelete(p); }}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </Card>
+      </Tabs>
 
       {/* DETAIL DIALOG */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
