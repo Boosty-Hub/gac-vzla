@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
+import { useSalespersons } from '@/hooks/useSalespersons';
 
 interface VehicleModel {
   id: string;
