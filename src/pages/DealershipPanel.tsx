@@ -228,14 +228,21 @@ const DealershipPanel = () => {
     setLoading(false);
   };
 
-  const fetchProspects = async () => {
+  const fetchProspects = async (salespersonName?: string | null) => {
     if (!selectedDealership) return;
     setLoadingProspects(true);
-    const { data } = await supabase
+    let query = supabase
       .from('prospects')
       .select('*')
       .eq('dealership_id', selectedDealership)
       .order('created_at', { ascending: false });
+
+    // If a salesperson name is provided, filter by it
+    if (salespersonName) {
+      query = query.eq('salesperson', salespersonName);
+    }
+
+    const { data } = await query;
     setProspects((data || []) as Prospect[]);
     setLoadingProspects(false);
   };

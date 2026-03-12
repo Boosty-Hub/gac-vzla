@@ -109,7 +109,7 @@ const DealershipProspectos = () => {
     if (loadingAccess) return;
     if (selectedDealership) { fetchProspects(); }
     else { setLoading(false); }
-  }, [selectedDealership, loadingAccess]);
+  }, [selectedDealership, loadingAccess, currentSalesperson]);
 
   const filteredProspects = prospects.filter(p => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
