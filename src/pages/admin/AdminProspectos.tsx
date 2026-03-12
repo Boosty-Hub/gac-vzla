@@ -373,16 +373,20 @@ const AdminProspectos = () => {
           <Button size="sm" variant="outline" onClick={() => setSalespersonManagerOpen(true)} className="gap-1">
             <UserCog className="w-3.5 h-3.5" /> Vendedores
           </Button>
-          <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1">
-            <Download className="w-3.5 h-3.5" /> Plantilla
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1">
-            <Upload className="w-3.5 h-3.5" /> Importar CSV
-          </Button>
-          <input ref={fileInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} />
-          <Button size="sm" onClick={openCreate} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Prospecto
-          </Button>
+          {canCreate && (
+            <>
+              <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1">
+                <Download className="w-3.5 h-3.5" /> Plantilla
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1">
+                <Upload className="w-3.5 h-3.5" /> Importar CSV
+              </Button>
+              <input ref={fileInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} />
+              <Button size="sm" onClick={openCreate} className="gac-gradient">
+                <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Prospecto
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
