@@ -331,17 +331,31 @@ const AdminUsuarios = () => {
                     {new Date(u.created_at).toLocaleDateString('es-VE')}
                   </TableCell>
                   <TableCell className="text-right">
-                    {hasPermission('usuarios.edit') && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => openEditDialog(u)}
-                        disabled={u.id === currentProfile?.id}
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </Button>
-                    )}
+                    <div className="flex items-center justify-end gap-0.5">
+                      {hasPermission('usuarios.edit') && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Generar Magic Link"
+                          onClick={() => handleGenerateMagicLink(u.id)}
+                          disabled={generatingLink === u.id}
+                        >
+                          {copiedLink === u.id ? <CheckIcon className="w-3 h-3 text-green-600" /> : generatingLink === u.id ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Link2 className="w-3 h-3" />}
+                        </Button>
+                      )}
+                      {hasPermission('usuarios.edit') && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => openEditDialog(u)}
+                          disabled={u.id === currentProfile?.id}
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
