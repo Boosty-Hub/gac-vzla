@@ -240,6 +240,50 @@ const AdminProspectos = () => {
     setDeleting(false);
   };
 
+  const handleWhatsAppSalesperson = async (p: Prospect) => {
+    const spName = (p as any).salesperson;
+    const sp = salespersons.find(s => s.name === spName);
+    if (!sp?.phone) {
+      toast.error('El vendedor no tiene teléfono registrado');
+      return;
+    }
+
+    setSendingWa(p.id);
+    const st = PROSPECT_STATUSES.find(s => s.name === p.status) || FALLBACK_STATUS;
+    const src = PROSPECT_SOURCES.find(s => s.value === p.source);
+
+    let message = `🚗 *Nuevo Prospecto Asignado*\n\n`;
+    message += `👤 *Nombre:* ${p.name}\n`;
+    if (p.phone) message += `📞 *Teléfono:* ${p.phone}\n`;
+    if (p.email) message += `📧 *Email:* ${p.email}\n`;
+    if (p.model_interest) message += `🚘 *Modelo de interés:* ${p.model_interest}\n`;
+    message += `📍 *Concesionario:* ${p.dealerships?.name || '-'}\n`;
+    message += `📋 *Fuente:* ${src?.label || p.source}\n`;
+    message += `🏷️ *Estado:* ${st.label}\n`;
+    if (p.notes) message += `📝 *Notas:* ${p.notes}\n`;
+    message += `📅 *Fecha:* ${new Date(p.created_at).toLocaleDateString('es-VE')}\n`;
+
+    // Generate magic link if salesperson has a profile_id
+    if (sp.profile_id) {
+      try {
+        const { data, error } = await supabase.functions.invoke('generate-magic-link', {
+          body: { user_id: sp.profile_id },
+        });
+        if (!error && data?.token) {
+          const magicUrl = `${window.location.origin}/magic-login?token=${data.token}`;
+          message += `\n🔗 *Accede a la plataforma:*\n${magicUrl}`;
+        }
+      } catch (err) {
+        console.error('Error generating magic link:', err);
+      }
+    }
+
+    const phone = sp.phone.replace(/[^0-9]/g, '');
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+    setSendingWa(null);
+  };
+
   // CSV Template download
   const downloadTemplate = () => {
     const headers = 'nombre,telefono,email,modelo_interes,fuente,estado,notas';
