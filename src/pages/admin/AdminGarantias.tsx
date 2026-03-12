@@ -151,15 +151,21 @@ const AdminGarantias = () => {
   useEffect(() => {
     if (vehicles.length === 0) return;
     (async () => {
-      const { data } = await supabase
-        .from('reservations')
-        .select('vehicle_id')
-        .eq('status', 'completada')
-        .in('vehicle_id', vehicles.map(v => v.id));
       const counts: Record<string, number> = {};
-      (data || []).forEach((r: any) => { counts[r.vehicle_id] = (counts[r.vehicle_id] || 0) + 1; });
+      const BATCH = 200;
+      const ids = vehicles.map(v => v.id);
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const batch = ids.slice(i, i + BATCH);
+        const { data } = await supabase
+          .from('reservations')
+          .select('vehicle_id')
+          .eq('status', 'completada')
+          .in('vehicle_id', batch);
+        (data || []).forEach((r: any) => { counts[r.vehicle_id] = (counts[r.vehicle_id] || 0) + 1; });
+      }
       setServiceCounts(counts);
     })();
+  }, [vehicles]);
   }, [vehicles]);
 
   const vehiclesWithWarranty = vehicles.map(v => ({
