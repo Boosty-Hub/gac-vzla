@@ -76,14 +76,34 @@ const AdminGarantias = () => {
   const [detailWarranty, setDetailWarranty] = useState<WarrantyResult | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
+  const fetchAllVehicles = async () => {
+    const PAGE_SIZE = 1000;
+    let allVehicles: VehicleRow[] = [];
+    let from = 0;
+    let hasMore = true;
+    while (hasMore) {
+      const { data } = await supabase
+        .from('vehicles')
+        .select('id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand), clients(full_name, cedula, phone)')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .range(from, from + PAGE_SIZE - 1);
+      const rows = (data || []) as VehicleRow[];
+      allVehicles = allVehicles.concat(rows);
+      hasMore = rows.length === PAGE_SIZE;
+      from += PAGE_SIZE;
+    }
+    return allVehicles;
+  };
+
   const fetchData = async () => {
     setLoading(true);
-    const [{ data: conds }, { data: vehs }] = await Promise.all([
+    const [{ data: conds }, vehs] = await Promise.all([
       supabase.from('warranty_conditions').select('*').eq('is_active', true).order('name'),
-      supabase.from('vehicles').select('id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand), clients(full_name, cedula, phone)').eq('is_active', true).order('created_at', { ascending: false }).limit(500),
+      fetchAllVehicles(),
     ]);
     setConditions((conds || []) as WarrantyCondition[]);
-    setVehicles((vehs || []) as VehicleRow[]);
+    setVehicles(vehs);
     setLoading(false);
   };
 
@@ -131,13 +151,18 @@ const AdminGarantias = () => {
   useEffect(() => {
     if (vehicles.length === 0) return;
     (async () => {
-      const { data } = await supabase
-        .from('reservations')
-        .select('vehicle_id')
-        .eq('status', 'completada')
-        .in('vehicle_id', vehicles.map(v => v.id));
       const counts: Record<string, number> = {};
-      (data || []).forEach((r: any) => { counts[r.vehicle_id] = (counts[r.vehicle_id] || 0) + 1; });
+      const BATCH = 200;
+      const ids = vehicles.map(v => v.id);
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const batch = ids.slice(i, i + BATCH);
+        const { data } = await supabase
+          .from('reservations')
+          .select('vehicle_id')
+          .eq('status', 'completada')
+          .in('vehicle_id', batch);
+        (data || []).forEach((r: any) => { counts[r.vehicle_id] = (counts[r.vehicle_id] || 0) + 1; });
+      }
       setServiceCounts(counts);
     })();
   }, [vehicles]);
