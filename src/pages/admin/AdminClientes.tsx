@@ -58,6 +58,11 @@ interface ServiceRecord {
   dealerships: { name: string } | null;
 }
 
+interface ClientVehicleInfo {
+  id: string;
+  warranty_active: boolean;
+}
+
 interface Client {
   id: string;
   full_name: string;
@@ -69,7 +74,7 @@ interface Client {
   state: string | null;
   is_active: boolean;
   created_at: string;
-  vehicles: { count: number }[];
+  vehicles: ClientVehicleInfo[];
   client_users: { count: number }[];
 }
 
