@@ -1,44 +1,384 @@
-import { Card, CardContent } from '@/components/ui/card';
-import { concesionarios, reservasMock, vehiculosMock } from '@/data/mockData';
-import { CalendarDays, ClipboardList, BarChart3, MapPin } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
+  Car, MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line, Legend,
+} from 'recharts';
+import { useProspectStatuses } from '@/hooks/useProspectStatuses';
+import { useIsMobile } from '@/hooks/use-mobile';
+
+interface Prospect {
+  id: string;
+  status: string;
+  source: string;
+  salesperson: string | null;
+  created_at: string;
+  dealership_id: string;
+}
+
+interface Reservation {
+  id: string;
+  status: string;
+  reservation_date: string;
+  service_type: string;
+  dealership_id: string;
+  created_at: string;
+}
+
+interface Dealership {
+  id: string;
+  name: string;
+}
+
+const COLORS = [
+  'hsl(var(--primary))',
+  'hsl(220, 70%, 55%)',
+  'hsl(160, 60%, 45%)',
+  'hsl(45, 90%, 50%)',
+  'hsl(0, 70%, 55%)',
+  'hsl(280, 60%, 55%)',
+  'hsl(200, 70%, 50%)',
+  'hsl(30, 80%, 55%)',
+];
 
 const AdminDashboard = () => {
-  const totalReservas = reservasMock.length;
-  const reservasPendientes = reservasMock.filter(r => r.estado === 'pendiente').length;
-  const reservasHoy = reservasMock.filter(r => r.fecha === '2025-02-14').length;
+  const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
+  const isMobile = useIsMobile();
+  const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [dealerships, setDealerships] = useState<Dealership[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const stats = [
-    { label: 'Total Reservas', value: totalReservas, icon: CalendarDays, color: 'text-primary' },
-    { label: 'Pendientes', value: reservasPendientes, icon: ClipboardList, color: 'text-yellow-600' },
-    { label: 'Reservas Hoy', value: reservasHoy, icon: BarChart3, color: 'text-blue-600' },
-    { label: 'Concesionarios', value: concesionarios.length, icon: MapPin, color: 'text-green-600' },
-  ];
+  useEffect(() => {
+    const load = async () => {
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const since = thirtyDaysAgo.toISOString();
+
+      const [pRes, rRes, dRes] = await Promise.all([
+        supabase.from('prospects').select('id, status, source, salesperson, created_at, dealership_id').gte('created_at', since),
+        supabase.from('reservations').select('id, status, reservation_date, service_type, dealership_id, created_at').gte('created_at', since),
+        supabase.from('dealerships').select('id, name').eq('is_active', true),
+      ]);
+
+      setProspects((pRes.data || []) as Prospect[]);
+      setReservations((rRes.data || []) as Reservation[]);
+      setDealerships((dRes.data || []) as Dealership[]);
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  // ─── KPIs ───
+  const totalProspects = prospects.length;
+  const totalReservations = reservations.length;
+  const prospectsByStatus = useMemo(() => {
+    const map: Record<string, number> = {};
+    prospects.forEach(p => { map[p.status] = (map[p.status] || 0) + 1; });
+    return map;
+  }, [prospects]);
+
+  const nuevos = prospectsByStatus['nuevo'] || 0;
+  const ganados = prospectsByStatus['ganado'] || 0;
+  const perdidos = prospectsByStatus['perdido'] || 0;
+  const conversionRate = totalProspects > 0 ? Math.round((ganados / totalProspects) * 100) : 0;
+
+  const reservasPendientes = reservations.filter(r => r.status === 'pendiente').length;
+  const reservasCompletadas = reservations.filter(r => r.status === 'completada').length;
+  const reservasCanceladas = reservations.filter(r => r.status === 'cancelada').length;
+
+  // ─── Chart: Prospects by status (pie) ───
+  const prospectStatusPie = useMemo(() => {
+    return PROSPECT_STATUSES.filter(s => prospectsByStatus[s.name]).map(s => ({
+      name: s.label,
+      value: prospectsByStatus[s.name] || 0,
+    }));
+  }, [PROSPECT_STATUSES, prospectsByStatus]);
+
+  // ─── Chart: Reservations by status (pie) ───
+  const reservationStatusPie = useMemo(() => {
+    const statuses = [
+      { name: 'Pendientes', value: reservasPendientes, color: 'hsl(45, 90%, 50%)' },
+      { name: 'Completadas', value: reservasCompletadas, color: 'hsl(160, 60%, 45%)' },
+      { name: 'Canceladas', value: reservasCanceladas, color: 'hsl(0, 70%, 55%)' },
+    ].filter(s => s.value > 0);
+    return statuses;
+  }, [reservasPendientes, reservasCompletadas, reservasCanceladas]);
+
+  // ─── Chart: Daily trend (last 30 days) ───
+  const dailyTrend = useMemo(() => {
+    const days: Record<string, { date: string; prospectos: number; reservas: number }> = {};
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split('T')[0];
+      days[key] = { date: `${d.getDate()}/${d.getMonth() + 1}`, prospectos: 0, reservas: 0 };
+    }
+    prospects.forEach(p => {
+      const key = p.created_at.split('T')[0];
+      if (days[key]) days[key].prospectos++;
+    });
+    reservations.forEach(r => {
+      const key = r.created_at.split('T')[0];
+      if (days[key]) days[key].reservas++;
+    });
+    return Object.values(days);
+  }, [prospects, reservations]);
+
+  // ─── Chart: Prospects by source (bar) ───
+  const prospectsBySource = useMemo(() => {
+    const map: Record<string, number> = {};
+    prospects.forEach(p => { map[p.source] = (map[p.source] || 0) + 1; });
+    const labels: Record<string, string> = {
+      presencial: 'Presencial', telefono: 'Teléfono', web: 'Web',
+      redes_sociales: 'Redes', referido: 'Referido', evento: 'Evento', otro: 'Otro',
+    };
+    return Object.entries(map)
+      .map(([key, value]) => ({ name: labels[key] || key, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [prospects]);
+
+  // ─── Salesperson performance ───
+  const salespersonPerformance = useMemo(() => {
+    const map: Record<string, { total: number; ganados: number; perdidos: number }> = {};
+    prospects.forEach(p => {
+      const sp = p.salesperson || 'Sin asignar';
+      if (!map[sp]) map[sp] = { total: 0, ganados: 0, perdidos: 0 };
+      map[sp].total++;
+      if (p.status === 'ganado') map[sp].ganados++;
+      if (p.status === 'perdido') map[sp].perdidos++;
+    });
+    return Object.entries(map)
+      .map(([name, data]) => ({
+        name,
+        total: data.total,
+        ganados: data.ganados,
+        perdidos: data.perdidos,
+        conversion: data.total > 0 ? Math.round((data.ganados / data.total) * 100) : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [prospects]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-muted-foreground">Cargando analíticas...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-display font-bold">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">Resumen general del sistema</p>
+        <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">Últimos 30 días — Resumen general del sistema</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map(s => (
-          <Card key={s.label} className="gac-shadow">
-            <CardContent className="p-4 flex items-center gap-4">
-              <div className={cn("p-3 rounded-xl bg-muted", s.color)}>
-                <s.icon className="w-5 h-5" />
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard icon={Users} label="Prospectos" value={totalProspects} color="text-blue-600" />
+        <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600"
+          sub={`${ganados} ganados de ${totalProspects}`} />
+        <KpiCard icon={CalendarDays} label="Reservas" value={totalReservations} color="text-primary" />
+        <KpiCard icon={ClipboardList} label="Pendientes" value={reservasPendientes} color="text-amber-600"
+          sub={`${reservasCompletadas} completadas`} />
+      </div>
+
+      {/* Row: Prospect + Reservation pies */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Prospects by Status */}
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <Users className="w-4 h-4 text-muted-foreground" /> Prospectos por Estado
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {prospectStatusPie.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <ResponsiveContainer width={isMobile ? 180 : 200} height={180}>
+                  <PieChart>
+                    <Pie data={prospectStatusPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
+                      {prospectStatusPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => [v, 'Prospectos']} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap gap-2 justify-center sm:flex-col sm:gap-1">
+                  {prospectStatusPie.map((s, i) => (
+                    <div key={s.name} className="flex items-center gap-2 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                      <span className="text-muted-foreground">{s.name}</span>
+                      <span className="font-semibold">{s.value}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div>
-                <p className="text-2xl font-display font-bold">{s.value}</p>
-                <p className="text-xs text-muted-foreground">{s.label}</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Reservations by Status */}
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-muted-foreground" /> Reservas por Estado
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {reservationStatusPie.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <ResponsiveContainer width={isMobile ? 180 : 200} height={180}>
+                  <PieChart>
+                    <Pie data={reservationStatusPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
+                      {reservationStatusPie.map((s, i) => <Cell key={i} fill={s.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => [v, 'Reservas']} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap gap-2 justify-center sm:flex-col sm:gap-1">
+                  {reservationStatusPie.map(s => (
+                    <div key={s.name} className="flex items-center gap-2 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                      <span className="text-muted-foreground">{s.name}</span>
+                      <span className="font-semibold">{s.value}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </CardContent>
-          </Card>
-        ))}
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Trend line chart */}
+      <Card className="gac-shadow">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-display flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-muted-foreground" /> Tendencia Diaria (30 días)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={isMobile ? 200 : 280}>
+            <LineChart data={dailyTrend} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={isMobile ? 4 : 2} />
+              <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+              <Tooltip contentStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="prospectos" name="Prospectos" stroke="hsl(220, 70%, 55%)" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="reservas" name="Reservas" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Row: Source bar + Salesperson table */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Prospects by Source */}
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-muted-foreground" /> Prospectos por Fuente
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {prospectsBySource.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={isMobile ? 180 : 220}>
+                <BarChart data={prospectsBySource} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={70} />
+                  <Tooltip contentStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="value" name="Prospectos" fill="hsl(220, 70%, 55%)" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Salesperson Performance */}
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-muted-foreground" /> Rendimiento por Vendedor
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {salespersonPerformance.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+            ) : (
+              <div className="divide-y divide-border">
+                {salespersonPerformance.slice(0, 8).map((sp, i) => (
+                  <div key={sp.name} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className={cn(
+                      "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
+                      i === 0 ? "bg-amber-100 text-amber-800" :
+                      i === 1 ? "bg-gray-100 text-gray-700" :
+                      i === 2 ? "bg-orange-100 text-orange-800" :
+                      "bg-muted text-muted-foreground"
+                    )}>
+                      {i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium truncate">{sp.name}</p>
+                      <p className="text-[10px] text-muted-foreground">{sp.total} prospectos</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
+                        <ArrowUpRight className="w-2.5 h-2.5 text-green-600" />{sp.ganados}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
+                        <ArrowDownRight className="w-2.5 h-2.5 text-red-500" />{sp.perdidos}
+                      </Badge>
+                      <span className={cn("text-xs font-semibold", sp.conversion >= 50 ? "text-green-600" : sp.conversion >= 20 ? "text-amber-600" : "text-muted-foreground")}>
+                        {sp.conversion}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
 };
+
+// ─── KPI Card Component ───
+function KpiCard({ icon: Icon, label, value, color, sub }: { icon: any; label: string; value: string | number; color: string; sub?: string }) {
+  return (
+    <Card className="gac-shadow">
+      <CardContent className="p-3 sm:p-4 flex items-center gap-3 sm:gap-4">
+        <div className={cn("p-2.5 sm:p-3 rounded-xl bg-muted shrink-0", color)}>
+          <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xl sm:text-2xl font-display font-bold">{value}</p>
+          <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{label}</p>
+          {sub && <p className="text-[9px] sm:text-[10px] text-muted-foreground/70 truncate">{sub}</p>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default AdminDashboard;
