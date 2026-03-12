@@ -547,9 +547,11 @@ const AdminClientes = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right" onClick={e => e.stopPropagation()}>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
-                        <Pencil className="w-3 h-3" />
-                      </Button>
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                   {expandedClient === c.id && (
