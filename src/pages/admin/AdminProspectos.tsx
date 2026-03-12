@@ -619,7 +619,7 @@ const AdminProspectos = () => {
                         <TableCell>{r.email || '-'}</TableCell>
                         <TableCell>{r.model || '-'}</TableCell>
                         <TableCell><Badge variant="outline" className="text-[10px] px-1 py-0">{PROSPECT_SOURCES.find(s => s.value === r.source)?.label || r.source}</Badge></TableCell>
-                        <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.name === r.status)?.color)}>{PROSPECT_STATUSES.find(s => s.name === r.status)?.label || r.status}</Badge></TableCell>
+                        <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.name === r.status)?.color || FALLBACK_STATUS.color)}>{PROSPECT_STATUSES.find(s => s.name === r.status)?.label || r.status}</Badge></TableCell>
                         <TableCell className="max-w-[120px] truncate" title={r.notes}>{r.notes || '-'}</TableCell>
                         <TableCell>
                           <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" onClick={() => removeImportRow(idx)}>
