@@ -462,6 +462,7 @@ const AdminProspectos = () => {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
                   <TableHead>Modelo</TableHead>
+                  <TableHead>Vendedor</TableHead>
                   <TableHead>Concesionario</TableHead>
                   <TableHead>Fuente</TableHead>
                   <TableHead>Estado</TableHead>
