@@ -56,6 +56,7 @@ const PROSPECT_SOURCES = [
 ];
 
 // Statuses are now loaded from DB via useProspectStatuses hook
+const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 'bg-gray-100 text-gray-800', sort_order: 0, is_active: true };
 
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
