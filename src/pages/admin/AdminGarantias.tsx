@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
-import { Car, ShieldCheck, ShieldX, Search, CalendarDays, Hash, Wrench, MapPin, Clock, ClipboardCheck, User } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Car, ShieldCheck, ShieldX, Search, CalendarDays, Hash, MapPin, Clock, ClipboardCheck, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface WarrantyCondition {
@@ -55,12 +56,18 @@ interface WarrantyResult {
   kmRemaining: number;
 }
 
+const ROW_OPTIONS = [10, 25, 50, 100];
+
 const AdminGarantias = () => {
   const [conditions, setConditions] = useState<WarrantyCondition[]>([]);
   const [vehicles, setVehicles] = useState<VehicleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('todos');
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   // Detail
   const [detailOpen, setDetailOpen] = useState(false);
@@ -89,14 +96,11 @@ const AdminGarantias = () => {
     const cond = conditions[0];
     const reasons: string[] = [];
 
-    // Check manual warranty flag
     if (!v.warranty_active) reasons.push('Garantía desactivada manualmente');
 
-    // Check km
     const kmRemaining = cond.max_km - v.mileage;
     if (v.mileage > cond.max_km) reasons.push(`Excede ${cond.max_km.toLocaleString()} km (actual: ${v.mileage.toLocaleString()} km)`);
 
-    // Check months
     let monthsRemaining = cond.max_months;
     if (v.purchase_date) {
       const purchase = new Date(v.purchase_date);
@@ -106,7 +110,6 @@ const AdminGarantias = () => {
       if (monthsElapsed > cond.max_months) reasons.push(`Excede ${cond.max_months} meses desde la compra (${monthsElapsed} meses transcurridos)`);
     }
 
-    // Check services
     const servicesExpected = cond.service_interval_km > 0 ? Math.floor(v.mileage / cond.service_interval_km) : 0;
     if (completedServices < servicesExpected) reasons.push(`Servicios atrasados: ${completedServices}/${servicesExpected} realizados`);
 
@@ -124,7 +127,6 @@ const AdminGarantias = () => {
     };
   };
 
-  // We need completed service counts per vehicle — fetch them all at once
   const [serviceCounts, setServiceCounts] = useState<Record<string, number>>({});
   useEffect(() => {
     if (vehicles.length === 0) return;
@@ -163,6 +165,14 @@ const AdminGarantias = () => {
 
   const totalActive = vehiclesWithWarranty.filter(x => x.warranty.active).length;
   const totalInactive = vehiclesWithWarranty.filter(x => !x.warranty.active).length;
+
+  // Pagination logic
+  const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
+  const safePage = Math.min(page, totalPages);
+  const paginatedData = filtered.slice((safePage - 1) * rowsPerPage, safePage * rowsPerPage);
+
+  // Reset page on filter change
+  useEffect(() => { setPage(1); }, [search, statusFilter, rowsPerPage]);
 
   const openDetail = async (v: VehicleRow, w: WarrantyResult) => {
     setDetailVehicle(v);
@@ -225,49 +235,69 @@ const AdminGarantias = () => {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-3">
-          {filtered.map(({ vehicle: v, warranty: w }) => (
-            <Card key={v.id} className={cn("gac-shadow border-l-4 cursor-pointer hover:shadow-md transition-shadow", w.active ? "border-l-green-500" : "border-l-red-500")} onClick={() => openDetail(v, w)}>
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <Car className="w-8 h-8 text-muted-foreground shrink-0" />
-                    <div>
-                      <h4 className="font-semibold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h4>
-                      <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
-                      <p className="text-xs text-muted-foreground">{v.clients?.full_name || '-'} · {v.mileage.toLocaleString()} km{v.purchase_date ? ` · Compra: ${v.purchase_date}` : ''}</p>
-                    </div>
-                  </div>
-                  <Badge className={cn("text-xs flex items-center gap-1 shrink-0", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                    {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                    {w.active ? 'Activa' : 'Inactiva'}
-                  </Badge>
-                </div>
-                <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                  <div className="bg-muted rounded-lg p-2">
-                    <p className="text-sm font-bold">{w.servicesCompleted}</p>
-                    <p className="text-[10px] text-muted-foreground">Realizados</p>
-                  </div>
-                  <div className="bg-muted rounded-lg p-2">
-                    <p className="text-sm font-bold">{w.servicesExpected}</p>
-                    <p className="text-[10px] text-muted-foreground">Esperados</p>
-                  </div>
-                  <div className="bg-muted rounded-lg p-2">
-                    <p className="text-sm font-bold">{w.nextServiceKm > 0 ? `${(w.nextServiceKm / 1000).toFixed(0)}k` : '-'}</p>
-                    <p className="text-[10px] text-muted-foreground">Próximo (km)</p>
-                  </div>
-                  <div className="bg-muted rounded-lg p-2">
-                    <p className="text-sm font-bold">{w.monthsRemaining > 0 ? `${w.monthsRemaining}m` : '-'}</p>
-                    <p className="text-[10px] text-muted-foreground">Meses rest.</p>
-                  </div>
-                </div>
-                {!w.active && w.reason && (
-                  <p className="mt-2 text-xs text-red-600 font-medium">⚠ {w.reason}</p>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Card className="gac-shadow">
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">Vehículo</TableHead>
+                    <TableHead className="text-xs">Placa</TableHead>
+                    <TableHead className="text-xs">Cliente</TableHead>
+                    <TableHead className="text-xs text-right">Km</TableHead>
+                    <TableHead className="text-xs text-center">Servicios</TableHead>
+                    <TableHead className="text-xs text-center">Meses Rest.</TableHead>
+                    <TableHead className="text-xs text-center">Km Rest.</TableHead>
+                    <TableHead className="text-xs text-center">Garantía</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginatedData.map(({ vehicle: v, warranty: w }) => (
+                    <TableRow key={v.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openDetail(v, w)}>
+                      <TableCell className="text-xs font-medium">
+                        {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}
+                      </TableCell>
+                      <TableCell className="text-xs">{v.plate || '-'}</TableCell>
+                      <TableCell className="text-xs max-w-[160px] truncate">{v.clients?.full_name || '-'}</TableCell>
+                      <TableCell className="text-xs text-right">{v.mileage.toLocaleString()}</TableCell>
+                      <TableCell className="text-xs text-center">{w.servicesCompleted}/{w.servicesExpected}</TableCell>
+                      <TableCell className="text-xs text-center">{w.monthsRemaining > 0 ? w.monthsRemaining : '0'}</TableCell>
+                      <TableCell className="text-xs text-center">{w.kmRemaining > 0 ? w.kmRemaining.toLocaleString() : '0'}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge className={cn("text-[10px] gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                          {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                          {w.active ? 'Activa' : 'Inactiva'}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            {/* Pagination footer */}
+            <div className="flex items-center justify-between border-t px-4 py-2">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>Filas por página:</span>
+                <Select value={String(rowsPerPage)} onValueChange={v => setRowsPerPage(Number(v))}>
+                  <SelectTrigger className="h-7 w-[65px] text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ROW_OPTIONS.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span>{(safePage - 1) * rowsPerPage + 1}–{Math.min(safePage * rowsPerPage, filtered.length)} de {filtered.length}</span>
+                <Button variant="outline" size="icon" className="h-7 w-7" disabled={safePage <= 1} onClick={() => setPage(p => p - 1)}>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="outline" size="icon" className="h-7 w-7" disabled={safePage >= totalPages} onClick={() => setPage(p => p + 1)}>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* DETAIL DIALOG */}
