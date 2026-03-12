@@ -28,6 +28,9 @@ interface VehicleModel {
 const BRANDS = ['GAC', 'DFSK', 'SHINERAY'];
 
 const AdminModelos = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('modelos.create');
+  const canEdit = hasPermission('modelos.edit');
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
