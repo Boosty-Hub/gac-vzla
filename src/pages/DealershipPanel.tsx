@@ -15,6 +15,7 @@ import { CalendarDays, Plus, LogOut, ClipboardList, Search, CheckCircle, Car, Us
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { toast } from 'sonner';
 
 interface Dealership {
