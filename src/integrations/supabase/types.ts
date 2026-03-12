@@ -577,6 +577,7 @@ export type Database = {
           is_active: boolean
           name: string
           phone: string | null
+          profile_id: string | null
           updated_at: string
         }
         Insert: {
@@ -585,6 +586,7 @@ export type Database = {
           is_active?: boolean
           name: string
           phone?: string | null
+          profile_id?: string | null
           updated_at?: string
         }
         Update: {
@@ -593,9 +595,18 @@ export type Database = {
           is_active?: boolean
           name?: string
           phone?: string | null
+          profile_id?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "salespersons_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       service_types: {
         Row: {
