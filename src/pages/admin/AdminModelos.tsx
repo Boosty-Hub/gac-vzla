@@ -195,9 +195,11 @@ const AdminModelos = () => {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-display font-bold">Modelos de Vehículos</h1>
-        <Button size="sm" onClick={openCreateDialog} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {canCreate && (
+          <Button size="sm" onClick={openCreateDialog} className="gac-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
       <div className="relative max-w-sm">
