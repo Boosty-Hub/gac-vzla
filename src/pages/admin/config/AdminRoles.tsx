@@ -113,7 +113,7 @@ const AdminRoles = () => {
   const handleSave = async () => {
     if (!formName.trim()) { toast.error('El nombre es requerido'); return; }
     setSaving(true);
-    const payload = { name: formName.trim(), description: formDescription.trim() || null };
+    const payload = { name: formName.trim(), description: formDescription.trim() || null, redirect_portal: formRedirectPortal };
 
     if (editingRole) {
       const { error } = await supabase.from('roles').update(payload).eq('id', editingRole.id);
