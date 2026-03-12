@@ -194,6 +194,7 @@ const AdminProspectos = () => {
       source: pSource,
       status: pStatus,
       notes: pNotes.trim() || null,
+      salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson : null,
     };
 
     if (editing) {
