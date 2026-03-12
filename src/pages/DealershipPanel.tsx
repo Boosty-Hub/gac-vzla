@@ -262,9 +262,9 @@ const DealershipPanel = () => {
   useEffect(() => {
     if (selectedDealership) {
       fetchReservations();
-      fetchProspects();
+      fetchProspects(isSalesperson ? currentSalesperson?.name : null);
     }
-  }, [selectedDealership]);
+  }, [selectedDealership, currentSalesperson]);
 
   // Stats
   const pendientes = reservations.filter(r => r.status === 'pendiente').length;
