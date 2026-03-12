@@ -4,6 +4,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -111,6 +112,12 @@ const DealershipProspectos = () => {
     return true;
   });
 
+  const CLOSED_STATUSES = ['ganado', 'perdido'];
+  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados'>('abiertos');
+  const openProspects = filteredProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
+  const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
+  const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
+
   const openDialog = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
     setPSource('presencial'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
@@ -166,91 +173,104 @@ const DealershipProspectos = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[180px] max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input placeholder="Buscar nombre, teléfono, email, modelo..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => setProsSearch(e.target.value)} />
-        </div>
-        <Select value={prosStatusFilter} onValueChange={setProsStatusFilter}>
-          <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los estados</SelectItem>
-            {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={prosSourceFilter} onValueChange={setProsSourceFilter}>
-          <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Fuente" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todas las fuentes</SelectItem>
-            {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      <Tabs value={activeTab} onValueChange={v => setActiveTab(v as 'abiertos' | 'cerrados')} className="space-y-3">
+        <TabsList>
+          <TabsTrigger value="abiertos" className="text-xs gap-1">
+            Abiertos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{openProspects.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="cerrados" className="text-xs gap-1">
+            Cerrados <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{closedProspects.length}</Badge>
+          </TabsTrigger>
+        </TabsList>
 
-      <Card className="gac-shadow">
-        {loading ? (
-          <CardContent className="p-8 text-center">
-            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">Cargando prospectos...</p>
-          </CardContent>
-        ) : filteredProspects.length === 0 ? (
-          <CardContent className="p-8 text-center">
-            <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">No hay prospectos</p>
-          </CardContent>
-        ) : (
-          <Table className="text-xs">
-            <TableHeader>
-              <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
-                <TableHead>Nombre</TableHead>
-                <TableHead>Contacto</TableHead>
-                <TableHead>Modelo</TableHead>
-                <TableHead>Vendedor</TableHead>
-                <TableHead>Fuente</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Fecha</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredProspects.map(p => {
-                const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
-                const src = PROSPECT_SOURCES.find(s => s.value === p.source);
-                return (
-                  <TableRow key={p.id} className="[&>td]:py-1.5">
-                    <TableCell className="font-medium">{p.name}</TableCell>
-                    <TableCell>
-                      {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
-                      {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
-                    </TableCell>
-                    <TableCell>{p.model_interest || '-'}</TableCell>
-                    <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
-                        <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent">
-                          <Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PROSPECT_STATUSES.map(s => (
-                            <SelectItem key={s.name} value={s.name}>
-                              <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {new Date(p.created_at).toLocaleDateString('es-VE')}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[180px] max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input placeholder="Buscar nombre, teléfono, email, modelo..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => setProsSearch(e.target.value)} />
+          </div>
+          <Select value={prosStatusFilter} onValueChange={setProsStatusFilter}>
+            <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los estados</SelectItem>
+              {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={prosSourceFilter} onValueChange={setProsSourceFilter}>
+            <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Fuente" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todas las fuentes</SelectItem>
+              {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Card className="gac-shadow">
+          {loading ? (
+            <CardContent className="p-8 text-center">
+              <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">Cargando prospectos...</p>
+            </CardContent>
+          ) : displayedProspects.length === 0 ? (
+            <CardContent className="p-8 text-center">
+              <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">
+                {activeTab === 'abiertos' ? 'No hay prospectos abiertos' : 'No hay prospectos cerrados'}
+              </p>
+            </CardContent>
+          ) : (
+            <Table className="text-xs">
+              <TableHeader>
+                <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Contacto</TableHead>
+                  <TableHead>Modelo</TableHead>
+                  <TableHead>Vendedor</TableHead>
+                  <TableHead>Fuente</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Fecha</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {displayedProspects.map(p => {
+                  const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
+                  const src = PROSPECT_SOURCES.find(s => s.value === p.source);
+                  return (
+                    <TableRow key={p.id} className="[&>td]:py-1.5">
+                      <TableCell className="font-medium">{p.name}</TableCell>
+                      <TableCell>
+                        {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
+                        {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
+                      </TableCell>
+                      <TableCell>{p.model_interest || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
+                          <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent">
+                            <Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {PROSPECT_STATUSES.map(s => (
+                              <SelectItem key={s.name} value={s.name}>
+                                <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {new Date(p.created_at).toLocaleDateString('es-VE')}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </Card>
+      </Tabs>
 
       {/* CREATE PROSPECT DIALOG */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
