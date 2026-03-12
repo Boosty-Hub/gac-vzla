@@ -51,6 +51,8 @@ interface ServiceRecord {
 }
 
 const AdminVehiculos = () => {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission('vehiculos.edit');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
