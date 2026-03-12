@@ -157,10 +157,17 @@ const AdminClientes = () => {
     setLoading(true);
     let query = supabase
       .from('clients')
-      .select('*, vehicles(count), client_users(count)', { count: 'exact' });
+      .select('*, vehicles(id, warranty_active), client_users(count)', { count: 'exact' });
 
     if (busqueda.trim()) {
       query = query.or(`full_name.ilike.%${busqueda}%,cedula.ilike.%${busqueda}%,email.ilike.%${busqueda}%,phone.ilike.%${busqueda}%`);
+    }
+
+    if (filterStatus !== 'todos') {
+      query = query.eq('is_active', filterStatus === 'activo');
+    }
+    if (filterCity !== 'todos') {
+      query = query.eq('city', filterCity);
     }
 
     const { data, error, count } = await query
