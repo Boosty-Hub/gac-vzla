@@ -254,15 +254,15 @@ const AdminProspectos = () => {
     const src = PROSPECT_SOURCES.find(s => s.value === p.source);
 
     let message = `🚗 *Nuevo Prospecto Asignado*\n\n`;
-    message += `👤 *Nombre:* ${p.name}\n`;
-    if (p.phone) message += `📞 *Teléfono:* ${p.phone}\n`;
-    if (p.email) message += `📧 *Email:* ${p.email}\n`;
-    if (p.model_interest) message += `🚘 *Modelo de interés:* ${p.model_interest}\n`;
-    message += `📍 *Concesionario:* ${p.dealerships?.name || '-'}\n`;
-    message += `📋 *Fuente:* ${src?.label || p.source}\n`;
-    message += `🏷️ *Estado:* ${st.label}\n`;
-    if (p.notes) message += `📝 *Notas:* ${p.notes}\n`;
-    message += `📅 *Fecha:* ${new Date(p.created_at).toLocaleDateString('es-VE')}\n`;
+    message += `▪️ *Nombre:* ${p.name}\n`;
+    if (p.phone) message += `▪️ *Teléfono:* ${p.phone}\n`;
+    if (p.email) message += `▪️ *Email:* ${p.email}\n`;
+    if (p.model_interest) message += `▪️ *Modelo de interés:* ${p.model_interest}\n`;
+    message += `▪️ *Concesionario:* ${p.dealerships?.name || '-'}\n`;
+    message += `▪️ *Fuente:* ${src?.label || p.source}\n`;
+    message += `▪️ *Estado:* ${st.label}\n`;
+    if (p.notes) message += `▪️ *Notas:* ${p.notes}\n`;
+    message += `▪️ *Fecha:* ${new Date(p.created_at).toLocaleDateString('es-VE')}\n`;
 
     if (sp.profile_id) {
       try {
