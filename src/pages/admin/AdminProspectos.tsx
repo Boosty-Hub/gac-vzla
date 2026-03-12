@@ -88,6 +88,7 @@ const AdminProspectos = () => {
   const [pSource, setPSource] = useState('presencial');
   const [pStatus, setPStatus] = useState('nuevo');
   const [pNotes, setPNotes] = useState('');
+  const [pSalesperson, setPSalesperson] = useState('');
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
