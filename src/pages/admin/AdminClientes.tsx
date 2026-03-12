@@ -422,9 +422,11 @@ const AdminClientes = () => {
             <Users className="w-3 h-3" /> {totalCount}
           </Badge>
         </div>
-        <Button size="sm" onClick={openCreateClient} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {canCreate && (
+          <Button size="sm" onClick={openCreateClient} className="gac-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
