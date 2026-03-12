@@ -114,6 +114,28 @@ const AdminUsuarios = () => {
 
   const getSelectedRoleName = (roleId: string) => roles.find(r => r.id === roleId)?.name || '';
 
+  const handleGenerateMagicLink = async (userId: string) => {
+    setGeneratingLink(userId);
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-magic-link', {
+        body: { user_id: userId },
+      });
+      if (error || data?.error) {
+        toast.error(data?.error || error?.message || 'Error al generar link');
+        return;
+      }
+      const url = `${window.location.origin}/magic-login?token=${data.token}`;
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(userId);
+      toast.success('Magic link copiado al portapapeles (válido por 360 días)');
+      setTimeout(() => setCopiedLink(null), 3000);
+    } catch (err) {
+      toast.error('Error de conexión');
+    } finally {
+      setGeneratingLink(null);
+    }
+  };
+
   const handleCreateUser = async () => {
     if (!createEmail.trim() || !createPassword.trim()) {
       toast.error('Email y contraseña son requeridos');
