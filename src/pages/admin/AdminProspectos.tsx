@@ -12,12 +12,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2 } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import ProspectStatusManager from '@/components/ProspectStatusManager';
+import SalespersonManager from '@/components/SalespersonManager';
+import { useSalespersons } from '@/hooks/useSalespersons';
 
 interface VehicleModel {
   id: string;
@@ -60,7 +62,9 @@ const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 
 
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
+  const { salespersons, fetchSalespersons: refetchSalespersons } = useSalespersons();
   const [statusManagerOpen, setStatusManagerOpen] = useState(false);
+  const [salespersonManagerOpen, setSalespersonManagerOpen] = useState(false);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -84,6 +88,7 @@ const AdminProspectos = () => {
   const [pSource, setPSource] = useState('presencial');
   const [pStatus, setPStatus] = useState('nuevo');
   const [pNotes, setPNotes] = useState('');
+  const [pSalesperson, setPSalesperson] = useState('');
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -157,7 +162,7 @@ const AdminProspectos = () => {
     setEditing(null);
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
-    setPSource('presencial'); setPStatus('nuevo'); setPNotes('');
+    setPSource('presencial'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setDialogOpen(true);
   };
 
@@ -171,6 +176,7 @@ const AdminProspectos = () => {
     setPSource(p.source);
     setPStatus(p.status);
     setPNotes(p.notes || '');
+    setPSalesperson((p as any).salesperson || '');
     setDialogOpen(true);
   };
 
@@ -188,6 +194,7 @@ const AdminProspectos = () => {
       source: pSource,
       status: pStatus,
       notes: pNotes.trim() || null,
+      salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson : null,
     };
 
     if (editing) {
@@ -357,6 +364,9 @@ const AdminProspectos = () => {
           <Button size="sm" variant="outline" onClick={() => setStatusManagerOpen(true)} className="gap-1">
             <Settings2 className="w-3.5 h-3.5" /> Estados
           </Button>
+          <Button size="sm" variant="outline" onClick={() => setSalespersonManagerOpen(true)} className="gap-1">
+            <UserCog className="w-3.5 h-3.5" /> Vendedores
+          </Button>
           <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1">
             <Download className="w-3.5 h-3.5" /> Plantilla
           </Button>
@@ -452,6 +462,7 @@ const AdminProspectos = () => {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
                   <TableHead>Modelo</TableHead>
+                  <TableHead>Vendedor</TableHead>
                   <TableHead>Concesionario</TableHead>
                   <TableHead>Fuente</TableHead>
                   <TableHead>Estado</TableHead>
@@ -471,6 +482,9 @@ const AdminProspectos = () => {
                         {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                       </TableCell>
                       <TableCell>{p.model_interest || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {salespersons.find(sp => sp.name === (p as any).salesperson)?.name || (p as any).salesperson || '-'}
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <MapPin className="w-2.5 h-2.5 text-muted-foreground" />
@@ -706,6 +720,18 @@ const AdminProspectos = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Vendedor</Label>
+                <Select value={pSalesperson} onValueChange={setPSalesperson}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin asignar</SelectItem>
+                    {salespersons.map(sp => (
+                      <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1 col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
@@ -757,6 +783,13 @@ const AdminProspectos = () => {
         open={statusManagerOpen}
         onOpenChange={setStatusManagerOpen}
         onStatusesChanged={refetchStatuses}
+      />
+
+      {/* SALESPERSON MANAGER */}
+      <SalespersonManager
+        open={salespersonManagerOpen}
+        onOpenChange={setSalespersonManagerOpen}
+        onSalespersonsChanged={refetchSalespersons}
       />
     </div>
   );

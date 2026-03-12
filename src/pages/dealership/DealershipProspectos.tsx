@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
+import { useSalespersons } from '@/hooks/useSalespersons';
 
 interface VehicleModel {
   id: string;
@@ -50,6 +51,7 @@ const PROSPECT_SOURCES = [
 
 const DealershipProspectos = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
+  const { salespersons } = useSalespersons();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
@@ -136,7 +138,7 @@ const DealershipProspectos = () => {
       source: pSource,
       status: pStatus,
       notes: pNotes.trim() || null,
-      salesperson: pSalesperson.trim() || null,
+      salesperson: (pSalesperson.trim() && pSalesperson !== '__none') ? pSalesperson.trim() : null,
     });
     if (error) { toast.error('Error al crear prospecto'); console.error(error); }
     else { toast.success('Prospecto creado'); setDialogOpen(false); fetchProspects(); }
@@ -321,6 +323,18 @@ const DealershipProspectos = () => {
               <div className="space-y-1">
                 <Label className="text-xs">Vendedor</Label>
                 <Input value={pSalesperson} onChange={e => setPSalesperson(e.target.value)} placeholder="Nombre del vendedor" className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Vendedor</Label>
+                <Select value={pSalesperson} onValueChange={setPSalesperson}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin asignar</SelectItem>
+                    {salespersons.map(sp => (
+                      <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1 col-span-2">
                 <Label className="text-xs">Estado</Label>
