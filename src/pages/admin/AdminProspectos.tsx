@@ -65,6 +65,10 @@ const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
   const { salespersons, fetchSalespersons: refetchSalespersons } = useSalespersons();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('prospectos.create');
+  const canEdit = hasPermission('prospectos.edit');
+  const canDelete = hasPermission('prospectos.delete');
   const [statusManagerOpen, setStatusManagerOpen] = useState(false);
   const [salespersonManagerOpen, setSalespersonManagerOpen] = useState(false);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
