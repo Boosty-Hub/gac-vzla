@@ -308,7 +308,7 @@ const DealershipProspectos = () => {
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {PROSPECT_STATUSES.map(s => (
-                      <SelectItem key={s.value} value={s.value}>
+                      <SelectItem key={s.name} value={s.name}>
                         <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
                       </SelectItem>
                     ))}
