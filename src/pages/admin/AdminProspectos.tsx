@@ -21,6 +21,7 @@ import ProspectStatusManager from '@/components/ProspectStatusManager';
 import SalespersonManager from '@/components/SalespersonManager';
 import { useSalespersons } from '@/hooks/useSalespersons';
 import { useAuth } from '@/contexts/AuthContext';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface VehicleModel {
   id: string;
@@ -58,13 +59,13 @@ const PROSPECT_SOURCES = [
   { value: 'otro', label: 'Otro' },
 ];
 
-// Statuses are now loaded from DB via useProspectStatuses hook
 const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 'bg-gray-100 text-gray-800', sort_order: 0, is_active: true };
 
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
   const { salespersons, fetchSalespersons: refetchSalespersons } = useSalespersons();
   const { hasPermission } = useAuth();
+  const isMobile = useIsMobile();
   const canCreate = hasPermission('prospectos.create');
   const canEdit = hasPermission('prospectos.edit');
   const canDelete = hasPermission('prospectos.delete');
@@ -102,7 +103,7 @@ const AdminProspectos = () => {
   // Import CSV
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; model: string; source: string; status: string; dealership: string; notes: string; errors: string[] }>>([]); 
+  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; model: string; source: string; status: string; dealership: string; notes: string; errors: string[] }>>([]);
   const [importing, setImporting] = useState(false);
   const [importDealership, setImportDealership] = useState('');
 
@@ -263,7 +264,6 @@ const AdminProspectos = () => {
     if (p.notes) message += `📝 *Notas:* ${p.notes}\n`;
     message += `📅 *Fecha:* ${new Date(p.created_at).toLocaleDateString('es-VE')}\n`;
 
-    // Generate magic link if salesperson has a profile_id
     if (sp.profile_id) {
       try {
         const { data, error } = await supabase.functions.invoke('generate-magic-link', {
@@ -296,7 +296,6 @@ const AdminProspectos = () => {
     URL.revokeObjectURL(url);
   };
 
-  // CSV parsing
   const VALID_SOURCES = PROSPECT_SOURCES.map(s => s.value);
   const VALID_STATUSES = PROSPECT_STATUSES.map(s => s.name);
 
@@ -401,33 +400,84 @@ const AdminProspectos = () => {
   const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
   const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
 
+  // Mobile prospect card
+  const ProspectCard = ({ p }: { p: Prospect }) => {
+    const st = PROSPECT_STATUSES.find(s => s.name === p.status) || FALLBACK_STATUS;
+    const src = PROSPECT_SOURCES.find(s => s.value === p.source);
+    return (
+      <Card className="gac-shadow" onClick={() => openDetail(p)}>
+        <CardContent className="p-3 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold truncate">{p.name}</p>
+              <p className="text-[11px] text-muted-foreground truncate">{p.dealerships?.name || '-'}</p>
+            </div>
+            <Badge className={cn("text-[10px] px-1.5 py-0 shrink-0", st.color)}>{st.label}</Badge>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {p.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{p.phone}</span>}
+            {p.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{p.email}</span>}
+            {p.model_interest && <span className="flex items-center gap-1">🚘 {p.model_interest}</span>}
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
+              <span className="text-[10px] text-muted-foreground">{new Date(p.created_at).toLocaleDateString('es-VE')}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {(p as any).salesperson && (
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" disabled={sendingWa === p.id}
+                  onClick={(e) => { e.stopPropagation(); handleWhatsAppSalesperson(p); }}>
+                  {sendingWa === p.id
+                    ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    : <MessageCircle className="w-4 h-4 text-green-600" />}
+                </Button>
+              )}
+              {canEdit && (
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
+                  <FileText className="w-3.5 h-3.5" />
+                </Button>
+              )}
+              {canDelete && (
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={(e) => { e.stopPropagation(); confirmDelete(p); }}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-display font-bold">Prospectos</h1>
           <Badge variant="outline" className="gap-1 text-xs">
             <Users className="w-3 h-3" /> {prospects.length}
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button size="sm" variant="outline" onClick={() => setStatusManagerOpen(true)} className="gap-1">
-            <Settings2 className="w-3.5 h-3.5" /> Estados
+            <Settings2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Estados</span>
           </Button>
           <Button size="sm" variant="outline" onClick={() => setSalespersonManagerOpen(true)} className="gap-1">
-            <UserCog className="w-3.5 h-3.5" /> Vendedores
+            <UserCog className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Vendedores</span>
           </Button>
           {canCreate && (
             <>
-              <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1">
+              <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1 hidden sm:flex">
                 <Download className="w-3.5 h-3.5" /> Plantilla
               </Button>
-              <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1">
+              <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1 hidden sm:flex">
                 <Upload className="w-3.5 h-3.5" /> Importar CSV
               </Button>
               <input ref={fileInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} />
               <Button size="sm" onClick={openCreate} className="gac-gradient">
-                <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Prospecto
+                <Plus className="w-3.5 h-3.5 sm:mr-1" /> <span className="hidden sm:inline">Nuevo Prospecto</span>
               </Button>
             </>
           )}
@@ -435,22 +485,22 @@ const AdminProspectos = () => {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <Card className="gac-shadow">
-          <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-blue-600">{totalNuevos}</p>
+          <CardContent className="p-2 sm:p-3 text-center">
+            <p className="text-xl sm:text-2xl font-bold text-blue-600">{totalNuevos}</p>
             <p className="text-[10px] text-muted-foreground">Nuevos</p>
           </CardContent>
         </Card>
         <Card className="gac-shadow">
-          <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-purple-600">{totalInteresados}</p>
+          <CardContent className="p-2 sm:p-3 text-center">
+            <p className="text-xl sm:text-2xl font-bold text-purple-600">{totalInteresados}</p>
             <p className="text-[10px] text-muted-foreground">En proceso</p>
           </CardContent>
         </Card>
         <Card className="gac-shadow">
-          <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-green-600">{totalGanados}</p>
+          <CardContent className="p-2 sm:p-3 text-center">
+            <p className="text-xl sm:text-2xl font-bold text-green-600">{totalGanados}</p>
             <p className="text-[10px] text-muted-foreground">Ganados</p>
           </CardContent>
         </Card>
@@ -467,49 +517,59 @@ const AdminProspectos = () => {
         </TabsList>
 
         {/* Filters */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[180px] max-w-sm">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-0 sm:min-w-[180px] sm:max-w-sm">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input placeholder="Buscar nombre, teléfono, email, modelo..." className="pl-8 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
+            <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <Select value={dealershipFilter} onValueChange={setDealershipFilter}>
-            <SelectTrigger className="w-[170px] h-8 text-xs"><SelectValue placeholder="Concesionario" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos los concesionarios</SelectItem>
-              {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos los estados</SelectItem>
-              {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={sourceFilter} onValueChange={setSourceFilter}>
-            <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Fuente" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todas las fuentes</SelectItem>
-              {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <Select value={dealershipFilter} onValueChange={setDealershipFilter}>
+              <SelectTrigger className="w-[140px] sm:w-[170px] h-8 text-xs shrink-0"><SelectValue placeholder="Concesionario" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos</SelectItem>
+                {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[110px] sm:w-[130px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos</SelectItem>
+                {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+              <SelectTrigger className="w-[110px] sm:w-[140px] h-8 text-xs shrink-0"><SelectValue placeholder="Fuente" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todas</SelectItem>
+                {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        {/* Table shared across tabs */}
-        <Card className="gac-shadow">
-          {loading ? (
+        {/* Content: Cards on mobile, Table on desktop */}
+        {loading ? (
+          <Card className="gac-shadow">
             <CardContent className="p-8 text-center">
               <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">Cargando prospectos...</p>
             </CardContent>
-          ) : displayedProspects.length === 0 ? (
+          </Card>
+        ) : displayedProspects.length === 0 ? (
+          <Card className="gac-shadow">
             <CardContent className="p-8 text-center">
               <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">
                 {activeTab === 'abiertos' ? 'No hay prospectos abiertos' : 'No hay prospectos cerrados'}
               </p>
             </CardContent>
-          ) : (
+          </Card>
+        ) : isMobile ? (
+          <div className="space-y-2">
+            {displayedProspects.map(p => <ProspectCard key={p.id} p={p} />)}
+          </div>
+        ) : (
+          <Card className="gac-shadow">
             <Table className="text-xs">
               <TableHeader>
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
@@ -565,17 +625,11 @@ const AdminProspectos = () => {
                       <TableCell className="text-muted-foreground">
                         {new Date(p.created_at).toLocaleDateString('es-VE')}
                       </TableCell>
-                       <TableCell className="text-right">
+                      <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           {(p as any).salesperson && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 w-6 p-0"
-                              title="Enviar prospecto por WhatsApp al vendedor"
-                              disabled={sendingWa === p.id}
-                              onClick={(e) => { e.stopPropagation(); handleWhatsAppSalesperson(p); }}
-                            >
+                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Enviar prospecto por WhatsApp al vendedor" disabled={sendingWa === p.id}
+                              onClick={(e) => { e.stopPropagation(); handleWhatsAppSalesperson(p); }}>
                               {sendingWa === p.id
                                 ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                                 : <MessageCircle className="w-3.5 h-3.5 text-green-600" />}
@@ -598,13 +652,13 @@ const AdminProspectos = () => {
                 })}
               </TableBody>
             </Table>
-          )}
-        </Card>
+          </Card>
+        )}
       </Tabs>
 
       {/* DETAIL DIALOG */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={cn("max-w-md", isMobile && "max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto")}>
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               <User className="w-4 h-4" /> Detalle del Prospecto
@@ -624,7 +678,7 @@ const AdminProspectos = () => {
                     <div className="flex items-center gap-2"><Phone className="w-4 h-4 text-muted-foreground shrink-0" /><span>{detailProspect.phone}</span></div>
                   )}
                   {detailProspect.email && (
-                    <div className="flex items-center gap-2"><Mail className="w-4 h-4 text-muted-foreground shrink-0" /><span>{detailProspect.email}</span></div>
+                    <div className="flex items-center gap-2"><Mail className="w-4 h-4 text-muted-foreground shrink-0" /><span className="truncate">{detailProspect.email}</span></div>
                   )}
                   {detailProspect.model_interest && (
                     <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-muted-foreground shrink-0" /><span>Interés: {detailProspect.model_interest}</span></div>
@@ -655,15 +709,15 @@ const AdminProspectos = () => {
 
       {/* IMPORT PREVIEW DIALOG */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogContent className={cn("max-w-3xl max-h-[85vh] flex flex-col", isMobile && "max-w-[calc(100vw-1rem)] max-h-[95vh]")}>
           <DialogHeader>
-            <DialogTitle className="font-display flex items-center gap-2">
-              <Upload className="w-4 h-4" /> Importación Masiva de Prospectos
+            <DialogTitle className="font-display flex items-center gap-2 text-sm">
+              <Upload className="w-4 h-4" /> Importación Masiva
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 flex-1 overflow-hidden flex flex-col">
             <div className="space-y-1">
-              <Label className="text-xs">Asignar todos a concesionario *</Label>
+              <Label className="text-xs">Concesionario *</Label>
               <Select value={importDealership} onValueChange={setImportDealership}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
                 <SelectContent>
@@ -672,54 +726,82 @@ const AdminProspectos = () => {
               </Select>
             </div>
 
-            <div className="flex items-center gap-4 text-xs">
-              <span className="flex items-center gap-1 text-muted-foreground"><FileText className="w-3.5 h-3.5" /> {importRows.length} fila(s) detectadas</span>
+            <div className="flex items-center gap-4 text-xs flex-wrap">
+              <span className="flex items-center gap-1 text-muted-foreground"><FileText className="w-3.5 h-3.5" /> {importRows.length} fila(s)</span>
               {importRows.filter(r => r.errors.length > 0).length > 0 && (
-                <span className="flex items-center gap-1 text-amber-600"><AlertTriangle className="w-3.5 h-3.5" /> {importRows.filter(r => r.errors.length > 0).length} con advertencias</span>
+                <span className="flex items-center gap-1 text-amber-600"><AlertTriangle className="w-3.5 h-3.5" /> {importRows.filter(r => r.errors.length > 0).length} advertencias</span>
               )}
               <span className="flex items-center gap-1 text-green-600"><CheckCircle2 className="w-3.5 h-3.5" /> {importRows.filter(r => r.name.trim()).length} válidas</span>
             </div>
 
-            <ScrollArea className="flex-1 border rounded-md">
-              <Table className="text-xs">
-                <TableHeader>
-                  <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
-                    <TableHead className="w-8">#</TableHead>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Teléfono</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Modelo</TableHead>
-                    <TableHead>Fuente</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Notas</TableHead>
-                    <TableHead className="w-8"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+            {isMobile ? (
+              <ScrollArea className="flex-1">
+                <div className="space-y-2 pr-2">
                   {importRows.map((r, idx) => {
                     const hasErrors = r.errors.length > 0;
-                    const isCritical = !r.name.trim();
                     return (
-                      <TableRow key={idx} className={cn("[&>td]:py-1", isCritical && "bg-red-50", hasErrors && !isCritical && "bg-amber-50")}>
-                        <TableCell className="text-muted-foreground">{r.row}</TableCell>
-                        <TableCell className={cn("font-medium", !r.name.trim() && "text-red-600")}>{r.name || <span className="italic text-red-500">vacío</span>}</TableCell>
-                        <TableCell>{r.phone || '-'}</TableCell>
-                        <TableCell>{r.email || '-'}</TableCell>
-                        <TableCell>{r.model || '-'}</TableCell>
-                        <TableCell><Badge variant="outline" className="text-[10px] px-1 py-0">{PROSPECT_SOURCES.find(s => s.value === r.source)?.label || r.source}</Badge></TableCell>
-                        <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.name === r.status)?.color || FALLBACK_STATUS.color)}>{PROSPECT_STATUSES.find(s => s.name === r.status)?.label || r.status}</Badge></TableCell>
-                        <TableCell className="max-w-[120px] truncate" title={r.notes}>{r.notes || '-'}</TableCell>
-                        <TableCell>
-                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" onClick={() => removeImportRow(idx)}>
+                      <Card key={idx} className={cn("p-2", hasErrors && "border-amber-300 bg-amber-50/50")}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <p className="text-xs font-medium truncate">{r.name || <span className="italic text-destructive">vacío</span>}</p>
+                            <div className="flex flex-wrap gap-1 text-[10px] text-muted-foreground">
+                              {r.phone && <span>{r.phone}</span>}
+                              {r.email && <span>{r.email}</span>}
+                              {r.model && <span>{r.model}</span>}
+                            </div>
+                            {hasErrors && <p className="text-[10px] text-amber-600">{r.errors.join(', ')}</p>}
+                          </div>
+                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 shrink-0" onClick={() => removeImportRow(idx)}>
                             <X className="w-3 h-3" />
                           </Button>
-                        </TableCell>
-                      </TableRow>
+                        </div>
+                      </Card>
                     );
                   })}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+                </div>
+              </ScrollArea>
+            ) : (
+              <ScrollArea className="flex-1 border rounded-md">
+                <Table className="text-xs">
+                  <TableHeader>
+                    <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                      <TableHead className="w-8">#</TableHead>
+                      <TableHead>Nombre</TableHead>
+                      <TableHead>Teléfono</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Modelo</TableHead>
+                      <TableHead>Fuente</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead>Notas</TableHead>
+                      <TableHead className="w-8"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {importRows.map((r, idx) => {
+                      const hasErrors = r.errors.length > 0;
+                      const isCritical = !r.name.trim();
+                      return (
+                        <TableRow key={idx} className={cn("[&>td]:py-1", isCritical && "bg-red-50", hasErrors && !isCritical && "bg-amber-50")}>
+                          <TableCell className="text-muted-foreground">{r.row}</TableCell>
+                          <TableCell className={cn("font-medium", !r.name.trim() && "text-red-600")}>{r.name || <span className="italic text-red-500">vacío</span>}</TableCell>
+                          <TableCell>{r.phone || '-'}</TableCell>
+                          <TableCell>{r.email || '-'}</TableCell>
+                          <TableCell>{r.model || '-'}</TableCell>
+                          <TableCell><Badge variant="outline" className="text-[10px] px-1 py-0">{PROSPECT_SOURCES.find(s => s.value === r.source)?.label || r.source}</Badge></TableCell>
+                          <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.name === r.status)?.color || FALLBACK_STATUS.color)}>{PROSPECT_STATUSES.find(s => s.name === r.status)?.label || r.status}</Badge></TableCell>
+                          <TableCell className="max-w-[120px] truncate" title={r.notes}>{r.notes || '-'}</TableCell>
+                          <TableCell>
+                            <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" onClick={() => removeImportRow(idx)}>
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            )}
 
             {importRows.some(r => r.errors.length > 0) && (
               <div className="bg-amber-50 border border-amber-200 rounded-md p-2.5 text-xs space-y-1 max-h-24 overflow-y-auto">
@@ -730,10 +812,10 @@ const AdminProspectos = () => {
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => { setImportOpen(false); setImportRows([]); }}>Cancelar</Button>
-            <Button onClick={handleBulkImport} disabled={importing || importRows.filter(r => r.name.trim()).length === 0} className="gac-gradient">
-              {importing ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : `Importar ${importRows.filter(r => r.name.trim()).length} Prospecto(s)`}
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => { setImportOpen(false); setImportRows([]); }} className="w-full sm:w-auto">Cancelar</Button>
+            <Button onClick={handleBulkImport} disabled={importing || importRows.filter(r => r.name.trim()).length === 0} className="gac-gradient w-full sm:w-auto">
+              {importing ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : `Importar ${importRows.filter(r => r.name.trim()).length}`}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -741,7 +823,7 @@ const AdminProspectos = () => {
 
       {/* CREATE/EDIT DIALOG */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className={cn(isMobile && "max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto")}>
           <DialogHeader>
             <DialogTitle className="font-display">{editing ? 'Editar Prospecto' : 'Nuevo Prospecto'}</DialogTitle>
           </DialogHeader>
@@ -755,8 +837,8 @@ const AdminProspectos = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1 col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Nombre *</Label>
                 <Input value={pName} onChange={e => setPName(e.target.value)} placeholder="Nombre completo" className="h-8 text-xs" />
               </div>
@@ -806,7 +888,7 @@ const AdminProspectos = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1 col-span-2">
+              <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -825,9 +907,9 @@ const AdminProspectos = () => {
               <Textarea value={pNotes} onChange={e => setPNotes(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones..." />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={saving} className="gac-gradient">
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving} className="gac-gradient w-full sm:w-auto">
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editing ? 'Guardar Cambios' : 'Crear Prospecto'}
             </Button>
           </DialogFooter>
@@ -836,16 +918,16 @@ const AdminProspectos = () => {
 
       {/* DELETE CONFIRMATION */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className={cn(isMobile && "max-w-[calc(100vw-2rem)]")}>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Eliminar prospecto?</AlertDialogTitle>
             <AlertDialogDescription>
               Esta acción eliminará permanentemente al prospecto <strong>{deleteTarget?.name}</strong>. Esta acción no se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel disabled={deleting} className="w-full sm:w-auto">Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90 w-full sm:w-auto">
               {deleting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Eliminar'}
             </AlertDialogAction>
           </AlertDialogFooter>
