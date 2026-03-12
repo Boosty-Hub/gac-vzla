@@ -38,35 +38,36 @@ interface AdminLayoutProps {
   children: ReactNode;
 }
 
+// Each item has a `module` for permission checking (module.view)
 const menuItems = [
   {
     group: 'General',
     items: [
-      { label: 'Dashboard', icon: BarChart3, path: '/admin' },
+      { label: 'Dashboard', icon: BarChart3, path: '/admin', module: 'dashboard' },
     ],
   },
   {
     group: 'Operaciones',
     items: [
-      { label: 'Reservas', icon: CalendarDays, path: '/admin/reservas' },
-      { label: 'Garantías', icon: ShieldCheck, path: '/admin/garantias' },
-      { label: 'Historial de Servicios', icon: ClipboardList, path: '/admin/historial' },
+      { label: 'Reservas', icon: CalendarDays, path: '/admin/reservas', module: 'reservas' },
+      { label: 'Garantías', icon: ShieldCheck, path: '/admin/garantias', module: 'garantias' },
+      { label: 'Historial de Servicios', icon: ClipboardList, path: '/admin/historial', module: 'historial' },
     ],
   },
   {
     group: 'Gestión',
     items: [
-      { label: 'Clientes', icon: UserCheck, path: '/admin/clientes' },
-      { label: 'Prospectos', icon: Users, path: '/admin/prospectos' },
-      { label: 'Modelos', icon: BookOpen, path: '/admin/modelos' },
-      { label: 'Concesionarios', icon: MapPin, path: '/admin/concesionarios' },
-      { label: 'Vehículos', icon: Car, path: '/admin/vehiculos' },
+      { label: 'Clientes', icon: UserCheck, path: '/admin/clientes', module: 'clientes' },
+      { label: 'Prospectos', icon: Users, path: '/admin/prospectos', module: 'prospectos' },
+      { label: 'Modelos', icon: BookOpen, path: '/admin/modelos', module: 'modelos' },
+      { label: 'Concesionarios', icon: MapPin, path: '/admin/concesionarios', module: 'concesionarios' },
+      { label: 'Vehículos', icon: Car, path: '/admin/vehiculos', module: 'vehiculos' },
     ],
   },
   {
     group: 'Administración',
     items: [
-      { label: 'Configuración', icon: Settings, path: '/admin/configuracion' },
+      { label: 'Configuración', icon: Settings, path: '/admin/configuracion', module: 'configuracion' },
     ],
   },
 ];
