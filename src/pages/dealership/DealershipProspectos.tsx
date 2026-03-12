@@ -112,6 +112,12 @@ const DealershipProspectos = () => {
     return true;
   });
 
+  const CLOSED_STATUSES = ['ganado', 'perdido'];
+  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados'>('abiertos');
+  const openProspects = filteredProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
+  const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
+  const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
+
   const openDialog = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
     setPSource('presencial'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
