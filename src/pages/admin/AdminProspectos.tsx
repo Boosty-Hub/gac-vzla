@@ -533,7 +533,6 @@ const AdminProspectos = () => {
                               <Trash2 className="w-3 h-3" />
                             </Button>
                           )}
-                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
