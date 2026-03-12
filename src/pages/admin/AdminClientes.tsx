@@ -512,6 +512,19 @@ const AdminClientes = () => {
                         <Car className="w-2.5 h-2.5" /> {c.vehicles?.length ?? 0}
                       </Badge>
                     </TableCell>
+                    <TableCell>
+                      {c.vehicles?.length > 0 ? (
+                        c.vehicles.some(v => v.warranty_active) ? (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-800 gap-0.5">
+                            <ShieldCheck className="w-2.5 h-2.5" /> Activa
+                          </Badge>
+                        ) : (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-800 gap-0.5">
+                            <ShieldX className="w-2.5 h-2.5" /> Inactiva
+                          </Badge>
+                        )
+                      ) : <span className="text-muted-foreground">-</span>}
+                    </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       <Button variant="ghost" size="icon" className="h-6 w-6 relative" onClick={() => openUsersDialog(c)} title="Gestionar usuarios">
                         <UserPlus className="w-3 h-3" />
