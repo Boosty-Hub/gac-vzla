@@ -57,6 +57,8 @@ const PROSPECT_SOURCES = [
 // Statuses are now loaded from DB via useProspectStatuses hook
 
 const AdminProspectos = () => {
+  const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
+  const [statusManagerOpen, setStatusManagerOpen] = useState(false);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
