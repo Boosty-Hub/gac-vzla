@@ -13,6 +13,7 @@ import { Plus, Search, Users, Phone, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
+import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 
 interface VehicleModel {
   id: string;
@@ -44,17 +45,10 @@ const PROSPECT_SOURCES = [
   { value: 'otro', label: 'Otro' },
 ];
 
-const PROSPECT_STATUSES = [
-  { value: 'nuevo', label: 'Nuevo', color: 'bg-blue-100 text-blue-800' },
-  { value: 'contactado', label: 'Contactado', color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'interesado', label: 'Interesado', color: 'bg-purple-100 text-purple-800' },
-  { value: 'cotizado', label: 'Cotizado', color: 'bg-indigo-100 text-indigo-800' },
-  { value: 'negociacion', label: 'Negociación', color: 'bg-orange-100 text-orange-800' },
-  { value: 'ganado', label: 'Ganado', color: 'bg-green-100 text-green-800' },
-  { value: 'perdido', label: 'Perdido', color: 'bg-red-100 text-red-800' },
-];
+// Statuses loaded from DB
 
 const DealershipProspectos = () => {
+  const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
@@ -181,7 +175,7 @@ const DealershipProspectos = () => {
           <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todos los estados</SelectItem>
-            {PROSPECT_STATUSES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+            {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={prosSourceFilter} onValueChange={setProsSourceFilter}>
@@ -219,7 +213,7 @@ const DealershipProspectos = () => {
             </TableHeader>
             <TableBody>
               {filteredProspects.map(p => {
-                const st = PROSPECT_STATUSES.find(s => s.value === p.status) || PROSPECT_STATUSES[0];
+                const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
                 const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                 return (
                   <TableRow key={p.id} className="[&>td]:py-1.5">
@@ -240,7 +234,7 @@ const DealershipProspectos = () => {
                         </SelectTrigger>
                         <SelectContent>
                           {PROSPECT_STATUSES.map(s => (
-                            <SelectItem key={s.value} value={s.value}>
+                            <SelectItem key={s.name} value={s.name}>
                               <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
                             </SelectItem>
                           ))}
@@ -314,7 +308,7 @@ const DealershipProspectos = () => {
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {PROSPECT_STATUSES.map(s => (
-                      <SelectItem key={s.value} value={s.value}>
+                      <SelectItem key={s.name} value={s.name}>
                         <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
                       </SelectItem>
                     ))}

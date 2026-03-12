@@ -11,10 +11,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2 } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { useProspectStatuses } from '@/hooks/useProspectStatuses';
+import ProspectStatusManager from '@/components/ProspectStatusManager';
 
 interface VehicleModel {
   id: string;
@@ -52,17 +54,11 @@ const PROSPECT_SOURCES = [
   { value: 'otro', label: 'Otro' },
 ];
 
-const PROSPECT_STATUSES = [
-  { value: 'nuevo', label: 'Nuevo', color: 'bg-blue-100 text-blue-800' },
-  { value: 'contactado', label: 'Contactado', color: 'bg-yellow-100 text-yellow-800' },
-  { value: 'interesado', label: 'Interesado', color: 'bg-purple-100 text-purple-800' },
-  { value: 'cotizado', label: 'Cotizado', color: 'bg-indigo-100 text-indigo-800' },
-  { value: 'negociacion', label: 'Negociación', color: 'bg-orange-100 text-orange-800' },
-  { value: 'ganado', label: 'Ganado', color: 'bg-green-100 text-green-800' },
-  { value: 'perdido', label: 'Perdido', color: 'bg-red-100 text-red-800' },
-];
+// Statuses are now loaded from DB via useProspectStatuses hook
 
 const AdminProspectos = () => {
+  const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
+  const [statusManagerOpen, setStatusManagerOpen] = useState(false);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -243,7 +239,7 @@ const AdminProspectos = () => {
 
   // CSV parsing
   const VALID_SOURCES = PROSPECT_SOURCES.map(s => s.value);
-  const VALID_STATUSES = PROSPECT_STATUSES.map(s => s.value);
+  const VALID_STATUSES = PROSPECT_STATUSES.map(s => s.name);
 
   const parseCSV = (text: string) => {
     const lines = text.split(/\r?\n/).filter(l => l.trim());
@@ -348,6 +344,9 @@ const AdminProspectos = () => {
           </Badge>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setStatusManagerOpen(true)} className="gap-1">
+            <Settings2 className="w-3.5 h-3.5" /> Estados
+          </Button>
           <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1">
             <Download className="w-3.5 h-3.5" /> Plantilla
           </Button>
@@ -400,7 +399,7 @@ const AdminProspectos = () => {
           <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todos los estados</SelectItem>
-            {PROSPECT_STATUSES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+            {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={sourceFilter} onValueChange={setSourceFilter}>
@@ -440,7 +439,7 @@ const AdminProspectos = () => {
             </TableHeader>
             <TableBody>
               {filteredProspects.map(p => {
-                const st = PROSPECT_STATUSES.find(s => s.value === p.status) || PROSPECT_STATUSES[0];
+                const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
                 const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                 return (
                   <TableRow key={p.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(p)}>
@@ -466,7 +465,7 @@ const AdminProspectos = () => {
                         </SelectTrigger>
                         <SelectContent>
                           {PROSPECT_STATUSES.map(s => (
-                            <SelectItem key={s.value} value={s.value}>
+                            <SelectItem key={s.name} value={s.name}>
                               <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
                             </SelectItem>
                           ))}
@@ -503,7 +502,7 @@ const AdminProspectos = () => {
             </DialogTitle>
           </DialogHeader>
           {detailProspect && (() => {
-            const st = PROSPECT_STATUSES.find(s => s.value === detailProspect.status) || PROSPECT_STATUSES[0];
+            const st = PROSPECT_STATUSES.find(s => s.name === detailProspect.status) || PROSPECT_STATUSES[0];
             const src = PROSPECT_SOURCES.find(s => s.value === detailProspect.source);
             return (
               <div className="space-y-4 py-1">
@@ -597,7 +596,7 @@ const AdminProspectos = () => {
                         <TableCell>{r.email || '-'}</TableCell>
                         <TableCell>{r.model || '-'}</TableCell>
                         <TableCell><Badge variant="outline" className="text-[10px] px-1 py-0">{PROSPECT_SOURCES.find(s => s.value === r.source)?.label || r.source}</Badge></TableCell>
-                        <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.value === r.status)?.color)}>{PROSPECT_STATUSES.find(s => s.value === r.status)?.label || r.status}</Badge></TableCell>
+                        <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.name === r.status)?.color)}>{PROSPECT_STATUSES.find(s => s.name === r.status)?.label || r.status}</Badge></TableCell>
                         <TableCell className="max-w-[120px] truncate" title={r.notes}>{r.notes || '-'}</TableCell>
                         <TableCell>
                           <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive" onClick={() => removeImportRow(idx)}>
@@ -690,7 +689,7 @@ const AdminProspectos = () => {
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {PROSPECT_STATUSES.map(s => (
-                      <SelectItem key={s.value} value={s.value}>
+                      <SelectItem key={s.name} value={s.name}>
                         <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
                       </SelectItem>
                     ))}
@@ -729,6 +728,13 @@ const AdminProspectos = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* STATUS MANAGER */}
+      <ProspectStatusManager
+        open={statusManagerOpen}
+        onOpenChange={setStatusManagerOpen}
+        onStatusesChanged={refetchStatuses}
+      />
     </div>
   );
 };
