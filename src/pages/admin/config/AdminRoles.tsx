@@ -66,6 +66,7 @@ const AdminRoles = () => {
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  const [formRedirectPortal, setFormRedirectPortal] = useState('cliente');
 
   // Permissions dialog
   const [permDialogOpen, setPermDialogOpen] = useState(false);
