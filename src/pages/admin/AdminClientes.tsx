@@ -80,6 +80,9 @@ interface Client {
 }
 
 const AdminClientes = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('clientes.create');
+  const canEdit = hasPermission('clientes.edit');
   const [clients, setClients] = useState<Client[]>([]);
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
