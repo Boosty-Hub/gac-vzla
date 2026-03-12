@@ -176,6 +176,7 @@ const AdminProspectos = () => {
     setPSource(p.source);
     setPStatus(p.status);
     setPNotes(p.notes || '');
+    setPSalesperson((p as any).salesperson || '');
     setDialogOpen(true);
   };
 
