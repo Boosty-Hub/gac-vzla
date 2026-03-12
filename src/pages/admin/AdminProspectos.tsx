@@ -110,6 +110,7 @@ const AdminProspectos = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [sendingWa, setSendingWa] = useState<string | null>(null);
 
   const fetchDealerships = async () => {
     const { data } = await supabase
