@@ -118,7 +118,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         <Separator className="bg-sidebar-border" />
 
         <SidebarContent>
-          {menuItems.map((group) => (
+          {filteredMenuItems.map((group) => (
             <SidebarGroup key={group.group}>
               <SidebarGroupLabel>{group.group}</SidebarGroupLabel>
               <SidebarGroupContent>
