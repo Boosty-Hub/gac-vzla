@@ -330,10 +330,18 @@ const AdminProspectos = () => {
     setImportRows(prev => prev.filter((_, i) => i !== idx));
   };
 
+  const CLOSED_STATUSES = ['ganado', 'perdido'];
+
+  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados'>('abiertos');
+
   // Stats
   const totalNuevos = prospects.filter(p => p.status === 'nuevo').length;
-  const totalInteresados = prospects.filter(p => ['interesado', 'cotizado', 'negociacion'].includes(p.status)).length;
+  const totalInteresados = prospects.filter(p => !CLOSED_STATUSES.includes(p.status) && p.status !== 'nuevo').length;
   const totalGanados = prospects.filter(p => p.status === 'ganado').length;
+
+  const openProspects = filteredProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
+  const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
+  const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
 
   return (
     <div className="space-y-4">
