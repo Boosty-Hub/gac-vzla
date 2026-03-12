@@ -87,6 +87,11 @@ const AdminClientes = () => {
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
 
+  // Filters
+  const [filterStatus, setFilterStatus] = useState('todos');
+  const [filterWarranty, setFilterWarranty] = useState('todos');
+  const [filterCity, setFilterCity] = useState('todos');
+
   // Client dialog
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
