@@ -48,6 +48,7 @@ const PROSPECT_SOURCES = [
 // Statuses loaded from DB
 
 const DealershipProspectos = () => {
+  const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
