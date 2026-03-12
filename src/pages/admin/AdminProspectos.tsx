@@ -239,7 +239,7 @@ const AdminProspectos = () => {
 
   // CSV parsing
   const VALID_SOURCES = PROSPECT_SOURCES.map(s => s.value);
-  const VALID_STATUSES = PROSPECT_STATUSES.map(s => s.value);
+  const VALID_STATUSES = PROSPECT_STATUSES.map(s => s.name);
 
   const parseCSV = (text: string) => {
     const lines = text.split(/\r?\n/).filter(l => l.trim());
