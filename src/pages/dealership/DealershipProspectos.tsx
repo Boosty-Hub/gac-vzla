@@ -53,6 +53,7 @@ const DealershipProspectos = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { salespersons } = useSalespersons();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
+  const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
   const isMobile = useIsMobile();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
