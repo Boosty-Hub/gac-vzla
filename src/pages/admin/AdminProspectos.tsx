@@ -461,7 +461,7 @@ const AdminProspectos = () => {
               </TableHeader>
               <TableBody>
                 {displayedProspects.map(p => {
-                  const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
+                  const st = PROSPECT_STATUSES.find(s => s.name === p.status) || FALLBACK_STATUS;
                   const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                   return (
                     <TableRow key={p.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(p)}>
