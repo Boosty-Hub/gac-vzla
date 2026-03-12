@@ -1,5 +1,5 @@
-import { ReactNode, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { ReactNode, useEffect } from 'react';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Sidebar,
