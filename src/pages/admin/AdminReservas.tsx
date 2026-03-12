@@ -506,9 +506,11 @@ const AdminReservas = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
-                        <Pencil className="w-3 h-3" />
-                      </Button>
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

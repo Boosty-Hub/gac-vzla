@@ -428,9 +428,11 @@ const AdminVehiculos = () => {
                     <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setDetailOpen(false); openEdit(v); }}>
-                      <Pencil className="w-3 h-3" /> Editar
-                    </Button>
+                    {canEdit && (
+                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setDetailOpen(false); openEdit(v); }}>
+                        <Pencil className="w-3 h-3" /> Editar
+                      </Button>
+                    )}
                     <Badge className={cn("text-xs flex items-center gap-1", v.warranty_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
                       {v.warranty_active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
                       {v.warranty_active ? 'Garantía Activa' : 'Sin Garantía'}

@@ -323,9 +323,11 @@ const AdminConcesionarios = () => {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDetailOpen(false)}>Cerrar</Button>
-            <Button className="gac-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
-              <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
-            </Button>
+            {canEdit && (
+              <Button className="gac-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
+                <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

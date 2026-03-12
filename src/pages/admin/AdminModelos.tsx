@@ -259,11 +259,13 @@ const AdminModelos = () => {
                       {m.is_active ? 'Activo' : 'Inactivo'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditDialog(m)}>
-                      <Pencil className="w-3 h-3" />
-                    </Button>
-                  </TableCell>
+                    <TableCell className="text-right">
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditDialog(m)}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </TableCell>
                 </TableRow>
               ))}
             </TableBody>

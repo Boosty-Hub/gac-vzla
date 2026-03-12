@@ -593,9 +593,11 @@ const AdminClientes = () => {
                                   <Badge variant={v.warranty_active ? "default" : "secondary"} className="text-xs">
                                     {v.warranty_active ? 'Garantía' : 'Sin garantía'}
                                   </Badge>
-                                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditVehicle(v); }}>
-                                    <Pencil className="w-3 h-3" />
-                                  </Button>
+                                  {canEdit && (
+                                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditVehicle(v); }}>
+                                      <Pencil className="w-3 h-3" />
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             ))}

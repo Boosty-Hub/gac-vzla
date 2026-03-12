@@ -228,9 +228,11 @@ const AdminUsuarios = () => {
             <Users className="w-3 h-3" /> {users.length}
           </Badge>
         </div>
-        <Button size="sm" onClick={openCreateDialog} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {hasPermission('usuarios.create') && (
+          <Button size="sm" onClick={openCreateDialog} className="gac-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
