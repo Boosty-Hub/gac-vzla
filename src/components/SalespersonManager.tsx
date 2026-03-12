@@ -90,7 +90,7 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
       name: fName.trim(),
       phone: fPhone.trim() || null,
       is_active: fActive,
-      profile_id: fProfileId || null,
+      profile_id: fProfileId && fProfileId !== 'none' ? fProfileId : null,
     };
 
     if (editing) {
