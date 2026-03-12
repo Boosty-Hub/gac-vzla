@@ -37,8 +37,7 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   }
 
   if (allowedRoles && role && !allowedRoles.includes(role.name)) {
-    const redirect = roleRedirectMap[role.name] || '/login';
-    return <Navigate to={redirect} replace />;
+    return <Navigate to={getRedirectPath(role)} replace />;
   }
 
   return <>{children}</>;
