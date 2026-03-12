@@ -62,6 +62,8 @@ const AdminUsuarios = () => {
   const [creating, setCreating] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [createDealershipId, setCreateDealershipId] = useState('');
+  const [generatingLink, setGeneratingLink] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
   // Dealerships for concesionario role
   const [dealerships, setDealerships] = useState<{ id: string; name: string }[]>([]);
