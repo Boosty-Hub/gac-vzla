@@ -344,6 +344,9 @@ const AdminProspectos = () => {
           </Badge>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setStatusManagerOpen(true)} className="gap-1">
+            <Settings2 className="w-3.5 h-3.5" /> Estados
+          </Button>
           <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1">
             <Download className="w-3.5 h-3.5" /> Plantilla
           </Button>
