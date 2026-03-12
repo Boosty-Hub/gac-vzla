@@ -166,7 +166,6 @@ const AdminGarantias = () => {
       setServiceCounts(counts);
     })();
   }, [vehicles]);
-  }, [vehicles]);
 
   const vehiclesWithWarranty = vehicles.map(v => ({
     vehicle: v,
