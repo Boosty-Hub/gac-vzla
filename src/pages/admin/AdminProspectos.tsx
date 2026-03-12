@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -110,6 +110,7 @@ const AdminProspectos = () => {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [sendingWa, setSendingWa] = useState<string | null>(null);
 
   const fetchDealerships = async () => {
     const { data } = await supabase
@@ -237,6 +238,50 @@ const AdminProspectos = () => {
     if (error) { toast.error('Error al eliminar prospecto'); console.error(error); }
     else { toast.success('Prospecto eliminado'); setDeleteOpen(false); setDeleteTarget(null); fetchProspects(); }
     setDeleting(false);
+  };
+
+  const handleWhatsAppSalesperson = async (p: Prospect) => {
+    const spName = (p as any).salesperson;
+    const sp = salespersons.find(s => s.name === spName);
+    if (!sp?.phone) {
+      toast.error('El vendedor no tiene teléfono registrado');
+      return;
+    }
+
+    setSendingWa(p.id);
+    const st = PROSPECT_STATUSES.find(s => s.name === p.status) || FALLBACK_STATUS;
+    const src = PROSPECT_SOURCES.find(s => s.value === p.source);
+
+    let message = `🚗 *Nuevo Prospecto Asignado*\n\n`;
+    message += `👤 *Nombre:* ${p.name}\n`;
+    if (p.phone) message += `📞 *Teléfono:* ${p.phone}\n`;
+    if (p.email) message += `📧 *Email:* ${p.email}\n`;
+    if (p.model_interest) message += `🚘 *Modelo de interés:* ${p.model_interest}\n`;
+    message += `📍 *Concesionario:* ${p.dealerships?.name || '-'}\n`;
+    message += `📋 *Fuente:* ${src?.label || p.source}\n`;
+    message += `🏷️ *Estado:* ${st.label}\n`;
+    if (p.notes) message += `📝 *Notas:* ${p.notes}\n`;
+    message += `📅 *Fecha:* ${new Date(p.created_at).toLocaleDateString('es-VE')}\n`;
+
+    // Generate magic link if salesperson has a profile_id
+    if (sp.profile_id) {
+      try {
+        const { data, error } = await supabase.functions.invoke('generate-magic-link', {
+          body: { user_id: sp.profile_id },
+        });
+        if (!error && data?.token) {
+          const magicUrl = `${window.location.origin}/magic-login?token=${data.token}`;
+          message += `\n🔗 *Accede a la plataforma:*\n${magicUrl}`;
+        }
+      } catch (err) {
+        console.error('Error generating magic link:', err);
+      }
+    }
+
+    const phone = sp.phone.replace(/[^0-9]/g, '');
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+    setSendingWa(null);
   };
 
   // CSV Template download
@@ -522,6 +567,20 @@ const AdminProspectos = () => {
                       </TableCell>
                        <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {(p as any).salesperson && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0"
+                              title="Enviar prospecto por WhatsApp al vendedor"
+                              disabled={sendingWa === p.id}
+                              onClick={(e) => { e.stopPropagation(); handleWhatsAppSalesperson(p); }}
+                            >
+                              {sendingWa === p.id
+                                ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                : <MessageCircle className="w-3.5 h-3.5 text-green-600" />}
+                            </Button>
+                          )}
                           {canEdit && (
                             <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
                               Editar
