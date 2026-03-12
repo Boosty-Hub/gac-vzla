@@ -307,15 +307,17 @@ const AdminUsuarios = () => {
                     {new Date(u.created_at).toLocaleDateString('es-VE')}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => openEditDialog(u)}
-                      disabled={u.id === currentProfile?.id}
-                    >
-                      <Pencil className="w-3 h-3" />
-                    </Button>
+                    {hasPermission('usuarios.edit') && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => openEditDialog(u)}
+                        disabled={u.id === currentProfile?.id}
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
