@@ -1,5 +1,5 @@
-import { ReactNode, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { ReactNode, useEffect } from 'react';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Sidebar,
@@ -90,6 +90,12 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       }),
     }))
     .filter(group => group.items.length > 0);
+
+  // If user is on /admin (dashboard) but doesn't have permission, redirect to first available route
+  const allFilteredItems = filteredMenuItems.flatMap(g => g.items);
+  if (location.pathname === '/admin' && !hasPermission('dashboard.view') && allFilteredItems.length > 0) {
+    return <Navigate to={allFilteredItems[0].path} replace />;
+  }
 
   const handleSignOut = async () => {
     await signOut();
