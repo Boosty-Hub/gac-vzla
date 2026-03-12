@@ -6,6 +6,7 @@ export interface Salesperson {
   name: string;
   phone: string | null;
   is_active: boolean;
+  profile_id: string | null;
 }
 
 export const useSalespersons = () => {
