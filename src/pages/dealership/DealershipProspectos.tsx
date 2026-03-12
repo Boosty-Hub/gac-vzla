@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useSalespersons } from '@/hooks/useSalespersons';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface VehicleModel {
   id: string;
@@ -47,22 +48,19 @@ const PROSPECT_SOURCES = [
   { value: 'otro', label: 'Otro' },
 ];
 
-// Statuses loaded from DB
-
 const DealershipProspectos = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { salespersons } = useSalespersons();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
+  const isMobile = useIsMobile();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Search/filter
   const [prosSearch, setProsSearch] = useState('');
   const [prosStatusFilter, setProsStatusFilter] = useState('todos');
   const [prosSourceFilter, setProsSourceFilter] = useState('todos');
 
-  // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pName, setPName] = useState('');
@@ -151,9 +149,49 @@ const DealershipProspectos = () => {
     else { fetchProspects(); }
   };
 
+  // Mobile card
+  const ProspectCard = ({ p }: { p: Prospect }) => {
+    const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
+    const src = PROSPECT_SOURCES.find(s => s.value === p.source);
+    return (
+      <Card className="gac-shadow">
+        <CardContent className="p-3 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold truncate">{p.name}</p>
+              {p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
+            </div>
+            <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
+              <SelectTrigger className="h-6 w-auto text-[10px] px-1.5 py-0 border-0 bg-transparent shrink-0">
+                <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
+              </SelectTrigger>
+              <SelectContent>
+                {PROSPECT_STATUSES.map(s => (
+                  <SelectItem key={s.name} value={s.name}>
+                    <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            {p.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{p.phone}</span>}
+            {p.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{p.email}</span>}
+          </div>
+          <div className="flex items-center gap-2 text-[10px]">
+            {p.model_interest && <span className="text-muted-foreground">🚘 {p.model_interest}</span>}
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
+            <span className="text-muted-foreground ml-auto">{new Date(p.created_at).toLocaleDateString('es-VE')}</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-display font-bold">Prospectos</h1>
           <Badge variant="outline" className="gap-1 text-xs">
@@ -163,14 +201,14 @@ const DealershipProspectos = () => {
         <div className="flex items-center gap-2">
           {showSelector && (
             <Select value={selectedDealership} onValueChange={setSelectedDealership}>
-              <SelectTrigger className="w-[180px] h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-[150px] sm:w-[180px] h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
               </SelectContent>
             </Select>
           )}
           <Button size="sm" onClick={openDialog} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Prospecto
+            <Plus className="w-3.5 h-3.5 sm:mr-1" /> <span className="hidden sm:inline">Nuevo Prospecto</span>
           </Button>
         </div>
       </div>
@@ -185,41 +223,53 @@ const DealershipProspectos = () => {
           </TabsTrigger>
         </TabsList>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[180px] max-w-sm">
+        {/* Filters */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-0 sm:min-w-[180px] sm:max-w-sm">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input placeholder="Buscar nombre, teléfono, email, modelo..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => setProsSearch(e.target.value)} />
+            <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => setProsSearch(e.target.value)} />
           </div>
-          <Select value={prosStatusFilter} onValueChange={setProsStatusFilter}>
-            <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos los estados</SelectItem>
-              {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={prosSourceFilter} onValueChange={setProsSourceFilter}>
-            <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Fuente" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todas las fuentes</SelectItem>
-              {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2">
+            <Select value={prosStatusFilter} onValueChange={setProsStatusFilter}>
+              <SelectTrigger className="w-[110px] sm:w-[130px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos</SelectItem>
+                {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={prosSourceFilter} onValueChange={setProsSourceFilter}>
+              <SelectTrigger className="w-[110px] sm:w-[140px] h-8 text-xs shrink-0"><SelectValue placeholder="Fuente" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todas</SelectItem>
+                {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        <Card className="gac-shadow">
-          {loading ? (
+        {/* Content */}
+        {loading ? (
+          <Card className="gac-shadow">
             <CardContent className="p-8 text-center">
               <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">Cargando prospectos...</p>
             </CardContent>
-          ) : displayedProspects.length === 0 ? (
+          </Card>
+        ) : displayedProspects.length === 0 ? (
+          <Card className="gac-shadow">
             <CardContent className="p-8 text-center">
               <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">
                 {activeTab === 'abiertos' ? 'No hay prospectos abiertos' : 'No hay prospectos cerrados'}
               </p>
             </CardContent>
-          ) : (
+          </Card>
+        ) : isMobile ? (
+          <div className="space-y-2">
+            {displayedProspects.map(p => <ProspectCard key={p.id} p={p} />)}
+          </div>
+        ) : (
+          <Card className="gac-shadow">
             <Table className="text-xs">
               <TableHeader>
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
@@ -251,7 +301,7 @@ const DealershipProspectos = () => {
                       <TableCell>
                         <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
                           <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent">
-                            <Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge>
+                            <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
                           </SelectTrigger>
                           <SelectContent>
                             {PROSPECT_STATUSES.map(s => (
@@ -270,19 +320,19 @@ const DealershipProspectos = () => {
                 })}
               </TableBody>
             </Table>
-          )}
-        </Card>
+          </Card>
+        )}
       </Tabs>
 
       {/* CREATE PROSPECT DIALOG */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className={cn(isMobile && "max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto")}>
           <DialogHeader>
             <DialogTitle className="font-display">Nuevo Prospecto</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1 col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Nombre *</Label>
                 <Input value={pName} onChange={e => setPName(e.target.value)} placeholder="Nombre completo" className="h-8 text-xs" />
               </div>
@@ -322,10 +372,6 @@ const DealershipProspectos = () => {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Vendedor</Label>
-                <Input value={pSalesperson} onChange={e => setPSalesperson(e.target.value)} placeholder="Nombre del vendedor" className="h-8 text-xs" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Vendedor</Label>
                 <Select value={pSalesperson} onValueChange={setPSalesperson}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
                   <SelectContent>
@@ -336,7 +382,7 @@ const DealershipProspectos = () => {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1 col-span-2">
+              <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -355,9 +401,9 @@ const DealershipProspectos = () => {
               <Textarea value={pNotes} onChange={e => setPNotes(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones..." />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={saving} className="gac-gradient">
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
+            <Button onClick={handleSave} disabled={saving} className="gac-gradient w-full sm:w-auto">
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Crear Prospecto'}
             </Button>
           </DialogFooter>
