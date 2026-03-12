@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,9 @@ interface Dealership {
 }
 
 const AdminConcesionarios = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('concesionarios.create');
+  const canEdit = hasPermission('concesionarios.edit');
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -149,9 +153,11 @@ const AdminConcesionarios = () => {
             <MapPin className="w-3 h-3" /> {filteredDealerships.length}
           </Badge>
         </div>
-        <Button size="sm" onClick={openCreate} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {canCreate && (
+          <Button size="sm" onClick={openCreate} className="gac-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -228,11 +234,13 @@ const AdminConcesionarios = () => {
                       {d.is_active ? 'Activo' : 'Inactivo'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); openEdit(d); }}>
-                      <Pencil className="w-3 h-3" />
-                    </Button>
-                  </TableCell>
+                    <TableCell className="text-right">
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); openEdit(d); }}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -315,9 +323,11 @@ const AdminConcesionarios = () => {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDetailOpen(false)}>Cerrar</Button>
-            <Button className="gac-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
-              <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
-            </Button>
+            {canEdit && (
+              <Button className="gac-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
+                <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

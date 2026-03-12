@@ -228,9 +228,11 @@ const AdminUsuarios = () => {
             <Users className="w-3 h-3" /> {users.length}
           </Badge>
         </div>
-        <Button size="sm" onClick={openCreateDialog} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {hasPermission('usuarios.create') && (
+          <Button size="sm" onClick={openCreateDialog} className="gac-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -305,15 +307,17 @@ const AdminUsuarios = () => {
                     {new Date(u.created_at).toLocaleDateString('es-VE')}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => openEditDialog(u)}
-                      disabled={u.id === currentProfile?.id}
-                    >
-                      <Pencil className="w-3 h-3" />
-                    </Button>
+                    {hasPermission('usuarios.edit') && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => openEditDialog(u)}
+                        disabled={u.id === currentProfile?.id}
+                      >
+                        <Pencil className="w-3 h-3" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

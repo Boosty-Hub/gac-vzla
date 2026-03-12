@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -79,6 +80,9 @@ interface Client {
 }
 
 const AdminClientes = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('clientes.create');
+  const canEdit = hasPermission('clientes.edit');
   const [clients, setClients] = useState<Client[]>([]);
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -418,9 +422,11 @@ const AdminClientes = () => {
             <Users className="w-3 h-3" /> {totalCount}
           </Badge>
         </div>
-        <Button size="sm" onClick={openCreateClient} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {canCreate && (
+          <Button size="sm" onClick={openCreateClient} className="gac-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -541,9 +547,11 @@ const AdminClientes = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right" onClick={e => e.stopPropagation()}>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
-                        <Pencil className="w-3 h-3" />
-                      </Button>
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                   {expandedClient === c.id && (
@@ -585,9 +593,11 @@ const AdminClientes = () => {
                                   <Badge variant={v.warranty_active ? "default" : "secondary"} className="text-xs">
                                     {v.warranty_active ? 'Garantía' : 'Sin garantía'}
                                   </Badge>
-                                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditVehicle(v); }}>
-                                    <Pencil className="w-3 h-3" />
-                                  </Button>
+                                  {canEdit && (
+                                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditVehicle(v); }}>
+                                      <Pencil className="w-3 h-3" />
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             ))}

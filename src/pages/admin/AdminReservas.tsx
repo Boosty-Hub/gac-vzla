@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -86,6 +87,9 @@ const STATUS_LABELS: Record<string, string> = {
 
 
 const AdminReservas = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('reservas.create');
+  const canEdit = hasPermission('reservas.edit');
   const [view, setView] = useState<'table' | 'matrix'>('table');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
@@ -409,9 +413,11 @@ const AdminReservas = () => {
               <TabsTrigger value="matrix" className="gap-1 text-xs h-7"><LayoutGrid className="w-3.5 h-3.5" /> Matriz</TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button size="sm" onClick={openCreate} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Nueva
-          </Button>
+          {canCreate && (
+            <Button size="sm" onClick={openCreate} className="gac-gradient">
+              <Plus className="w-3.5 h-3.5 mr-1" /> Nueva
+            </Button>
+          )}
         </div>
       </div>
 
@@ -500,9 +506,11 @@ const AdminReservas = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
-                        <Pencil className="w-3 h-3" />
-                      </Button>
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -27,6 +28,9 @@ interface VehicleModel {
 const BRANDS = ['GAC', 'DFSK', 'SHINERAY'];
 
 const AdminModelos = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('modelos.create');
+  const canEdit = hasPermission('modelos.edit');
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
@@ -191,9 +195,11 @@ const AdminModelos = () => {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-display font-bold">Modelos de Vehículos</h1>
-        <Button size="sm" onClick={openCreateDialog} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {canCreate && (
+          <Button size="sm" onClick={openCreateDialog} className="gac-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
       <div className="relative max-w-sm">
@@ -253,11 +259,13 @@ const AdminModelos = () => {
                       {m.is_active ? 'Activo' : 'Inactivo'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditDialog(m)}>
-                      <Pencil className="w-3 h-3" />
-                    </Button>
-                  </TableCell>
+                    <TableCell className="text-right">
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditDialog(m)}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </TableCell>
                 </TableRow>
               ))}
             </TableBody>

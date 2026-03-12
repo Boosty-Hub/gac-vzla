@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -50,6 +51,8 @@ interface ServiceRecord {
 }
 
 const AdminVehiculos = () => {
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission('vehiculos.edit');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -303,11 +306,13 @@ const AdminVehiculos = () => {
                       {v.warranty_active ? 'Activa' : 'Inactiva'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={(e) => { e.stopPropagation(); openEdit(v); }}>
-                      <Pencil className="w-3 h-3" />
-                    </Button>
-                  </TableCell>
+                    <TableCell className="text-right">
+                      {canEdit && (
+                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={(e) => { e.stopPropagation(); openEdit(v); }}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -423,9 +428,11 @@ const AdminVehiculos = () => {
                     <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setDetailOpen(false); openEdit(v); }}>
-                      <Pencil className="w-3 h-3" /> Editar
-                    </Button>
+                    {canEdit && (
+                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setDetailOpen(false); openEdit(v); }}>
+                        <Pencil className="w-3 h-3" /> Editar
+                      </Button>
+                    )}
                     <Badge className={cn("text-xs flex items-center gap-1", v.warranty_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
                       {v.warranty_active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
                       {v.warranty_active ? 'Garantía Activa' : 'Sin Garantía'}

@@ -48,6 +48,7 @@ const MODULE_LABELS: Record<string, string> = {
   reservas: 'Reservas',
   garantias: 'Garantías',
   historial: 'Historial',
+  prospectos: 'Prospectos',
   usuarios: 'Usuarios',
   roles: 'Roles',
 };

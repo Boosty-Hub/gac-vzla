@@ -20,6 +20,7 @@ import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import ProspectStatusManager from '@/components/ProspectStatusManager';
 import SalespersonManager from '@/components/SalespersonManager';
 import { useSalespersons } from '@/hooks/useSalespersons';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface VehicleModel {
   id: string;
@@ -63,6 +64,10 @@ const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
   const { salespersons, fetchSalespersons: refetchSalespersons } = useSalespersons();
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('prospectos.create');
+  const canEdit = hasPermission('prospectos.edit');
+  const canDelete = hasPermission('prospectos.delete');
   const [statusManagerOpen, setStatusManagerOpen] = useState(false);
   const [salespersonManagerOpen, setSalespersonManagerOpen] = useState(false);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
@@ -367,16 +372,20 @@ const AdminProspectos = () => {
           <Button size="sm" variant="outline" onClick={() => setSalespersonManagerOpen(true)} className="gap-1">
             <UserCog className="w-3.5 h-3.5" /> Vendedores
           </Button>
-          <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1">
-            <Download className="w-3.5 h-3.5" /> Plantilla
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1">
-            <Upload className="w-3.5 h-3.5" /> Importar CSV
-          </Button>
-          <input ref={fileInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} />
-          <Button size="sm" onClick={openCreate} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Prospecto
-          </Button>
+          {canCreate && (
+            <>
+              <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1">
+                <Download className="w-3.5 h-3.5" /> Plantilla
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1">
+                <Upload className="w-3.5 h-3.5" /> Importar CSV
+              </Button>
+              <input ref={fileInputRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFileUpload} />
+              <Button size="sm" onClick={openCreate} className="gac-gradient">
+                <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo Prospecto
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -511,14 +520,18 @@ const AdminProspectos = () => {
                       <TableCell className="text-muted-foreground">
                         {new Date(p.created_at).toLocaleDateString('es-VE')}
                       </TableCell>
-                      <TableCell className="text-right">
+                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
-                            Editar
-                          </Button>
-                          <Button size="sm" variant="ghost" className="text-[10px] h-6 px-1.5 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); confirmDelete(p); }}>
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
+                          {canEdit && (
+                            <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
+                              Editar
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button size="sm" variant="ghost" className="text-[10px] h-6 px-1.5 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); confirmDelete(p); }}>
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -571,7 +584,9 @@ const AdminProspectos = () => {
                   </div>
                 )}
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); openEdit(detailProspect); }}>Editar</Button>
+                  {canEdit && (
+                    <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); openEdit(detailProspect); }}>Editar</Button>
+                  )}
                 </div>
               </div>
             );
