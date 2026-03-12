@@ -487,6 +487,7 @@ const AdminClientes = () => {
                 <TableHead>Correo</TableHead>
                 <TableHead>Ciudad</TableHead>
                 <TableHead>Veh.</TableHead>
+                <TableHead>Garantía</TableHead>
                 <TableHead>Usr.</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-right">Acc.</TableHead>
