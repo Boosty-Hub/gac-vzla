@@ -483,7 +483,7 @@ const AdminClientes = () => {
                     <TableCell>{c.city || '-'}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
-                        <Car className="w-2.5 h-2.5" /> {c.vehicles?.[0]?.count ?? 0}
+                        <Car className="w-2.5 h-2.5" /> {c.vehicles?.length ?? 0}
                       </Badge>
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
