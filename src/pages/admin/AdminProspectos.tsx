@@ -567,6 +567,20 @@ const AdminProspectos = () => {
                       </TableCell>
                        <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {(p as any).salesperson && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 w-6 p-0"
+                              title="Enviar prospecto por WhatsApp al vendedor"
+                              disabled={sendingWa === p.id}
+                              onClick={(e) => { e.stopPropagation(); handleWhatsAppSalesperson(p); }}
+                            >
+                              {sendingWa === p.id
+                                ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                : <MessageCircle className="w-3.5 h-3.5 text-green-600" />}
+                            </Button>
+                          )}
                           {canEdit && (
                             <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
                               Editar
