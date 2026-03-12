@@ -87,11 +87,18 @@ const DealershipProspectos = () => {
   const fetchProspects = async () => {
     if (!selectedDealership) return;
     setLoading(true);
-    const { data } = await supabase
+    let query = supabase
       .from('prospects')
       .select('*')
       .eq('dealership_id', selectedDealership)
       .order('created_at', { ascending: false });
+
+    // If user is a linked salesperson, only show their assigned prospects
+    if (isSalesperson && currentSalesperson) {
+      query = query.eq('salesperson', currentSalesperson.name);
+    }
+
+    const { data } = await query;
     setProspects((data || []) as Prospect[]);
     setLoading(false);
   };
