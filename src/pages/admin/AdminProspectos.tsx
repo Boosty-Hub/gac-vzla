@@ -784,6 +784,13 @@ const AdminProspectos = () => {
         onOpenChange={setStatusManagerOpen}
         onStatusesChanged={refetchStatuses}
       />
+
+      {/* SALESPERSON MANAGER */}
+      <SalespersonManager
+        open={salespersonManagerOpen}
+        onOpenChange={setSalespersonManagerOpen}
+        onSalespersonsChanged={refetchSalespersons}
+      />
     </div>
   );
 };
