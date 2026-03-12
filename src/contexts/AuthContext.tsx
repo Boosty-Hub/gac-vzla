@@ -19,6 +19,7 @@ interface RoleData {
   id: string;
   name: UserRole;
   description: string | null;
+  redirect_portal: string;
 }
 
 interface AuthContextType {
