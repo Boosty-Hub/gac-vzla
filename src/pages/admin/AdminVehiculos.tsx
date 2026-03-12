@@ -2,13 +2,24 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
-import { Search, Car, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, Wrench, ClipboardCheck, User } from 'lucide-react';
+import { Search, Car, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, User, Pencil } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+
+interface VehicleModel {
+  id: string;
+  name: string;
+  brand: string;
+  year: number | null;
+}
 
 interface Vehicle {
   id: string;
@@ -20,6 +31,8 @@ interface Vehicle {
   purchase_date: string | null;
   warranty_active: boolean;
   is_active: boolean;
+  model_id: string;
+  client_id: string;
   vehicle_models: { name: string; brand: string } | null;
   clients: { full_name: string; cedula: string | null } | null;
 }
@@ -38,9 +51,11 @@ interface ServiceRecord {
 
 const AdminVehiculos = () => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
   const [brandFilter, setBrandFilter] = useState('all');
+  const [warrantyFilter, setWarrantyFilter] = useState('todos');
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
@@ -51,6 +66,29 @@ const AdminVehiculos = () => {
   const [detailHistory, setDetailHistory] = useState<ServiceRecord[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
+  // Edit dialog
+  const [editOpen, setEditOpen] = useState(false);
+  const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [eModelId, setEModelId] = useState('');
+  const [eYear, setEYear] = useState('');
+  const [ePlate, setEPlate] = useState('');
+  const [eVin, setEVin] = useState('');
+  const [eColor, setEColor] = useState('');
+  const [eMileage, setEMileage] = useState('0');
+  const [ePurchaseDate, setEPurchaseDate] = useState('');
+  const [eWarranty, setEWarranty] = useState(true);
+
+  const fetchModels = async () => {
+    const { data } = await supabase
+      .from('vehicle_models')
+      .select('id, name, brand, year')
+      .eq('is_active', true)
+      .order('brand')
+      .order('name');
+    if (data) setModels(data);
+  };
+
   const fetchVehicles = async () => {
     setLoading(true);
 
@@ -58,8 +96,8 @@ const AdminVehiculos = () => {
       .from('vehicles')
       .select('*, vehicle_models(name, brand), clients(full_name, cedula)', { count: 'exact' });
 
-    if (brandFilter !== 'all') {
-      query = query.eq('vehicle_models.brand', brandFilter);
+    if (warrantyFilter !== 'todos') {
+      query = query.eq('warranty_active', warrantyFilter === 'activa');
     }
 
     if (busqueda.trim()) {
@@ -73,24 +111,27 @@ const AdminVehiculos = () => {
     if (error) {
       console.error('Error fetching vehicles:', error);
     } else {
-      // If brand filter is active, filter client-side since PostgREST can't filter on joined columns in .eq
       let filtered = data || [];
       if (brandFilter !== 'all') {
         filtered = filtered.filter(v => v.vehicle_models?.brand === brandFilter);
       }
       setVehicles(filtered as Vehicle[]);
-      setTotalCount(count || 0);
+      setTotalCount(brandFilter !== 'all' ? filtered.length : (count || 0));
     }
     setLoading(false);
   };
 
   useEffect(() => {
+    fetchModels();
+  }, []);
+
+  useEffect(() => {
     setPage(0);
-  }, [busqueda, brandFilter, pageSize]);
+  }, [busqueda, brandFilter, warrantyFilter, pageSize]);
 
   useEffect(() => {
     fetchVehicles();
-  }, [page, busqueda, brandFilter, pageSize]);
+  }, [page, busqueda, brandFilter, warrantyFilter, pageSize]);
 
   const openDetail = async (v: Vehicle) => {
     setDetailVehicle(v);
@@ -105,6 +146,48 @@ const AdminVehiculos = () => {
       .limit(50);
     setDetailHistory((data || []) as ServiceRecord[]);
     setLoadingDetail(false);
+  };
+
+  const openEdit = (v: Vehicle) => {
+    setEditVehicle(v);
+    setEModelId(v.model_id);
+    setEYear(v.year.toString());
+    setEPlate(v.plate || '');
+    setEVin(v.vin || '');
+    setEColor(v.color || '');
+    setEMileage(v.mileage.toString());
+    setEPurchaseDate(v.purchase_date || '');
+    setEWarranty(v.warranty_active);
+    setEditOpen(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editVehicle) return;
+    if (!eModelId || !eYear) {
+      toast.error('Modelo y año son requeridos');
+      return;
+    }
+    setSaving(true);
+    const { error } = await supabase.from('vehicles').update({
+      model_id: eModelId,
+      year: parseInt(eYear),
+      plate: ePlate.trim().toUpperCase() || null,
+      vin: eVin.trim().toUpperCase() || null,
+      color: eColor.trim() || null,
+      mileage: parseInt(eMileage) || 0,
+      purchase_date: ePurchaseDate || null,
+      warranty_active: eWarranty,
+    }).eq('id', editVehicle.id);
+
+    if (error) {
+      toast.error('Error al actualizar vehículo');
+      console.error(error);
+    } else {
+      toast.success('Vehículo actualizado');
+      setEditOpen(false);
+      fetchVehicles();
+    }
+    setSaving(false);
   };
 
   const formatDate = (dateStr: string | null) => {
@@ -126,8 +209,8 @@ const AdminVehiculos = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[180px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
             placeholder="Buscar placa, VIN o color..."
@@ -141,10 +224,20 @@ const AdminVehiculos = () => {
             <SelectValue placeholder="Marca" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todas</SelectItem>
+            <SelectItem value="all">Todas las marcas</SelectItem>
             <SelectItem value="GAC">GAC</SelectItem>
             <SelectItem value="DFSK">DFSK</SelectItem>
             <SelectItem value="SHINERAY">SHINERAY</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={warrantyFilter} onValueChange={setWarrantyFilter}>
+          <SelectTrigger className="w-[160px] h-8 text-xs">
+            <SelectValue placeholder="Garantía" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todas las garantías</SelectItem>
+            <SelectItem value="activa">Garantía activa</SelectItem>
+            <SelectItem value="inactiva">Garantía inactiva</SelectItem>
           </SelectContent>
         </Select>
         <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
@@ -184,6 +277,7 @@ const AdminVehiculos = () => {
                 <TableHead>Km</TableHead>
                 <TableHead>F. Compra</TableHead>
                 <TableHead>Gar.</TableHead>
+                <TableHead className="text-right">Acc.</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -208,6 +302,11 @@ const AdminVehiculos = () => {
                     <Badge className={cn("text-[10px] px-1.5 py-0", v.warranty_active ? "bg-green-100 text-green-800" : "bg-muted text-muted-foreground")}>
                       {v.warranty_active ? 'Activa' : 'Inactiva'}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={(e) => { e.stopPropagation(); openEdit(v); }}>
+                      <Pencil className="w-3 h-3" />
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -242,6 +341,70 @@ const AdminVehiculos = () => {
           </div>
         </div>
       )}
+
+      {/* EDIT DIALOG */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-display">Editar Vehículo</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1 col-span-2">
+                <Label className="text-xs">Modelo *</Label>
+                <Select value={eModelId} onValueChange={setEModelId}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from(new Set(models.map(m => m.brand))).map(brand => (
+                      <SelectGroup key={brand}>
+                        <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
+                        {models.filter(m => m.brand === brand).map(m => (
+                          <SelectItem key={m.id} value={m.id}>{m.brand} {m.name}</SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Año *</Label>
+                <Input type="number" value={eYear} onChange={e => setEYear(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Placa</Label>
+                <Input value={ePlate} onChange={e => setEPlate(e.target.value)} placeholder="ABC123" className="h-8 text-xs uppercase" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">VIN</Label>
+                <Input value={eVin} onChange={e => setEVin(e.target.value)} className="h-8 text-xs uppercase" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Color</Label>
+                <Input value={eColor} onChange={e => setEColor(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Kilometraje</Label>
+                <Input type="number" value={eMileage} onChange={e => setEMileage(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Fecha de compra</Label>
+                <Input type="date" value={ePurchaseDate} onChange={e => setEPurchaseDate(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="flex items-center gap-2 col-span-2 pt-1">
+                <Switch checked={eWarranty} onCheckedChange={setEWarranty} />
+                <Label className="text-xs">Garantía activa</Label>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSaveEdit} disabled={saving} className="gac-gradient">
+              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Guardar Cambios'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* DETAIL DIALOG */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
@@ -259,10 +422,15 @@ const AdminVehiculos = () => {
                     <h3 className="font-display font-bold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
                     <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
                   </div>
-                  <Badge className={cn("text-xs flex items-center gap-1", v.warranty_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                    {v.warranty_active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                    {v.warranty_active ? 'Garantía Activa' : 'Sin Garantía'}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => { setDetailOpen(false); openEdit(v); }}>
+                      <Pencil className="w-3 h-3" /> Editar
+                    </Button>
+                    <Badge className={cn("text-xs flex items-center gap-1", v.warranty_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                      {v.warranty_active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                      {v.warranty_active ? 'Garantía Activa' : 'Sin Garantía'}
+                    </Badge>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
