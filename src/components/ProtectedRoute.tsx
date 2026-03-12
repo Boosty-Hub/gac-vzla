@@ -49,8 +49,17 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
 
 export function RedirectByRole() {
   const { user, role, loading } = useAuth();
+  const [waited, setWaited] = useState(false);
 
-  if (loading) {
+  useEffect(() => {
+    // Give profile loading a moment to complete after auth
+    if (user && !role && !loading) {
+      const timer = setTimeout(() => setWaited(true), 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [user, role, loading]);
+
+  if (loading || (user && !role && !waited)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
