@@ -178,8 +178,16 @@ const AdminClientes = () => {
       toast.error('Error al cargar clientes');
       console.error(error);
     } else {
-      setClients(data || []);
-      setTotalCount(count || 0);
+      let filtered = data || [];
+      // Client-side warranty filter since it depends on nested vehicles
+      if (filterWarranty !== 'todos') {
+        filtered = filtered.filter(c => {
+          const hasActiveWarranty = c.vehicles?.some((v: any) => v.warranty_active);
+          return filterWarranty === 'activa' ? hasActiveWarranty : !hasActiveWarranty;
+        });
+      }
+      setClients(filtered as Client[]);
+      setTotalCount(filterWarranty !== 'todos' ? filtered.length : (count || 0));
     }
     setLoading(false);
   };
