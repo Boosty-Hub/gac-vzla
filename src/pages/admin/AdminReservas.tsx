@@ -413,9 +413,11 @@ const AdminReservas = () => {
               <TabsTrigger value="matrix" className="gap-1 text-xs h-7"><LayoutGrid className="w-3.5 h-3.5" /> Matriz</TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button size="sm" onClick={openCreate} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Nueva
-          </Button>
+          {canCreate && (
+            <Button size="sm" onClick={openCreate} className="gac-gradient">
+              <Plus className="w-3.5 h-3.5 mr-1" /> Nueva
+            </Button>
+          )}
         </div>
       </div>
 
