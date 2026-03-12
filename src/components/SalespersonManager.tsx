@@ -7,8 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Plus, Pencil, Trash2, Phone } from 'lucide-react';
+import { Plus, Pencil, Trash2, Phone, UserCheck } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Salesperson {
@@ -16,6 +17,13 @@ interface Salesperson {
   name: string;
   phone: string | null;
   is_active: boolean;
+  profile_id: string | null;
+}
+
+interface ProfileOption {
+  id: string;
+  email: string;
+  full_name: string | null;
 }
 
 interface SalespersonManagerProps {
@@ -26,6 +34,7 @@ interface SalespersonManagerProps {
 
 const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: SalespersonManagerProps) => {
   const [salespersons, setSalespersons] = useState<Salesperson[]>([]);
+  const [profiles, setProfiles] = useState<ProfileOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [formOpen, setFormOpen] = useState(false);
@@ -34,23 +43,25 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
   const [fName, setFName] = useState('');
   const [fPhone, setFPhone] = useState('');
   const [fActive, setFActive] = useState(true);
+  const [fProfileId, setFProfileId] = useState('');
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Salesperson | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const fetchSalespersons = async () => {
+  const fetchData = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('salespersons' as any)
-      .select('*')
-      .order('name');
-    setSalespersons((data || []) as unknown as Salesperson[]);
+    const [spRes, profilesRes] = await Promise.all([
+      supabase.from('salespersons' as any).select('*').order('name'),
+      supabase.from('profiles').select('id, email, full_name').eq('is_active', true).order('full_name'),
+    ]);
+    setSalespersons((spRes.data || []) as unknown as Salesperson[]);
+    setProfiles(profilesRes.data || []);
     setLoading(false);
   };
 
   useEffect(() => {
-    if (open) fetchSalespersons();
+    if (open) fetchData();
   }, [open]);
 
   const openCreate = () => {
@@ -58,6 +69,7 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
     setFName('');
     setFPhone('');
     setFActive(true);
+    setFProfileId('');
     setFormOpen(true);
   };
 
@@ -66,6 +78,7 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
     setFName(s.name);
     setFPhone(s.phone || '');
     setFActive(s.is_active);
+    setFProfileId(s.profile_id || '');
     setFormOpen(true);
   };
 
@@ -77,16 +90,17 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
       name: fName.trim(),
       phone: fPhone.trim() || null,
       is_active: fActive,
+      profile_id: fProfileId || null,
     };
 
     if (editing) {
       const { error } = await (supabase.from('salespersons' as any) as any).update(payload).eq('id', editing.id);
       if (error) { toast.error('Error al actualizar vendedor'); console.error(error); }
-      else { toast.success('Vendedor actualizado'); setFormOpen(false); fetchSalespersons(); onSalespersonsChanged?.(); }
+      else { toast.success('Vendedor actualizado'); setFormOpen(false); fetchData(); onSalespersonsChanged?.(); }
     } else {
       const { error } = await (supabase.from('salespersons' as any) as any).insert(payload);
       if (error) { toast.error('Error al crear vendedor'); console.error(error); }
-      else { toast.success('Vendedor creado'); setFormOpen(false); fetchSalespersons(); onSalespersonsChanged?.(); }
+      else { toast.success('Vendedor creado'); setFormOpen(false); fetchData(); onSalespersonsChanged?.(); }
     }
     setSaving(false);
   };
@@ -101,8 +115,14 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
     setDeleting(true);
     const { error } = await (supabase.from('salespersons' as any) as any).delete().eq('id', deleteTarget.id);
     if (error) { toast.error('Error al eliminar vendedor'); console.error(error); }
-    else { toast.success('Vendedor eliminado'); setDeleteOpen(false); setDeleteTarget(null); fetchSalespersons(); onSalespersonsChanged?.(); }
+    else { toast.success('Vendedor eliminado'); setDeleteOpen(false); setDeleteTarget(null); fetchData(); onSalespersonsChanged?.(); }
     setDeleting(false);
+  };
+
+  const getProfileLabel = (profileId: string | null) => {
+    if (!profileId) return null;
+    const p = profiles.find(pr => pr.id === profileId);
+    return p ? (p.full_name || p.email) : null;
   };
 
   return (
@@ -130,6 +150,7 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
                   <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                     <TableHead>Nombre</TableHead>
                     <TableHead>Teléfono</TableHead>
+                    <TableHead>Usuario</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
@@ -144,6 +165,16 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
                             <Phone className="w-2.5 h-2.5" />{s.phone}
                           </div>
                         ) : '-'}
+                      </TableCell>
+                      <TableCell>
+                        {s.profile_id ? (
+                          <div className="flex items-center gap-1 text-muted-foreground">
+                            <UserCheck className="w-2.5 h-2.5 text-primary" />
+                            <span className="truncate max-w-[100px]">{getProfileLabel(s.profile_id) || 'Vinculado'}</span>
+                          </div>
+                        ) : (
+                          <span className="text-muted-foreground/50">Sin vincular</span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={s.is_active ? 'text-green-700 border-green-300' : 'text-muted-foreground'}>
@@ -183,6 +214,23 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
             <div className="space-y-1">
               <Label className="text-xs">Teléfono</Label>
               <Input value={fPhone} onChange={e => setFPhone(e.target.value)} placeholder="+58 412 1234567" className="h-8 text-xs" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Vincular con usuario</Label>
+              <Select value={fProfileId} onValueChange={setFProfileId}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Sin vincular (opcional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sin vincular</SelectItem>
+                  {profiles.map(p => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.full_name || p.email} <span className="text-muted-foreground ml-1">({p.email})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground">Vincula este vendedor con un usuario existente en la plataforma</p>
             </div>
             <div className="flex items-center gap-2">
               <Switch checked={fActive} onCheckedChange={setFActive} />
