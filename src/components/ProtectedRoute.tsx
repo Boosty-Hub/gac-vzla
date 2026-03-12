@@ -6,12 +6,17 @@ interface ProtectedRouteProps {
   allowedRoles?: UserRole[];
 }
 
-const roleRedirectMap: Record<UserRole, string> = {
-  superadmin: '/admin',
+const portalPaths: Record<string, string> = {
   admin: '/admin',
   concesionario: '/concesionario',
   cliente: '/usuario',
 };
+
+function getRedirectPath(role: { name: string; redirect_portal?: string } | null): string {
+  if (!role) return '/usuario';
+  const portal = role.redirect_portal || role.name;
+  return portalPaths[portal] || '/usuario';
+}
 
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const { user, role, loading } = useAuth();
