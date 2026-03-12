@@ -13,6 +13,7 @@ import { Plus, Search, Users, Phone, Mail } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
+import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 
 interface VehicleModel {
   id: string;
