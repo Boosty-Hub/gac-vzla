@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff } from 'lucide-react';
+import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -62,6 +62,8 @@ const AdminUsuarios = () => {
   const [creating, setCreating] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [createDealershipId, setCreateDealershipId] = useState('');
+  const [generatingLink, setGeneratingLink] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
   // Dealerships for concesionario role
   const [dealerships, setDealerships] = useState<{ id: string; name: string }[]>([]);
@@ -111,6 +113,28 @@ const AdminUsuarios = () => {
   };
 
   const getSelectedRoleName = (roleId: string) => roles.find(r => r.id === roleId)?.name || '';
+
+  const handleGenerateMagicLink = async (userId: string) => {
+    setGeneratingLink(userId);
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-magic-link', {
+        body: { user_id: userId },
+      });
+      if (error || data?.error) {
+        toast.error(data?.error || error?.message || 'Error al generar link');
+        return;
+      }
+      const url = `${window.location.origin}/magic-login?token=${data.token}`;
+      await navigator.clipboard.writeText(url);
+      setCopiedLink(userId);
+      toast.success('Magic link copiado al portapapeles (válido por 360 días)');
+      setTimeout(() => setCopiedLink(null), 3000);
+    } catch (err) {
+      toast.error('Error de conexión');
+    } finally {
+      setGeneratingLink(null);
+    }
+  };
 
   const handleCreateUser = async () => {
     if (!createEmail.trim() || !createPassword.trim()) {
@@ -307,17 +331,31 @@ const AdminUsuarios = () => {
                     {new Date(u.created_at).toLocaleDateString('es-VE')}
                   </TableCell>
                   <TableCell className="text-right">
-                    {hasPermission('usuarios.edit') && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => openEditDialog(u)}
-                        disabled={u.id === currentProfile?.id}
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </Button>
-                    )}
+                    <div className="flex items-center justify-end gap-0.5">
+                      {hasPermission('usuarios.edit') && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Generar Magic Link"
+                          onClick={() => handleGenerateMagicLink(u.id)}
+                          disabled={generatingLink === u.id}
+                        >
+                          {copiedLink === u.id ? <CheckIcon className="w-3 h-3 text-green-600" /> : generatingLink === u.id ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Link2 className="w-3 h-3" />}
+                        </Button>
+                      )}
+                      {hasPermission('usuarios.edit') && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => openEditDialog(u)}
+                          disabled={u.id === currentProfile?.id}
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

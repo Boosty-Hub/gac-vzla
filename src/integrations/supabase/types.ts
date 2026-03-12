@@ -196,6 +196,36 @@ export type Database = {
         }
         Relationships: []
       }
+      magic_links: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          expires_at: string
+          id: string
+          token: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          expires_at: string
+          id?: string
+          token?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string
+          id?: string
+          token?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       notifications: {
         Row: {
           created_at: string
@@ -522,18 +552,21 @@ export type Database = {
           description: string | null
           id: string
           name: string
+          redirect_portal: string
         }
         Insert: {
           created_at?: string
           description?: string | null
           id?: string
           name: string
+          redirect_portal?: string
         }
         Update: {
           created_at?: string
           description?: string | null
           id?: string
           name?: string
+          redirect_portal?: string
         }
         Relationships: []
       }

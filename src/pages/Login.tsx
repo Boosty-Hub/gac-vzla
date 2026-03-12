@@ -19,13 +19,13 @@ const Login = () => {
 
   // Redirect if already authenticated with a role
   if (user && role) {
-    const redirectMap: Record<string, string> = {
-      superadmin: '/admin',
+    const portalPaths: Record<string, string> = {
       admin: '/admin',
       concesionario: '/concesionario',
       cliente: '/usuario',
     };
-    return <Navigate to={redirectMap[role.name] || '/usuario'} replace />;
+    const portal = role.redirect_portal || role.name;
+    return <Navigate to={portalPaths[portal] || '/usuario'} replace />;
   }
 
   // Show loading only if we have a user but role hasn't loaded yet
