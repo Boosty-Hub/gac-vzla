@@ -75,7 +75,21 @@ const menuItems = [
 export default function AdminLayout({ children }: AdminLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, role, signOut } = useAuth();
+  const { profile, role, signOut, hasPermission } = useAuth();
+
+  // Filter menu items based on view permissions
+  const filteredMenuItems = menuItems
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => {
+        // Configuración is visible to admin/superadmin or if user has roles.view or usuarios.view
+        if (item.module === 'configuracion') {
+          return role?.name === 'superadmin' || role?.name === 'admin' || hasPermission('roles.view') || hasPermission('usuarios.view');
+        }
+        return hasPermission(`${item.module}.view`);
+      }),
+    }))
+    .filter(group => group.items.length > 0);
 
   const handleSignOut = async () => {
     await signOut();
