@@ -1,1 +1,7 @@
 project_id = "wsbuqiznddvxcwvpnbxm"
+
+[functions.generate-magic-link]
+verify_jwt = false
+
+[functions.verify-magic-link]
+verify_jwt = false
