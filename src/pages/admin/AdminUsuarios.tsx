@@ -339,6 +339,9 @@ const AdminUsuarios = () => {
                         <AvatarFallback className="text-[10px] bg-muted">{getInitials(u)}</AvatarFallback>
                       </Avatar>
                       <span className="font-medium">{u.full_name || 'Sin nombre'}</span>
+                      {u.pin_code && (
+                        <KeyRound className="w-3 h-3 text-primary" title={`PIN: ${u.pin_code}`} />
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{u.email}</TableCell>
