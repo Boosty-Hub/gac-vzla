@@ -27,6 +27,7 @@ import AdminRoles from "./pages/admin/config/AdminRoles";
 import AdminPermisos from "./pages/admin/config/AdminPermisos";
 import AdminServicios from './pages/admin/config/AdminServicios';
 import AdminCondicionesGarantia from './pages/admin/config/AdminCondicionesGarantia';
+import AdminGeneral from './pages/admin/config/AdminGeneral';
 import ConfigLayout from "./components/layouts/ConfigLayout";
 import PublicReserva from "./pages/PublicReserva";
 import NotFound from "./pages/NotFound";
@@ -80,7 +81,8 @@ const App = () => (
             <Route path="/admin/modelos" element={<AdminRoute><AdminModelos /></AdminRoute>} />
             <Route path="/admin/clientes" element={<AdminRoute><AdminClientes /></AdminRoute>} />
             <Route path="/admin/prospectos" element={<AdminRoute><AdminProspectos /></AdminRoute>} />
-            <Route path="/admin/configuracion" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminUsuarios /></ConfigLayout></ProtectedRoute>} />
+            <Route path="/admin/configuracion" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminGeneral /></ConfigLayout></ProtectedRoute>} />
+            <Route path="/admin/configuracion/general" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminGeneral /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/usuarios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminUsuarios /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/roles" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminRoles /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/permisos" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminPermisos /></ConfigLayout></ProtectedRoute>} />

@@ -7,79 +7,96 @@
 @layer base {
   :root {
     --background: 0 0% 98%;
-    --foreground: 220 20% 10%;
+    --foreground: 220 6% 11%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 20% 10%;
+    --card-foreground: 220 6% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 10%;
+    --popover-foreground: 220 6% 11%;
 
-    --primary: 358 78% 44%;
+    /* Primary = GAC/DFSK Red */
+    --primary: 356 95% 46%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 220 14% 96%;
-    --secondary-foreground: 220 20% 10%;
+    --secondary-foreground: 220 6% 11%;
 
     --muted: 220 14% 94%;
     --muted-foreground: 220 10% 46%;
 
     --accent: 220 14% 92%;
-    --accent-foreground: 220 20% 10%;
+    --accent-foreground: 220 6% 11%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 220 13% 90%;
     --input: 220 13% 90%;
-    --ring: 358 78% 44%;
+    --ring: 356 95% 46%;
 
     --radius: 0.625rem;
 
-    --sidebar-background: 220 20% 8%;
+    /* Sidebar — dark charcoal */
+    --sidebar-background: 220 6% 11%;
     --sidebar-foreground: 220 10% 85%;
-    --sidebar-primary: 358 78% 44%;
+    --sidebar-primary: 356 95% 46%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 15% 15%;
+    --sidebar-accent: 220 6% 16%;
     --sidebar-accent-foreground: 220 10% 85%;
-    --sidebar-border: 220 15% 18%;
-    --sidebar-ring: 358 78% 44%;
+    --sidebar-border: 220 6% 18%;
+    --sidebar-ring: 356 95% 46%;
 
-    /* GAC custom tokens */
-    --gac-red: 358 78% 44%;
-    --gac-red-light: 358 78% 55%;
-    --gac-charcoal: 220 20% 12%;
-    --gac-dark: 220 20% 8%;
-    --gac-silver: 220 10% 72%;
-    --gac-surface: 220 14% 97%;
-    --gac-success: 152 60% 40%;
-    --gac-warning: 38 92% 50%;
-    --gac-gradient: linear-gradient(135deg, hsl(358 78% 44%), hsl(358 78% 35%));
-    --gac-gradient-dark: linear-gradient(135deg, hsl(220 20% 8%), hsl(220 20% 14%));
-    --gac-shadow: 0 4px 24px -4px hsl(220 20% 10% / 0.12);
-    --gac-shadow-lg: 0 12px 40px -8px hsl(220 20% 10% / 0.18);
+    /* Brand tokens */
+    --imb-red: 356 95% 46%;
+    --imb-red-gac: 355 90% 48%;
+    --imb-red-dfsk: 356 96% 45%;
+    --imb-charcoal: 220 6% 11%;
+    --imb-dark: 220 6% 8%;
+    --imb-silver: 220 10% 72%;
+    --imb-surface: 220 14% 97%;
+    --imb-success: 152 60% 40%;
+    --imb-warning: 38 92% 50%;
+    --imb-gradient: linear-gradient(135deg, hsl(356 95% 46%), hsl(356 95% 36%));
+    --imb-gradient-dark: linear-gradient(135deg, hsl(220 6% 8%), hsl(220 6% 14%));
+    --imb-shadow: 0 4px 24px -4px hsl(220 6% 10% / 0.12);
+    --imb-shadow-lg: 0 12px 40px -8px hsl(220 6% 10% / 0.18);
+
+    /* Legacy aliases */
+    --gac-red: var(--imb-red);
+    --gac-red-light: 356 95% 55%;
+    --gac-charcoal: var(--imb-charcoal);
+    --gac-dark: var(--imb-dark);
+    --gac-silver: var(--imb-silver);
+    --gac-surface: var(--imb-surface);
+    --gac-success: var(--imb-success);
+    --gac-warning: var(--imb-warning);
+    --gac-gradient: var(--imb-gradient);
+    --gac-gradient-dark: var(--imb-gradient-dark);
+    --gac-shadow: var(--imb-shadow);
+    --gac-shadow-lg: var(--imb-shadow-lg);
   }
 
   .dark {
-    --background: 220 20% 6%;
+    --background: 220 6% 6%;
     --foreground: 220 10% 92%;
-    --card: 220 20% 10%;
+    --card: 220 6% 10%;
     --card-foreground: 220 10% 92%;
-    --popover: 220 20% 10%;
+    --popover: 220 6% 10%;
     --popover-foreground: 220 10% 92%;
-    --primary: 358 78% 50%;
+    --primary: 356 95% 50%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 220 15% 16%;
+    --secondary: 220 6% 16%;
     --secondary-foreground: 220 10% 92%;
-    --muted: 220 15% 16%;
+    --muted: 220 6% 16%;
     --muted-foreground: 220 10% 55%;
-    --accent: 220 15% 18%;
+    --accent: 220 6% 18%;
     --accent-foreground: 220 10% 92%;
     --destructive: 0 62% 30%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 15% 18%;
-    --input: 220 15% 18%;
-    --ring: 358 78% 50%;
+    --border: 220 6% 18%;
+    --input: 220 6% 18%;
+    --ring: 356 95% 50%;
   }
 }
 
@@ -99,34 +116,34 @@
 }
 
 @layer utilities {
-  .gac-gradient {
-    background: var(--gac-gradient);
+  .gac-gradient, .imb-gradient {
+    background: var(--imb-gradient);
   }
-  .gac-gradient-dark {
-    background: var(--gac-gradient-dark);
+  .gac-gradient-dark, .imb-gradient-dark {
+    background: var(--imb-gradient-dark);
   }
-  .gac-shadow {
-    box-shadow: var(--gac-shadow);
+  .gac-shadow, .imb-shadow {
+    box-shadow: var(--imb-shadow);
   }
-  .gac-shadow-lg {
-    box-shadow: var(--gac-shadow-lg);
+  .gac-shadow-lg, .imb-shadow-lg {
+    box-shadow: var(--imb-shadow-lg);
   }
   .text-gac-red {
-    color: hsl(var(--gac-red));
+    color: hsl(var(--imb-red));
   }
   .bg-gac-dark {
-    background-color: hsl(var(--gac-dark));
+    background-color: hsl(var(--imb-dark));
   }
   .bg-gac-charcoal {
-    background-color: hsl(var(--gac-charcoal));
+    background-color: hsl(var(--imb-charcoal));
   }
   .bg-gac-surface {
-    background-color: hsl(var(--gac-surface));
+    background-color: hsl(var(--imb-surface));
   }
   .text-gac-silver {
-    color: hsl(var(--gac-silver));
+    color: hsl(var(--imb-silver));
   }
   .border-gac-red {
-    border-color: hsl(var(--gac-red));
+    border-color: hsl(var(--imb-red));
   }
 }

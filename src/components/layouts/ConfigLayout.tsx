@@ -4,14 +4,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, Users, Shield, KeyRound, Settings, LogOut, Wrench, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Users, Shield, KeyRound, Settings, Wrench, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import imbLogo from '@/assets/imb-logo.png';
 
 interface ConfigLayoutProps {
   children: ReactNode;
 }
 
 const configMenu = [
+  { label: 'General', icon: SlidersHorizontal, path: '/admin/configuracion/general' },
   { label: 'Usuarios', icon: Users, path: '/admin/configuracion/usuarios' },
   { label: 'Roles', icon: Shield, path: '/admin/configuracion/roles' },
   { label: 'Permisos', icon: KeyRound, path: '/admin/configuracion/permisos' },
@@ -22,7 +24,7 @@ const configMenu = [
 export default function ConfigLayout({ children }: ConfigLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, role, signOut } = useAuth();
+  const { profile, role } = useAuth();
 
   const initials = profile?.full_name
     ? profile.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
@@ -30,7 +32,6 @@ export default function ConfigLayout({ children }: ConfigLayoutProps) {
 
   return (
     <div className="flex h-screen">
-      {/* Config sidebar */}
       <aside className="w-56 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col">
         <div className="p-4">
           <div className="flex items-center gap-3 mb-4">
@@ -39,7 +40,7 @@ export default function ConfigLayout({ children }: ConfigLayoutProps) {
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-display font-bold">Configuración</span>
-              <span className="text-xs text-sidebar-foreground/60">GAC Motor</span>
+              <span className="text-xs text-sidebar-foreground/60">IMB Movilidad</span>
             </div>
           </div>
         </div>
@@ -83,7 +84,6 @@ export default function ConfigLayout({ children }: ConfigLayoutProps) {
           </nav>
         </div>
 
-        {/* Footer */}
         <Separator className="bg-sidebar-border" />
         <div className="p-2">
           <div className="flex items-center gap-3 px-2 py-2">
@@ -100,7 +100,6 @@ export default function ConfigLayout({ children }: ConfigLayoutProps) {
         </div>
       </aside>
 
-      {/* Content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="flex h-14 items-center gap-4 border-b bg-background px-6 shrink-0">
           <h2 className="text-sm font-medium text-muted-foreground">

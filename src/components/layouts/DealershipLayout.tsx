@@ -24,9 +24,9 @@ import {
   CalendarDays,
   LogOut,
   Users,
-  Car,
   LayoutDashboard,
 } from 'lucide-react';
+import imbLogo from '@/assets/imb-logo.png';
 
 interface DealershipLayoutProps {
   children: ReactNode;
@@ -67,11 +67,9 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
       <Sidebar collapsible="icon">
         <SidebarHeader className="p-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <Car className="w-4 h-4" />
-            </div>
+            <img src={imbLogo} alt="IMB" className="w-8 h-8 rounded-lg object-contain brightness-0 invert" />
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-              <span className="text-sm font-display font-bold text-sidebar-foreground">GAC Motor</span>
+              <span className="text-sm font-display font-bold text-sidebar-foreground">IMB Movilidad</span>
               <span className="text-xs text-sidebar-foreground/60">Concesionario</span>
             </div>
           </div>
