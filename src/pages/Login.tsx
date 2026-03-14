@@ -211,7 +211,12 @@ const Login = () => {
                     <InputOTP
                       maxLength={4}
                       value={pinCode}
-                      onChange={handlePinLogin}
+                      onChange={(value) => {
+                        setPinCode(value);
+                        if (value.length === 4) {
+                          handlePinLogin(value);
+                        }
+                      }}
                       disabled={pinLoading}
                     >
                       <InputOTPGroup>
