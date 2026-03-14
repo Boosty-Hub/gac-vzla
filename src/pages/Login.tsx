@@ -185,13 +185,13 @@ const Login = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="pin" className="w-full">
+            <Tabs defaultValue="plate" className="w-full">
               <TabsList className="grid w-full grid-cols-3 mb-4">
-                <TabsTrigger value="pin" className="text-xs gap-1.5">
-                  <KeyRound className="w-3.5 h-3.5" /> PIN
-                </TabsTrigger>
                 <TabsTrigger value="plate" className="text-xs gap-1.5">
                   <Car className="w-3.5 h-3.5" /> Placa
+                </TabsTrigger>
+                <TabsTrigger value="pin" className="text-xs gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5" /> PIN
                 </TabsTrigger>
                 <TabsTrigger value="credentials" className="text-xs gap-1.5">
                   <Mail className="w-3.5 h-3.5" /> Correo
