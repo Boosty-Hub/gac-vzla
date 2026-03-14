@@ -173,6 +173,13 @@ const AdminUsuarios = () => {
       } else if (data?.error) {
         toast.error(data.error);
       } else {
+        // Save pin_code after user creation if provided
+        if (pinValue && data?.user_id) {
+          await supabase
+            .from('profiles')
+            .update({ pin_code: pinValue } as any)
+            .eq('id', data.user_id);
+        }
         toast.success('Usuario creado exitosamente');
         setCreateDialogOpen(false);
         fetchUsers();
