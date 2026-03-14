@@ -28,6 +28,7 @@ import AdminPermisos from "./pages/admin/config/AdminPermisos";
 import AdminServicios from './pages/admin/config/AdminServicios';
 import AdminCondicionesGarantia from './pages/admin/config/AdminCondicionesGarantia';
 import AdminGeneral from './pages/admin/config/AdminGeneral';
+import AdminPlantillas from './pages/admin/config/AdminPlantillas';
 import ConfigLayout from "./components/layouts/ConfigLayout";
 import PublicReserva from "./pages/PublicReserva";
 import NotFound from "./pages/NotFound";
