@@ -241,16 +241,35 @@ const AdminProspectos = () => {
     const st = PROSPECT_STATUSES.find(s => s.name === p.status) || FALLBACK_STATUS;
     const src = PROSPECT_SOURCES.find(s => s.value === p.source);
 
-    let message = `🚗 *Nuevo Prospecto Asignado*\n\n`;
-    message += `▪️ *Nombre:* ${p.name}\n`;
-    if (p.phone) message += `▪️ *Teléfono:* ${p.phone}\n`;
-    if (p.email) message += `▪️ *Email:* ${p.email}\n`;
-    if (p.model_interest) message += `▪️ *Modelo de interés:* ${p.model_interest}\n`;
-    message += `▪️ *Concesionario:* ${p.dealerships?.name || '-'}\n`;
-    message += `▪️ *Fuente:* ${src?.label || p.source}\n`;
-    message += `▪️ *Estado:* ${st.label}\n`;
-    if (p.notes) message += `▪️ *Notas:* ${p.notes}\n`;
-    message += `▪️ *Fecha:* ${new Date(p.created_at).toLocaleDateString('es-VE')}\n`;
+    // Fetch template from DB
+    let template = `🚗 *Nuevo Prospecto Asignado*\n\n▪️ *Nombre:* {{nombre}}\n{{#telefono}}▪️ *Teléfono:* {{telefono}}\n{{/telefono}}{{#email}}▪️ *Email:* {{email}}\n{{/email}}{{#modelo}}▪️ *Modelo de interés:* {{modelo}}\n{{/modelo}}{{#concesionario}}▪️ *Concesionario:* {{concesionario}}\n{{/concesionario}}▪️ *Fuente:* {{fuente}}\n▪️ *Estado:* {{estado}}\n{{#notas}}▪️ *Notas:* {{notas}}\n{{/notas}}▪️ *Fecha:* {{fecha}}`;
+    try {
+      const { data: tplData } = await supabase
+        .from('message_templates')
+        .select('content')
+        .eq('template_key', 'prospect_assigned')
+        .eq('is_active', true)
+        .single();
+      if (tplData?.content) template = tplData.content;
+    } catch { /* use default */ }
+
+    const vars: Record<string, string | undefined> = {
+      nombre: p.name,
+      telefono: p.phone || undefined,
+      email: p.email || undefined,
+      modelo: p.model_interest || undefined,
+      concesionario: p.dealerships?.name || undefined,
+      fuente: src?.label || p.source,
+      estado: st.label,
+      notas: p.notes || undefined,
+      fecha: new Date(p.created_at).toLocaleDateString('es-VE'),
+    };
+
+    // Process template
+    let message = template;
+    message = message.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key, content) => vars[key] ? content : '');
+    message = message.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '');
+    message = message.replace(/\n{3,}/g, '\n\n').trim();
 
     if (sp.profile_id) {
       try {

@@ -20,17 +20,32 @@ interface Template {
   is_active: boolean;
 }
 
-const AVAILABLE_VARS = [
-  { key: 'cliente', desc: 'Nombre del cliente' },
-  { key: 'fecha', desc: 'Fecha de la reserva' },
-  { key: 'hora', desc: 'Hora de la reserva' },
-  { key: 'servicio', desc: 'Tipo de servicio' },
-  { key: 'vehiculo', desc: 'Marca, modelo y año del vehículo' },
-  { key: 'placa', desc: 'Placa del vehículo' },
-  { key: 'concesionario', desc: 'Nombre del concesionario' },
-  { key: 'kilometraje', desc: 'Kilometraje actual' },
-  { key: 'notas', desc: 'Notas adicionales' },
-];
+const TEMPLATE_VAR_GROUPS: Record<string, { key: string; desc: string }[]> = {
+  reservation_confirmed: [
+    { key: 'cliente', desc: 'Nombre del cliente' },
+    { key: 'fecha', desc: 'Fecha de la reserva' },
+    { key: 'hora', desc: 'Hora de la reserva' },
+    { key: 'servicio', desc: 'Tipo de servicio' },
+    { key: 'vehiculo', desc: 'Marca, modelo y año del vehículo' },
+    { key: 'placa', desc: 'Placa del vehículo' },
+    { key: 'concesionario', desc: 'Nombre del concesionario' },
+    { key: 'kilometraje', desc: 'Kilometraje actual' },
+    { key: 'notas', desc: 'Notas adicionales' },
+  ],
+  prospect_assigned: [
+    { key: 'nombre', desc: 'Nombre del prospecto' },
+    { key: 'telefono', desc: 'Teléfono del prospecto' },
+    { key: 'email', desc: 'Email del prospecto' },
+    { key: 'modelo', desc: 'Modelo de interés' },
+    { key: 'concesionario', desc: 'Nombre del concesionario' },
+    { key: 'fuente', desc: 'Fuente del prospecto' },
+    { key: 'estado', desc: 'Estado del prospecto' },
+    { key: 'notas', desc: 'Notas del prospecto' },
+    { key: 'fecha', desc: 'Fecha de creación' },
+  ],
+};
+
+const ALL_VARS = Object.values(TEMPLATE_VAR_GROUPS).flat().filter((v, i, arr) => arr.findIndex(x => x.key === v.key) === i);
 
 function processPreview(template: string): string {
   const sampleVars: Record<string, string> = {
@@ -43,6 +58,12 @@ function processPreview(template: string): string {
     concesionario: 'Automotores La Florida C.A.',
     kilometraje: '30,000',
     notas: 'Revisar frenos traseros',
+    nombre: 'María González',
+    telefono: '0412-1234567',
+    email: 'maria@email.com',
+    modelo: 'GAC GS4 2025',
+    fuente: 'Instagram',
+    estado: 'Nuevo',
   };
 
   let result = template;
@@ -140,7 +161,7 @@ const AdminPlantillas = () => {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            {AVAILABLE_VARS.map(v => (
+            {ALL_VARS.map(v => (
               <Badge key={v.key} variant="outline" className="text-xs font-mono">
                 {`{{${v.key}}}`} <span className="ml-1 font-sans text-muted-foreground">– {v.desc}</span>
               </Badge>
