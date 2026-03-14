@@ -90,7 +90,7 @@ const DealershipProspectos = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchModels(); }, []);
+  
 
   useEffect(() => {
     if (loadingAccess) return;
