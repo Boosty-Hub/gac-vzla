@@ -32,7 +32,7 @@ Deno.serve(async (req) => {
       .select("id, client_id, is_active")
       .eq("plate", normalizedPlate)
       .eq("is_active", true)
-      .single();
+      .maybeSingle();
 
     if (vehicleError || !vehicle) {
       return new Response(
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     // 2. Look up client
     const { data: client, error: clientError } = await adminClient
       .from("clients")
-      .select("id, profile_id, full_name")
+      .select("id, profile_id, full_name, email, phone")
       .eq("id", vehicle.client_id)
       .eq("is_active", true)
       .maybeSingle();
@@ -56,8 +56,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Try profile_id from clients table, fallback to client_users table
+    // 3. Resolve profile_id — check clients table, then client_users, then auto-create
     let profileId = client.profile_id;
+
     if (!profileId) {
       const { data: clientUser } = await adminClient
         .from("client_users")
@@ -69,13 +70,59 @@ Deno.serve(async (req) => {
     }
 
     if (!profileId) {
-      return new Response(
-        JSON.stringify({ error: "Este cliente no tiene una cuenta de usuario vinculada. Contacte al administrador." }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      // Auto-create an auth account for this client
+      // Generate a deterministic email from client id if no real email exists
+      const autoEmail = client.email || `cliente-${client.id}@imb-movilidad.auto`;
+      const autoPassword = crypto.randomUUID(); // random password, login is via magic link only
+
+      // Get the 'cliente' role id
+      const { data: clienteRole } = await adminClient
+        .from("roles")
+        .select("id")
+        .eq("name", "cliente")
+        .maybeSingle();
+
+      // Create auth user
+      const { data: newUser, error: createError } = await adminClient.auth.admin.createUser({
+        email: autoEmail,
+        password: autoPassword,
+        email_confirm: true, // auto-confirm so magic link works
+        user_metadata: { full_name: client.full_name },
+      });
+
+      if (createError || !newUser?.user) {
+        console.error("Error creating auth user:", createError);
+        return new Response(
+          JSON.stringify({ error: "Error al crear cuenta de acceso para el cliente" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      profileId = newUser.user.id;
+
+      // Link client to the new profile — the handle_new_user trigger already creates the profile,
+      // but we need to update the clients table and create the client_users link
+      await adminClient
+        .from("clients")
+        .update({ profile_id: profileId, email: autoEmail })
+        .eq("id", client.id);
+
+      await adminClient
+        .from("client_users")
+        .insert({ client_id: client.id, profile_id: profileId });
+
+      // Ensure profile has cliente role
+      if (clienteRole?.id) {
+        await adminClient
+          .from("profiles")
+          .update({ role_id: clienteRole.id, full_name: client.full_name })
+          .eq("id", profileId);
+      }
+
+      console.log(`Auto-created auth account for client ${client.full_name} (${client.id})`);
     }
 
-    // 3. Get user email from auth
+    // 4. Get user email from auth
     const { data: userData, error: userError } = await adminClient.auth.admin.getUserById(profileId);
     if (userError || !userData?.user?.email) {
       return new Response(
@@ -84,7 +131,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    // 4. Generate a magic link to auto-login
+    // 5. Generate a magic link to auto-login
     const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
       type: "magiclink",
       email: userData.user.email,
