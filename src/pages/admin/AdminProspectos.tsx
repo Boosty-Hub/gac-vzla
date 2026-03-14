@@ -19,6 +19,8 @@ import { toast } from 'sonner';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import ProspectStatusManager from '@/components/ProspectStatusManager';
 import SalespersonManager from '@/components/SalespersonManager';
+import ProspectModelManager from '@/components/ProspectModelManager';
+import { useProspectModels } from '@/hooks/useProspectModels';
 import { useSalespersons } from '@/hooks/useSalespersons';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
