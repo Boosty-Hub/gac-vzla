@@ -185,15 +185,51 @@ const Login = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="credentials" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-4">
-                <TabsTrigger value="credentials" className="text-xs gap-1.5">
-                  <Mail className="w-3.5 h-3.5" /> Credenciales
+            <Tabs defaultValue="pin" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mb-4">
+                <TabsTrigger value="pin" className="text-xs gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5" /> PIN
                 </TabsTrigger>
                 <TabsTrigger value="plate" className="text-xs gap-1.5">
-                  <Car className="w-3.5 h-3.5" /> Placa del Vehículo
+                  <Car className="w-3.5 h-3.5" /> Placa
+                </TabsTrigger>
+                <TabsTrigger value="credentials" className="text-xs gap-1.5">
+                  <Mail className="w-3.5 h-3.5" /> Correo
                 </TabsTrigger>
               </TabsList>
+
+              <TabsContent value="pin">
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center mb-2">
+                    <KeyRound className="w-10 h-10 text-primary mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      Ingresa tu código PIN de 4 dígitos para acceder al sistema
+                    </p>
+                  </div>
+
+                  <div className="flex justify-center">
+                    <InputOTP
+                      maxLength={4}
+                      value={pinCode}
+                      onChange={handlePinLogin}
+                      disabled={pinLoading}
+                    >
+                      <InputOTPGroup>
+                        <InputOTPSlot index={0} className="w-14 h-14 text-2xl" />
+                        <InputOTPSlot index={1} className="w-14 h-14 text-2xl" />
+                        <InputOTPSlot index={2} className="w-14 h-14 text-2xl" />
+                        <InputOTPSlot index={3} className="w-14 h-14 text-2xl" />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+
+                  {pinLoading && (
+                    <div className="flex justify-center">
+                      <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
 
               <TabsContent value="credentials">
                 <form onSubmit={handleSubmit} className="space-y-4">
