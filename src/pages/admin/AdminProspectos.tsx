@@ -120,15 +120,6 @@ const AdminProspectos = () => {
     if (data) setDealerships(data);
   };
 
-  const fetchModels = async () => {
-    const { data } = await supabase
-      .from('vehicle_models')
-      .select('id, name, brand')
-      .eq('is_active', true)
-      .order('brand')
-      .order('name');
-    if (data) setVehicleModels(data as VehicleModel[]);
-  };
 
   const fetchProspects = async () => {
     setLoading(true);
