@@ -149,6 +149,11 @@ const AdminUsuarios = () => {
       toast.error('La contraseña debe tener al menos 6 caracteres');
       return;
     }
+    const pinValue = createPinCode.trim();
+    if (pinValue && !/^\d{4}$/.test(pinValue)) {
+      toast.error('El PIN debe ser de exactamente 4 dígitos numéricos');
+      return;
+    }
     setCreating(true);
 
     try {
@@ -159,6 +164,7 @@ const AdminUsuarios = () => {
           full_name: createFullName.trim() || null,
           role_id: createRoleId || null,
           dealership_id: getSelectedRoleName(createRoleId) === 'concesionario' ? createDealershipId || null : null,
+          pin_code: pinValue || null,
         },
       });
 
