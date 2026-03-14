@@ -111,6 +111,7 @@ const AdminUsuarios = () => {
     setCreateFullName('');
     setCreateRoleId('');
     setCreateDealershipId('');
+    setCreatePinCode('');
     setShowPassword(false);
     setCreateDialogOpen(true);
   };
