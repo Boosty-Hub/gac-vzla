@@ -24,6 +24,7 @@ interface ProfileWithRole {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  pin_code: string | null;
   roles: {
     id: string;
     name: string;
