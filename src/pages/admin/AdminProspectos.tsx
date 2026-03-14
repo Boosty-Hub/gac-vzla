@@ -25,11 +25,6 @@ import { useSalespersons } from '@/hooks/useSalespersons';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 
-interface VehicleModel {
-  id: string;
-  name: string;
-  brand: string;
-}
 
 interface Dealership {
   id: string;
