@@ -50,7 +50,7 @@ const AdminGeneral = () => {
     setUploading(config.key);
     try {
       const ext = file.name.split('.').pop();
-      const path = `branding/${config.key}.${ext}`;
+      const path = `${config.key}.${ext}`;
 
       const { error } = await supabase.storage
         .from('branding')
@@ -60,6 +60,16 @@ const AdminGeneral = () => {
         toast.error(`Error al subir ${config.label}: ${error.message}`);
       } else {
         toast.success(`${config.label} actualizado correctamente`);
+        // If favicon was uploaded, update it in the browser immediately
+        if (config.key === 'favicon') {
+          const { data } = supabase.storage.from('branding').getPublicUrl(path);
+          if (data?.publicUrl) {
+            const link = document.querySelector("link[rel='icon']") as HTMLLinkElement;
+            if (link) {
+              link.href = data.publicUrl + '?t=' + Date.now();
+            }
+          }
+        }
       }
     } catch (err) {
       toast.error('Error inesperado al subir archivo');
