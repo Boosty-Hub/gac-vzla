@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import NotificationCenter from '@/components/NotificationCenter';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -139,6 +140,9 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
           <h2 className="text-sm font-medium text-muted-foreground">
             {menuItems.flatMap(g => g.items).find(i => location.pathname === i.path || (i.path !== '/concesionario' && location.pathname.startsWith(i.path + '/')))?.label || 'Inicio'}
           </h2>
+          <div className="ml-auto">
+            <NotificationCenter />
+          </div>
         </header>
         <main className="flex-1 p-6">
           {children}
