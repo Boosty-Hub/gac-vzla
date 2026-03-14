@@ -5,8 +5,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Wrench, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
+import gacLogo from '@/assets/gac-logo.png';
+import dfskLogo from '@/assets/dfsk-logo.png';
+import imbLogo from '@/assets/imb-logo.png';
 
 const Login = () => {
   const { user, role, loading, signIn, signUp } = useAuth();
@@ -17,7 +20,6 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  // Redirect if already authenticated with a role
   if (user && role) {
     const portalPaths: Record<string, string> = {
       admin: '/admin',
@@ -28,7 +30,6 @@ const Login = () => {
     return <Navigate to={portalPaths[portal] || '/usuario'} replace />;
   }
 
-  // Show loading only if we have a user but role hasn't loaded yet
   if (user && !role && loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -75,20 +76,26 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="gac-gradient px-6 py-8 text-center">
-        <div className="max-w-md mx-auto flex items-center justify-center gap-3">
-          <Wrench className="w-7 h-7 text-primary-foreground" />
+      {/* Header with gradient */}
+      <header className="imb-gradient px-6 py-10 text-center relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_hsl(356_95%_46%/0.15),transparent_50%)]" />
+        <div className="relative max-w-lg mx-auto">
+          <div className="flex items-center justify-center gap-6 mb-3">
+            <img src={gacLogo} alt="GAC Motor" className="h-8 brightness-0 invert" />
+            <div className="w-px h-8 bg-primary-foreground/30" />
+            <img src={dfskLogo} alt="DFSK" className="h-7 brightness-0 invert" />
+          </div>
           <h1 className="text-2xl font-display font-bold text-primary-foreground tracking-tight">
-            GAC Motor Venezuela
+            IMB Movilidad
           </h1>
+          <p className="text-primary-foreground/70 text-sm mt-1">
+            Sistema de Gestión de Servicios y Reservas
+          </p>
         </div>
-        <p className="text-primary-foreground/80 text-sm mt-1">
-          Sistema de Gestión de Servicios y Reservas
-        </p>
       </header>
 
       <main className="flex-1 flex items-start justify-center px-4 py-10">
-        <Card className="w-full max-w-md gac-shadow">
+        <Card className="w-full max-w-md imb-shadow">
           <CardHeader className="text-center pb-4">
             <CardTitle className="font-display text-xl">
               {isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'}
@@ -159,7 +166,7 @@ const Login = () => {
                 </div>
               </div>
 
-              <Button type="submit" className="w-full gac-gradient" disabled={submitting}>
+              <Button type="submit" className="w-full imb-gradient" disabled={submitting}>
                 {submitting ? (
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                 ) : isLogin ? (
@@ -184,7 +191,11 @@ const Login = () => {
       </main>
 
       <footer className="bg-muted py-4 text-center text-xs text-muted-foreground">
-        © 2025 GAC Motor Venezuela · Sistema de Gestión de Servicios
+        <div className="flex items-center justify-center gap-4 mb-1">
+          <img src={gacLogo} alt="GAC" className="h-4 opacity-40" />
+          <img src={dfskLogo} alt="DFSK" className="h-3.5 opacity-40" />
+        </div>
+        © 2025 IMB Movilidad · GAC Motor & DFSK Venezuela
       </footer>
     </div>
   );

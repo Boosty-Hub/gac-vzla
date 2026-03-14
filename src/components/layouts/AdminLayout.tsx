@@ -28,18 +28,17 @@ import {
   MapPin,
   ShieldCheck,
   Users,
-  Wrench,
   ClipboardList,
   Settings,
   BookOpen,
   UserCheck,
 } from 'lucide-react';
+import imbLogo from '@/assets/imb-logo.png';
 
 interface AdminLayoutProps {
   children: ReactNode;
 }
 
-// Each item has a `module` for permission checking (module.view)
 const menuItems = [
   {
     group: 'General',
@@ -78,12 +77,10 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const location = useLocation();
   const { profile, role, signOut, hasPermission } = useAuth();
 
-  // Filter menu items based on view permissions
   const filteredMenuItems = menuItems
     .map(group => ({
       ...group,
       items: group.items.filter(item => {
-        // Configuración is visible to admin/superadmin or if user has roles.view or usuarios.view
         if (item.module === 'configuracion') {
           return role?.name === 'superadmin' || role?.name === 'admin' || hasPermission('roles.view') || hasPermission('usuarios.view');
         }
@@ -92,7 +89,6 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     }))
     .filter(group => group.items.length > 0);
 
-  // If user is on /admin (dashboard) but doesn't have permission, redirect to first available route
   const allFilteredItems = filteredMenuItems.flatMap(g => g.items);
   if (location.pathname === '/admin' && !hasPermission('dashboard.view') && allFilteredItems.length > 0) {
     return <Navigate to={allFilteredItems[0].path} replace />;
@@ -112,11 +108,9 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       <Sidebar collapsible="icon">
         <SidebarHeader className="p-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <Wrench className="w-4 h-4" />
-            </div>
+            <img src={imbLogo} alt="IMB" className="w-8 h-8 rounded-lg object-contain brightness-0 invert" />
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-              <span className="text-sm font-display font-bold text-sidebar-foreground">GAC Motor</span>
+              <span className="text-sm font-display font-bold text-sidebar-foreground">IMB Movilidad</span>
               <span className="text-xs text-sidebar-foreground/60">Panel Admin</span>
             </div>
           </div>
