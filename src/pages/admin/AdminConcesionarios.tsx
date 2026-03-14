@@ -147,6 +147,14 @@ const AdminConcesionarios = () => {
     setSaving(false);
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const { error } = await supabase.from('dealerships').delete().eq('id', deleteTarget.id);
+    if (error) { toast.error('Error al eliminar: ' + error.message); console.error(error); }
+    else { toast.success('Concesionario eliminado'); fetchDealerships(); }
+    setDeleteTarget(null);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
