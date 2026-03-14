@@ -455,6 +455,9 @@ const AdminProspectos = () => {
           <Button size="sm" variant="outline" onClick={() => setSalespersonManagerOpen(true)} className="gap-1">
             <UserCog className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Vendedores</span>
           </Button>
+          <Button size="sm" variant="outline" onClick={() => setModelManagerOpen(true)} className="gap-1">
+            <Car className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Modelos</span>
+          </Button>
           {canCreate && (
             <>
               <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1 hidden sm:flex">
