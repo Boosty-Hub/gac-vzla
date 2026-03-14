@@ -81,14 +81,17 @@ const AdminGeneral = () => {
         toast.error(`Error al subir ${config.label}: ${error.message}`);
       } else {
         toast.success(`${config.label} actualizado correctamente`);
-        // If favicon was uploaded, update it in the browser immediately
-        if (config.key === 'favicon') {
-          const { data } = supabase.storage.from('branding').getPublicUrl(path);
-          if (data?.publicUrl) {
+
+        // Update resolved URL for preview
+        const { data: urlData } = supabase.storage.from('branding').getPublicUrl(path);
+        if (urlData?.publicUrl) {
+          const freshUrl = urlData.publicUrl + '?t=' + Date.now();
+          setResolvedUrls(prev => ({ ...prev, [config.key]: freshUrl }));
+
+          // If favicon, also update the browser tab icon
+          if (config.key === 'favicon') {
             const link = document.querySelector("link[rel='icon']") as HTMLLinkElement;
-            if (link) {
-              link.href = data.publicUrl + '?t=' + Date.now();
-            }
+            if (link) link.href = freshUrl;
           }
         }
       }
