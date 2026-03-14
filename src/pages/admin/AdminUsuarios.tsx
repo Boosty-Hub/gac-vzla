@@ -52,6 +52,7 @@ const AdminUsuarios = () => {
   const [editFullName, setEditFullName] = useState('');
   const [editRoleId, setEditRoleId] = useState('');
   const [editIsActive, setEditIsActive] = useState(true);
+  const [editPinCode, setEditPinCode] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Create dialog state
