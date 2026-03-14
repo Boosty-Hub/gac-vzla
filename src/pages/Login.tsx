@@ -26,6 +26,10 @@ const Login = () => {
   const [plate, setPlate] = useState('');
   const [plateLoading, setPlateLoading] = useState(false);
 
+  // PIN login state
+  const [pinCode, setPinCode] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
+
   if (user && role) {
     const portalPaths: Record<string, string> = {
       admin: '/admin',
