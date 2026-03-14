@@ -133,7 +133,6 @@ const AdminProspectos = () => {
 
   useEffect(() => {
     fetchDealerships();
-    fetchModels();
     fetchProspects();
   }, []);
 
