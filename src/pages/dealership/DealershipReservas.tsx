@@ -15,6 +15,7 @@ import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, Clipbo
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
+import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 
 interface Reservation {
   id: string;

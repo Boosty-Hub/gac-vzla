@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 
 interface Dealership {
   id: string;
