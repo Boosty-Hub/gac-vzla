@@ -242,11 +242,18 @@ const AdminConcesionarios = () => {
                     </Badge>
                   </TableCell>
                     <TableCell className="text-right">
-                      {canEdit && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); openEdit(d); }}>
-                          <Pencil className="w-3 h-3" />
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-0.5">
+                        {canEdit && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); openEdit(d); }}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget(d); }}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                 </TableRow>
               ))}
