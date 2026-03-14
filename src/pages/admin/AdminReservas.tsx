@@ -11,9 +11,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle } from 'lucide-react';
+import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 
 interface Dealership {
   id: string;
@@ -54,7 +55,7 @@ interface Reservation {
   status: string;
   notes: string | null;
   dealerships: { id: string; name: string; city: string | null } | null;
-  clients: { full_name: string; cedula: string | null } | null;
+  clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
 
@@ -147,7 +148,7 @@ const AdminReservas = () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, dealerships(id, name, city), clients(full_name, cedula), vehicles(plate, year, vehicle_models(name, brand))');
+      .select('*, dealerships(id, name, city), clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand))');
 
     if (view === 'matrix') {
       query = query.eq('reservation_date', selectedDate);
@@ -506,11 +507,36 @@ const AdminReservas = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      {canEdit && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
-                          <Pencil className="w-3 h-3" />
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-0.5">
+                        {r.status === 'confirmada' && r.clients?.phone && (() => {
+                          const waUrl = buildWhatsAppReservationUrl({
+                            phone: r.clients.phone,
+                            clientName: r.clients.full_name,
+                            date: r.reservation_date,
+                            time: r.reservation_time,
+                            serviceType: r.service_type,
+                            vehicleBrand: r.vehicles?.vehicle_models?.brand,
+                            vehicleModel: r.vehicles?.vehicle_models?.name,
+                            vehicleYear: r.vehicles?.year,
+                            vehiclePlate: r.vehicles?.plate || undefined,
+                            dealershipName: r.dealerships?.name || undefined,
+                            mileage: r.current_mileage,
+                            notes: r.notes || undefined,
+                          });
+                          return waUrl ? (
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:text-green-700" asChild>
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp de confirmación">
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              </a>
+                            </Button>
+                          ) : null;
+                        })()}
+                        {canEdit && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
