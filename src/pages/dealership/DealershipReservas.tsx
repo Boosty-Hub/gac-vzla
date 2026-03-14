@@ -365,6 +365,32 @@ const DealershipReservas = () => {
                     <TableCell><Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge></TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {r.status === 'confirmada' && (r.clients?.phone || r.walkin_client_phone) && (() => {
+                          const phone = r.clients?.phone || r.walkin_client_phone || '';
+                          const name = r.clients?.full_name || r.walkin_client_name || 'Cliente';
+                          const dealerName = dealerships.find(d => d.id === selectedDealership)?.name;
+                          const waUrl = buildWhatsAppReservationUrl({
+                            phone,
+                            clientName: name,
+                            date: r.reservation_date,
+                            time: r.reservation_time,
+                            serviceType: r.service_type,
+                            vehicleBrand: r.vehicles?.vehicle_models?.brand,
+                            vehicleModel: r.vehicles?.vehicle_models?.name,
+                            vehicleYear: r.vehicles?.year,
+                            vehiclePlate: r.vehicles?.plate || r.walkin_plate || undefined,
+                            dealershipName: dealerName,
+                            mileage: r.current_mileage,
+                            notes: r.notes || undefined,
+                          });
+                          return waUrl ? (
+                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600 hover:text-green-700" asChild onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp">
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              </a>
+                            </Button>
+                          ) : null;
+                        })()}
                         {r.status === 'pendiente' && <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'confirmada'); }}>Confirmar</Button>}
                         {r.status === 'confirmada' && <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'en_proceso'); }}>Iniciar</Button>}
                         {r.status === 'en_proceso' && <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); openComplete(r); }}><ClipboardCheck className="w-3 h-3" /> Completar</Button>}
