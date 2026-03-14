@@ -19,6 +19,7 @@ const configMenu = [
   { label: 'Permisos', icon: KeyRound, path: '/admin/configuracion/permisos' },
   { label: 'Servicios', icon: Wrench, path: '/admin/configuracion/servicios' },
   { label: 'Garantías', icon: ShieldCheck, path: '/admin/configuracion/garantias' },
+  { label: 'Plantillas', icon: MessageCircle, path: '/admin/configuracion/plantillas' },
 ];
 
 export default function ConfigLayout({ children }: ConfigLayoutProps) {
