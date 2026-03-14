@@ -53,7 +53,7 @@ const AdminGeneral = () => {
       const path = `branding/${config.key}.${ext}`;
 
       const { error } = await supabase.storage
-        .from('public')
+        .from('branding')
         .upload(path, file, { upsert: true });
 
       if (error) {
