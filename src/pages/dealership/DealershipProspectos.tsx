@@ -70,15 +70,6 @@ const DealershipProspectos = () => {
   const [pNotes, setPNotes] = useState('');
   const [pSalesperson, setPSalesperson] = useState('');
 
-  const fetchModels = async () => {
-    const { data } = await supabase
-      .from('vehicle_models')
-      .select('id, name, brand')
-      .eq('is_active', true)
-      .order('brand')
-      .order('name');
-    if (data) setVehicleModels(data as VehicleModel[]);
-  };
 
   const fetchProspects = async () => {
     if (!selectedDealership) return;
