@@ -58,6 +58,12 @@ function processPreview(template: string): string {
     concesionario: 'Automotores La Florida C.A.',
     kilometraje: '30,000',
     notas: 'Revisar frenos traseros',
+    nombre: 'María González',
+    telefono: '0412-1234567',
+    email: 'maria@email.com',
+    modelo: 'GAC GS4 2025',
+    fuente: 'Instagram',
+    estado: 'Nuevo',
   };
 
   let result = template;
