@@ -18,6 +18,7 @@ import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useSalespersons } from '@/hooks/useSalespersons';
 import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useProspectModels } from '@/hooks/useProspectModels';
 
 interface VehicleModel {
   id: string;
