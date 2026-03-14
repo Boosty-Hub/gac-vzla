@@ -54,7 +54,7 @@ interface Reservation {
   status: string;
   notes: string | null;
   dealerships: { id: string; name: string; city: string | null } | null;
-  clients: { full_name: string; cedula: string | null } | null;
+  clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
 
