@@ -439,6 +439,24 @@ const AdminUsuarios = () => {
                 </div>
                 <Switch checked={editIsActive} onCheckedChange={setEditIsActive} />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editPinCode" className="flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5" /> Código PIN (4 dígitos)
+                </Label>
+                <Input
+                  id="editPinCode"
+                  value={editPinCode}
+                  onChange={e => {
+                    const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                    setEditPinCode(v);
+                  }}
+                  placeholder="Ej: 1234"
+                  maxLength={4}
+                  className="font-mono text-lg tracking-widest"
+                />
+                <p className="text-xs text-muted-foreground">PIN para inicio de sesión rápido. Dejar vacío para deshabilitar.</p>
+              </div>
             </div>
           )}
           <DialogFooter>
