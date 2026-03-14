@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import NotificationCenter from '@/components/NotificationCenter';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
