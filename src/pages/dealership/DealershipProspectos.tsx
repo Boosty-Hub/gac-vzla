@@ -20,11 +20,6 @@ import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useProspectModels } from '@/hooks/useProspectModels';
 
-interface VehicleModel {
-  id: string;
-  name: string;
-  brand: string;
-}
 
 interface Prospect {
   id: string;
