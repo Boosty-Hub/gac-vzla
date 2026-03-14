@@ -44,8 +44,29 @@ const logoConfigs: LogoConfig[] = [
 
 const AdminGeneral = () => {
   const [uploading, setUploading] = useState<string | null>(null);
+  const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
+  // Load actual images from branding bucket
+  useEffect(() => {
+    const loadBrandingImages = async () => {
+      const { data: files } = await supabase.storage.from('branding').list();
+      if (!files) return;
+
+      const urls: Record<string, string> = {};
+      for (const config of logoConfigs) {
+        const match = files.find(f => f.name.startsWith(config.key + '.'));
+        if (match) {
+          const { data } = supabase.storage.from('branding').getPublicUrl(match.name);
+          if (data?.publicUrl) {
+            urls[config.key] = data.publicUrl + '?t=' + new Date(match.updated_at).getTime();
+          }
+        }
+      }
+      setResolvedUrls(urls);
+    };
+    loadBrandingImages();
+  }, []);
   const handleUpload = async (config: LogoConfig, file: File) => {
     setUploading(config.key);
     try {
