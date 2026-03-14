@@ -8,10 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2 } from 'lucide-react';
+import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Dealership {
@@ -37,6 +38,7 @@ const AdminConcesionarios = () => {
   const { hasPermission } = useAuth();
   const canCreate = hasPermission('concesionarios.create');
   const canEdit = hasPermission('concesionarios.edit');
+  const canDelete = hasPermission('concesionarios.delete');
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -44,6 +46,7 @@ const AdminConcesionarios = () => {
   const [editing, setEditing] = useState<Dealership | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailDealer, setDetailDealer] = useState<Dealership | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Dealership | null>(null);
 
   const [filterBrand, setFilterBrand] = useState('todos');
 
@@ -144,6 +147,14 @@ const AdminConcesionarios = () => {
     setSaving(false);
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const { error } = await supabase.from('dealerships').delete().eq('id', deleteTarget.id);
+    if (error) { toast.error('Error al eliminar: ' + error.message); console.error(error); }
+    else { toast.success('Concesionario eliminado'); fetchDealerships(); }
+    setDeleteTarget(null);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -231,11 +242,18 @@ const AdminConcesionarios = () => {
                     </Badge>
                   </TableCell>
                     <TableCell className="text-right">
-                      {canEdit && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); openEdit(d); }}>
-                          <Pencil className="w-3 h-3" />
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-0.5">
+                        {canEdit && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); openEdit(d); }}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget(d); }}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                 </TableRow>
               ))}
@@ -320,6 +338,11 @@ const AdminConcesionarios = () => {
             </div>
           )}
           <DialogFooter>
+            {canDelete && detailDealer && (
+              <Button variant="destructive" size="sm" className="mr-auto" onClick={() => { setDetailOpen(false); setDeleteTarget(detailDealer); }}>
+                <Trash2 className="w-3.5 h-3.5 mr-1" /> Eliminar
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setDetailOpen(false)}>Cerrar</Button>
             {canEdit && (
               <Button className="imb-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
@@ -418,6 +441,24 @@ const AdminConcesionarios = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar concesionario?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará permanentemente <strong>{deleteTarget?.name}</strong>. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
