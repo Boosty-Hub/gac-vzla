@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Plus, Trash2, Pencil, X, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -32,6 +32,7 @@ const ProspectModelManager = ({ open, onOpenChange, onModelsChanged }: Props) =>
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBrand, setEditBrand] = useState('');
   const [editName, setEditName] = useState('');
+  const [filterBrand, setFilterBrand] = useState<string>('all');
 
   const fetchAll = async () => {
     setLoading(true);
@@ -45,6 +46,13 @@ const ProspectModelManager = ({ open, onOpenChange, onModelsChanged }: Props) =>
   };
 
   useEffect(() => { if (open) fetchAll(); }, [open]);
+
+  const brands = useMemo(() => Array.from(new Set(models.map(m => m.brand))).sort(), [models]);
+
+  const filteredModels = useMemo(() =>
+    filterBrand === 'all' ? models : models.filter(m => m.brand === filterBrand),
+    [models, filterBrand]
+  );
 
   const handleAdd = async () => {
     if (!newBrand.trim() || !newName.trim()) { toast.error('Marca y nombre son requeridos'); return; }
@@ -103,8 +111,25 @@ const ProspectModelManager = ({ open, onOpenChange, onModelsChanged }: Props) =>
           </Button>
         </div>
 
+        {/* Brand filter */}
+        <div className="flex items-center gap-2">
+          <Label className="text-xs text-muted-foreground">Filtrar:</Label>
+          <Select value={filterBrand} onValueChange={setFilterBrand}>
+            <SelectTrigger className="h-8 text-xs w-[160px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas las marcas</SelectItem>
+              {brands.map(b => (
+                <SelectItem key={b} value={b}>{b}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-muted-foreground ml-auto">{filteredModels.length} modelos</span>
+        </div>
+
         {/* List */}
-        <ScrollArea className="flex-1 min-h-0 max-h-[50vh]">
+        <div className="flex-1 min-h-0 overflow-y-auto border rounded-md">
           <Table className="text-xs">
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px]">
@@ -114,7 +139,7 @@ const ProspectModelManager = ({ open, onOpenChange, onModelsChanged }: Props) =>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {models.map(m => (
+              {filteredModels.map(m => (
                 <TableRow key={m.id} className="[&>td]:py-1">
                   {editingId === m.id ? (
                     <>
@@ -153,7 +178,7 @@ const ProspectModelManager = ({ open, onOpenChange, onModelsChanged }: Props) =>
                   )}
                 </TableRow>
               ))}
-              {models.length === 0 && !loading && (
+              {filteredModels.length === 0 && !loading && (
                 <TableRow>
                   <TableCell colSpan={3} className="text-center text-muted-foreground py-4">
                     No hay modelos configurados
@@ -162,7 +187,7 @@ const ProspectModelManager = ({ open, onOpenChange, onModelsChanged }: Props) =>
               )}
             </TableBody>
           </Table>
-        </ScrollArea>
+        </div>
       </DialogContent>
     </Dialog>
   );
