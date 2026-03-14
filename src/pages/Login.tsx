@@ -5,11 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Mail, Lock, User, Eye, EyeOff, Car } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
-import imbLogo from '@/assets/imb-logo.png';
 
 const Login = () => {
   const { user, role, loading, signIn, signUp } = useAuth();
@@ -19,6 +20,10 @@ const Login = () => {
   const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Plate login state
+  const [plate, setPlate] = useState('');
+  const [plateLoading, setPlateLoading] = useState(false);
 
   if (user && role) {
     const portalPaths: Record<string, string> = {
@@ -74,9 +79,45 @@ const Login = () => {
     }
   };
 
+  const handlePlateLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!plate.trim()) {
+      toast.error('Ingresa la placa de tu vehículo');
+      return;
+    }
+    setPlateLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('login-by-plate', {
+        body: { plate: plate.trim() },
+      });
+
+      if (error || data?.error) {
+        toast.error(data?.error || 'Error al buscar la placa');
+        setPlateLoading(false);
+        return;
+      }
+
+      // Verify the OTP to establish the session
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: data.token_hash,
+        type: 'magiclink',
+      });
+
+      if (verifyError) {
+        toast.error('Error al iniciar sesión: ' + verifyError.message);
+      } else {
+        toast.success(`Bienvenido, ${data.client_name || 'Cliente'}`);
+      }
+    } catch (err) {
+      toast.error('Error inesperado al iniciar sesión');
+    } finally {
+      setPlateLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {/* Header with gradient */}
       <header className="imb-gradient px-6 py-10 text-center relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_hsl(356_95%_46%/0.15),transparent_50%)]" />
         <div className="relative max-w-lg mx-auto">
@@ -96,96 +137,141 @@ const Login = () => {
 
       <main className="flex-1 flex items-start justify-center px-4 py-10">
         <Card className="w-full max-w-md imb-shadow">
-          <CardHeader className="text-center pb-4">
-            <CardTitle className="font-display text-xl">
-              {isLogin ? 'Iniciar Sesión' : 'Crear Cuenta'}
-            </CardTitle>
+          <CardHeader className="text-center pb-2">
+            <CardTitle className="font-display text-xl">Acceder al Sistema</CardTitle>
             <CardDescription>
-              {isLogin
-                ? 'Ingresa tus credenciales para acceder al sistema'
-                : 'Completa los datos para registrarte'}
+              Inicia sesión con tus credenciales o con la placa de tu vehículo
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {!isLogin && (
-                <div className="space-y-2">
-                  <Label htmlFor="fullName">Nombre Completo</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                    <Input
-                      id="fullName"
-                      type="text"
-                      placeholder="Juan Pérez"
-                      value={fullName}
-                      onChange={(e) => setFullName(e.target.value)}
-                      className="pl-9"
-                      required={!isLogin}
-                    />
+            <Tabs defaultValue="credentials" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="credentials" className="text-xs gap-1.5">
+                  <Mail className="w-3.5 h-3.5" /> Credenciales
+                </TabsTrigger>
+                <TabsTrigger value="plate" className="text-xs gap-1.5">
+                  <Car className="w-3.5 h-3.5" /> Placa del Vehículo
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="credentials">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {!isLogin && (
+                    <div className="space-y-2">
+                      <Label htmlFor="fullName">Nombre Completo</Label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input
+                          id="fullName"
+                          type="text"
+                          placeholder="Juan Pérez"
+                          value={fullName}
+                          onChange={(e) => setFullName(e.target.value)}
+                          className="pl-9"
+                          required={!isLogin}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Correo Electrónico</Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="correo@ejemplo.com"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="pl-9"
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
 
-              <div className="space-y-2">
-                <Label htmlFor="email">Correo Electrónico</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="correo@ejemplo.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="pl-9"
-                    required
-                  />
-                </div>
-              </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="password">Contraseña</Label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        id="password"
+                        type={showPassword ? 'text' : 'password'}
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="pl-9 pr-10"
+                        required
+                        minLength={6}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="password">Contraseña</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="pl-9 pr-10"
-                    required
-                    minLength={6}
-                  />
+                  <Button type="submit" className="w-full imb-gradient" disabled={submitting}>
+                    {submitting ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : isLogin ? (
+                      'Iniciar Sesión'
+                    ) : (
+                      'Crear Cuenta'
+                    )}
+                  </Button>
+                </form>
+
+                <div className="mt-4 text-center">
                   <button
                     type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setIsLogin(!isLogin)}
+                    className="text-sm text-primary hover:underline"
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    {isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
                   </button>
                 </div>
-              </div>
+              </TabsContent>
 
-              <Button type="submit" className="w-full imb-gradient" disabled={submitting}>
-                {submitting ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : isLogin ? (
-                  'Iniciar Sesión'
-                ) : (
-                  'Crear Cuenta'
-                )}
-              </Button>
-            </form>
+              <TabsContent value="plate">
+                <form onSubmit={handlePlateLogin} className="space-y-4">
+                  <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center mb-2">
+                    <Car className="w-10 h-10 text-primary mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      Ingresa la placa de tu vehículo para acceder directamente a tu portal de cliente
+                    </p>
+                  </div>
 
-            <div className="mt-4 text-center">
-              <button
-                type="button"
-                onClick={() => setIsLogin(!isLogin)}
-                className="text-sm text-primary hover:underline"
-              >
-                {isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
-              </button>
-            </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="plate">Placa del Vehículo</Label>
+                    <div className="relative">
+                      <Car className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        id="plate"
+                        type="text"
+                        placeholder="ABC123"
+                        value={plate}
+                        onChange={(e) => setPlate(e.target.value.toUpperCase())}
+                        className="pl-9 uppercase font-mono text-lg tracking-widest"
+                        required
+                        maxLength={10}
+                      />
+                    </div>
+                  </div>
+
+                  <Button type="submit" className="w-full imb-gradient" disabled={plateLoading}>
+                    {plateLoading ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      'Acceder con mi Placa'
+                    )}
+                  </Button>
+                </form>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </main>
