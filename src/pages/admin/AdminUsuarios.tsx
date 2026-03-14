@@ -195,13 +195,20 @@ const AdminUsuarios = () => {
     if (!editingUser) return;
     setSaving(true);
 
+    const pinValue = editPinCode.trim();
+    if (pinValue && !/^\d{4}$/.test(pinValue)) {
+      toast.error('El PIN debe ser de exactamente 4 dígitos numéricos');
+      return;
+    }
+
     const { error } = await supabase
       .from('profiles')
       .update({
         full_name: editFullName,
         role_id: editRoleId || null,
         is_active: editIsActive,
-      })
+        pin_code: pinValue || null,
+      } as any)
       .eq('id', editingUser.id);
 
     if (error) {
