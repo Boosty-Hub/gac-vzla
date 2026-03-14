@@ -66,10 +66,11 @@ const AdminProspectos = () => {
   const canCreate = hasPermission('prospectos.create');
   const canEdit = hasPermission('prospectos.edit');
   const canDelete = hasPermission('prospectos.delete');
+  const { models: prospectModels, brands: prospectBrands, fetchModels: refetchProspectModels } = useProspectModels();
   const [statusManagerOpen, setStatusManagerOpen] = useState(false);
   const [salespersonManagerOpen, setSalespersonManagerOpen] = useState(false);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
-  const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
 
