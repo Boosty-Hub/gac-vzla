@@ -62,6 +62,7 @@ const AdminUsuarios = () => {
   const [createFullName, setCreateFullName] = useState('');
   const [createRoleId, setCreateRoleId] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createPinCode, setCreatePinCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [createDealershipId, setCreateDealershipId] = useState('');
   const [generatingLink, setGeneratingLink] = useState<string | null>(null);
