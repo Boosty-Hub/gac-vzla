@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,8 +44,29 @@ const logoConfigs: LogoConfig[] = [
 
 const AdminGeneral = () => {
   const [uploading, setUploading] = useState<string | null>(null);
+  const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
   const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
+  // Load actual images from branding bucket
+  useEffect(() => {
+    const loadBrandingImages = async () => {
+      const { data: files } = await supabase.storage.from('branding').list();
+      if (!files) return;
+
+      const urls: Record<string, string> = {};
+      for (const config of logoConfigs) {
+        const match = files.find(f => f.name.startsWith(config.key + '.'));
+        if (match) {
+          const { data } = supabase.storage.from('branding').getPublicUrl(match.name);
+          if (data?.publicUrl) {
+            urls[config.key] = data.publicUrl + '?t=' + new Date(match.updated_at).getTime();
+          }
+        }
+      }
+      setResolvedUrls(urls);
+    };
+    loadBrandingImages();
+  }, []);
   const handleUpload = async (config: LogoConfig, file: File) => {
     setUploading(config.key);
     try {
@@ -60,14 +81,17 @@ const AdminGeneral = () => {
         toast.error(`Error al subir ${config.label}: ${error.message}`);
       } else {
         toast.success(`${config.label} actualizado correctamente`);
-        // If favicon was uploaded, update it in the browser immediately
-        if (config.key === 'favicon') {
-          const { data } = supabase.storage.from('branding').getPublicUrl(path);
-          if (data?.publicUrl) {
+
+        // Update resolved URL for preview
+        const { data: urlData } = supabase.storage.from('branding').getPublicUrl(path);
+        if (urlData?.publicUrl) {
+          const freshUrl = urlData.publicUrl + '?t=' + Date.now();
+          setResolvedUrls(prev => ({ ...prev, [config.key]: freshUrl }));
+
+          // If favicon, also update the browser tab icon
+          if (config.key === 'favicon') {
             const link = document.querySelector("link[rel='icon']") as HTMLLinkElement;
-            if (link) {
-              link.href = data.publicUrl + '?t=' + Date.now();
-            }
+            if (link) link.href = freshUrl;
           }
         }
       }
@@ -115,7 +139,7 @@ const AdminGeneral = () => {
               <div className="flex items-start gap-6">
                 <div className="w-24 h-24 rounded-lg border-2 border-dashed border-border flex items-center justify-center bg-muted/50 shrink-0 overflow-hidden">
                   <img
-                    src={config.defaultSrc}
+                    src={resolvedUrls[config.key] || config.defaultSrc}
                     alt={config.label}
                     className="max-w-full max-h-full object-contain p-2"
                   />
