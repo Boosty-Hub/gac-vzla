@@ -26,6 +26,7 @@ interface Dealership {
   is_active: boolean;
   brand: string;
   type: string;
+  is_service_center: boolean;
   email: string | null;
   instagram: string | null;
   website: string | null;
@@ -45,7 +46,6 @@ const AdminConcesionarios = () => {
   const [detailDealer, setDetailDealer] = useState<Dealership | null>(null);
 
   const [filterBrand, setFilterBrand] = useState('todos');
-  const [filterType, setFilterType] = useState('todos');
 
   // Form
   const [formName, setFormName] = useState('');
@@ -57,7 +57,7 @@ const AdminConcesionarios = () => {
   const [formBays, setFormBays] = useState('3');
   const [formIsActive, setFormIsActive] = useState(true);
   const [formBrand, setFormBrand] = useState('GAC');
-  const [formType, setFormType] = useState('concesionario');
+  const [formIsServiceCenter, setFormIsServiceCenter] = useState(false);
   const [formEmail, setFormEmail] = useState('');
   const [formInstagram, setFormInstagram] = useState('');
   const [formWebsite, setFormWebsite] = useState('');
@@ -73,7 +73,7 @@ const AdminConcesionarios = () => {
       toast.error('Error al cargar concesionarios');
       console.error(error);
     } else {
-      setDealerships(data || []);
+      setDealerships((data as unknown as Dealership[]) || []);
     }
     setLoading(false);
   };
@@ -82,7 +82,6 @@ const AdminConcesionarios = () => {
 
   const filteredDealerships = dealerships.filter(d => {
     if (filterBrand !== 'todos' && d.brand !== filterBrand) return false;
-    if (filterType !== 'todos' && d.type !== filterType) return false;
     return true;
   });
 
@@ -90,7 +89,7 @@ const AdminConcesionarios = () => {
     setEditing(null);
     setFormName(''); setFormCity(''); setFormState(''); setFormAddress('');
     setFormPhone(''); setFormSchedule('8:00 AM - 5:00 PM'); setFormBays('3'); setFormIsActive(true);
-    setFormBrand('GAC'); setFormType('concesionario'); setFormEmail(''); setFormInstagram(''); setFormWebsite('');
+    setFormBrand('GAC'); setFormIsServiceCenter(false); setFormEmail(''); setFormInstagram(''); setFormWebsite('');
     setDialogOpen(true);
   };
 
@@ -105,7 +104,7 @@ const AdminConcesionarios = () => {
     setFormBays(String(d.bays));
     setFormIsActive(d.is_active);
     setFormBrand(d.brand);
-    setFormType(d.type);
+    setFormIsServiceCenter(d.is_service_center ?? false);
     setFormEmail(d.email || '');
     setFormInstagram(d.instagram || '');
     setFormWebsite(d.website || '');
@@ -126,7 +125,8 @@ const AdminConcesionarios = () => {
       bays: parseInt(formBays) || 3,
       is_active: formIsActive,
       brand: formBrand,
-      type: formType,
+      type: 'concesionario' as const,
+      is_service_center: formIsServiceCenter,
       email: formEmail.trim() || null,
       instagram: formInstagram.trim() || null,
       website: formWebsite.trim() || null,
@@ -154,7 +154,7 @@ const AdminConcesionarios = () => {
           </Badge>
         </div>
         {canCreate && (
-          <Button size="sm" onClick={openCreate} className="gac-gradient">
+          <Button size="sm" onClick={openCreate} className="imb-gradient">
             <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
           </Button>
         )}
@@ -168,16 +168,9 @@ const AdminConcesionarios = () => {
             <TabsTrigger value="DFSK" className="text-xs px-3 h-6">DFSK</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Tabs value={filterType} onValueChange={setFilterType}>
-          <TabsList className="h-8">
-            <TabsTrigger value="todos" className="text-xs px-3 h-6">Todos</TabsTrigger>
-            <TabsTrigger value="concesionario" className="text-xs px-3 h-6 gap-1"><Building2 className="w-3 h-3" /> Concesionarios</TabsTrigger>
-            <TabsTrigger value="centro_servicio" className="text-xs px-3 h-6 gap-1"><Wrench className="w-3 h-3" /> Centros de Servicio</TabsTrigger>
-          </TabsList>
-        </Tabs>
       </div>
 
-      <Card className="gac-shadow">
+      <Card className="imb-shadow">
         {loading ? (
           <CardContent className="p-8 text-center">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -194,7 +187,7 @@ const AdminConcesionarios = () => {
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                 <TableHead>Nombre</TableHead>
                 <TableHead>Marca</TableHead>
-                <TableHead>Tipo</TableHead>
+                <TableHead>Centro Serv.</TableHead>
                 <TableHead>Ciudad</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead>Teléfono</TableHead>
@@ -213,10 +206,13 @@ const AdminConcesionarios = () => {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
-                      {d.type === 'concesionario' ? <Building2 className="w-2.5 h-2.5" /> : <Wrench className="w-2.5 h-2.5" />}
-                      {d.type === 'concesionario' ? 'Concesionario' : 'Centro Servicio'}
-                    </Badge>
+                    {d.is_service_center ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-emerald-500 text-emerald-600">
+                        <Wrench className="w-2.5 h-2.5" /> Sí
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">No</span>
+                    )}
                   </TableCell>
                   <TableCell>{d.city || '-'}</TableCell>
                   <TableCell>{d.state || '-'}</TableCell>
@@ -248,24 +244,26 @@ const AdminConcesionarios = () => {
         )}
       </Card>
 
+      {/* Detail dialog */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              {detailDealer?.type === 'concesionario' ? <Building2 className="w-4 h-4" /> : <Wrench className="w-4 h-4" />}
+              <Building2 className="w-4 h-4" />
               {detailDealer?.name}
             </DialogTitle>
           </DialogHeader>
           {detailDealer && (
             <div className="space-y-4 py-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className={`text-xs px-2 py-0.5 ${detailDealer.brand === 'GAC' ? 'border-primary text-primary' : 'border-orange-500 text-orange-600'}`}>
                   {detailDealer.brand}
                 </Badge>
-                <Badge variant="outline" className="text-xs px-2 py-0.5 gap-1">
-                  {detailDealer.type === 'concesionario' ? <Building2 className="w-3 h-3" /> : <Wrench className="w-3 h-3" />}
-                  {detailDealer.type === 'concesionario' ? 'Concesionario' : 'Centro de Servicio'}
-                </Badge>
+                {detailDealer.is_service_center && (
+                  <Badge variant="outline" className="text-xs px-2 py-0.5 gap-1 border-emerald-500 text-emerald-600">
+                    <Wrench className="w-3 h-3" /> Centro de Servicio
+                  </Badge>
+                )}
                 <Badge variant={detailDealer.is_active ? 'default' : 'secondary'} className="text-xs px-2 py-0.5">
                   {detailDealer.is_active ? 'Activo' : 'Inactivo'}
                 </Badge>
@@ -324,7 +322,7 @@ const AdminConcesionarios = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDetailOpen(false)}>Cerrar</Button>
             {canEdit && (
-              <Button className="gac-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
+              <Button className="imb-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
                 <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
               </Button>
             )}
@@ -332,33 +330,22 @@ const AdminConcesionarios = () => {
         </DialogContent>
       </Dialog>
 
+      {/* Create/Edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display">{editing ? 'Editar Concesionario' : 'Nuevo Concesionario'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Marca *</Label>
-                <Select value={formBrand} onValueChange={setFormBrand}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="GAC">GAC</SelectItem>
-                    <SelectItem value="DFSK">DFSK</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Tipo *</Label>
-                <Select value={formType} onValueChange={setFormType}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="concesionario">Concesionario</SelectItem>
-                    <SelectItem value="centro_servicio">Centro de Servicio</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="space-y-2">
+              <Label>Marca *</Label>
+              <Select value={formBrand} onValueChange={setFormBrand}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="GAC">GAC</SelectItem>
+                  <SelectItem value="DFSK">DFSK</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Nombre *</Label>
@@ -410,6 +397,13 @@ const AdminConcesionarios = () => {
             </div>
             <div className="flex items-center justify-between">
               <div>
+                <Label>Centro de Servicio</Label>
+                <p className="text-xs text-muted-foreground">Este concesionario también opera como centro de servicio</p>
+              </div>
+              <Switch checked={formIsServiceCenter} onCheckedChange={setFormIsServiceCenter} />
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
                 <Label>Activo</Label>
                 <p className="text-xs text-muted-foreground">Concesionario disponible en el sistema</p>
               </div>
@@ -418,7 +412,7 @@ const AdminConcesionarios = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={saving} className="gac-gradient">
+            <Button onClick={handleSave} disabled={saving} className="imb-gradient">
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editing ? 'Guardar' : 'Crear'}
             </Button>
           </DialogFooter>
