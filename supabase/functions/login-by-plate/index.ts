@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
     }
 
     // 3. Get user email from auth
-    const { data: userData, error: userError } = await adminClient.auth.admin.getUserById(client.profile_id);
+    const { data: userData, error: userError } = await adminClient.auth.admin.getUserById(profileId);
     if (userError || !userData?.user?.email) {
       return new Response(
         JSON.stringify({ error: "No se encontró la cuenta de usuario asociada" }),
