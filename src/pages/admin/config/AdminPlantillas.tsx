@@ -161,7 +161,7 @@ const AdminPlantillas = () => {
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            {AVAILABLE_VARS.map(v => (
+            {ALL_VARS.map(v => (
               <Badge key={v.key} variant="outline" className="text-xs font-mono">
                 {`{{${v.key}}}`} <span className="ml-1 font-sans text-muted-foreground">– {v.desc}</span>
               </Badge>
