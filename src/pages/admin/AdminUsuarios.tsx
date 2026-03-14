@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon } from 'lucide-react';
+import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +24,7 @@ interface ProfileWithRole {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  pin_code: string | null;
   roles: {
     id: string;
     name: string;
@@ -51,6 +52,7 @@ const AdminUsuarios = () => {
   const [editFullName, setEditFullName] = useState('');
   const [editRoleId, setEditRoleId] = useState('');
   const [editIsActive, setEditIsActive] = useState(true);
+  const [editPinCode, setEditPinCode] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Create dialog state
@@ -60,6 +62,7 @@ const AdminUsuarios = () => {
   const [createFullName, setCreateFullName] = useState('');
   const [createRoleId, setCreateRoleId] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createPinCode, setCreatePinCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [createDealershipId, setCreateDealershipId] = useState('');
   const [generatingLink, setGeneratingLink] = useState<string | null>(null);
@@ -108,6 +111,7 @@ const AdminUsuarios = () => {
     setCreateFullName('');
     setCreateRoleId('');
     setCreateDealershipId('');
+    setCreatePinCode('');
     setShowPassword(false);
     setCreateDialogOpen(true);
   };
@@ -145,6 +149,11 @@ const AdminUsuarios = () => {
       toast.error('La contraseña debe tener al menos 6 caracteres');
       return;
     }
+    const pinValue = createPinCode.trim();
+    if (pinValue && !/^\d{4}$/.test(pinValue)) {
+      toast.error('El PIN debe ser de exactamente 4 dígitos numéricos');
+      return;
+    }
     setCreating(true);
 
     try {
@@ -155,6 +164,7 @@ const AdminUsuarios = () => {
           full_name: createFullName.trim() || null,
           role_id: createRoleId || null,
           dealership_id: getSelectedRoleName(createRoleId) === 'concesionario' ? createDealershipId || null : null,
+          pin_code: pinValue || null,
         },
       });
 
@@ -163,6 +173,13 @@ const AdminUsuarios = () => {
       } else if (data?.error) {
         toast.error(data.error);
       } else {
+        // Save pin_code after user creation if provided
+        if (pinValue && data?.user_id) {
+          await supabase
+            .from('profiles')
+            .update({ pin_code: pinValue } as any)
+            .eq('id', data.user_id);
+        }
         toast.success('Usuario creado exitosamente');
         setCreateDialogOpen(false);
         fetchUsers();
@@ -179,6 +196,7 @@ const AdminUsuarios = () => {
     setEditFullName(user.full_name || '');
     setEditRoleId(user.role_id || '');
     setEditIsActive(user.is_active);
+    setEditPinCode(user.pin_code || '');
     setEditDealershipId('');
     // Load current dealership link
     const { data } = await supabase.from('dealership_users').select('dealership_id').eq('profile_id', user.id).limit(1);
@@ -190,13 +208,20 @@ const AdminUsuarios = () => {
     if (!editingUser) return;
     setSaving(true);
 
+    const pinValue = editPinCode.trim();
+    if (pinValue && !/^\d{4}$/.test(pinValue)) {
+      toast.error('El PIN debe ser de exactamente 4 dígitos numéricos');
+      return;
+    }
+
     const { error } = await supabase
       .from('profiles')
       .update({
         full_name: editFullName,
         role_id: editRoleId || null,
         is_active: editIsActive,
-      })
+        pin_code: pinValue || null,
+      } as any)
       .eq('id', editingUser.id);
 
     if (error) {
@@ -314,6 +339,9 @@ const AdminUsuarios = () => {
                         <AvatarFallback className="text-[10px] bg-muted">{getInitials(u)}</AvatarFallback>
                       </Avatar>
                       <span className="font-medium">{u.full_name || 'Sin nombre'}</span>
+                      {u.pin_code && (
+                        <span title={`PIN: ${u.pin_code}`}><KeyRound className="w-3 h-3 text-primary" /></span>
+                      )}
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{u.email}</TableCell>
@@ -427,6 +455,24 @@ const AdminUsuarios = () => {
                 </div>
                 <Switch checked={editIsActive} onCheckedChange={setEditIsActive} />
               </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editPinCode" className="flex items-center gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5" /> Código PIN (4 dígitos)
+                </Label>
+                <Input
+                  id="editPinCode"
+                  value={editPinCode}
+                  onChange={e => {
+                    const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                    setEditPinCode(v);
+                  }}
+                  placeholder="Ej: 1234"
+                  maxLength={4}
+                  className="font-mono text-lg tracking-widest"
+                />
+                <p className="text-xs text-muted-foreground">PIN para inicio de sesión rápido. Dejar vacío para deshabilitar.</p>
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -519,6 +565,22 @@ const AdminUsuarios = () => {
                 <p className="text-xs text-muted-foreground">El usuario solo verá reservas y prospectos de este concesionario</p>
               </div>
             )}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5" /> Código PIN (4 dígitos)
+              </Label>
+              <Input
+                value={createPinCode}
+                onChange={e => {
+                  const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                  setCreatePinCode(v);
+                }}
+                placeholder="Ej: 1234"
+                maxLength={4}
+                className="font-mono text-lg tracking-widest"
+              />
+              <p className="text-xs text-muted-foreground">PIN para inicio de sesión rápido (opcional)</p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>Cancelar</Button>

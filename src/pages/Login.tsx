@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Mail, Lock, User, Eye, EyeOff, Car } from 'lucide-react';
+import { Mail, Lock, User, Eye, EyeOff, Car, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 
@@ -24,6 +25,10 @@ const Login = () => {
   // Plate login state
   const [plate, setPlate] = useState('');
   const [plateLoading, setPlateLoading] = useState(false);
+
+  // PIN login state
+  const [pinCode, setPinCode] = useState('');
+  const [pinLoading, setPinLoading] = useState(false);
 
   if (user && role) {
     const portalPaths: Record<string, string> = {
@@ -116,6 +121,42 @@ const Login = () => {
     }
   };
 
+  const handlePinLogin = async (value: string) => {
+    if (value.length !== 4) return;
+    setPinCode(value);
+    setPinLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('login-by-pin', {
+        body: { pin: value },
+      });
+
+      if (error || data?.error) {
+        toast.error(data?.error || 'Código PIN no válido');
+        setPinCode('');
+        setPinLoading(false);
+        return;
+      }
+
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: data.token_hash,
+        type: 'magiclink',
+      });
+
+      if (verifyError) {
+        toast.error('Error al iniciar sesión: ' + verifyError.message);
+        setPinCode('');
+      } else {
+        toast.success(`Bienvenido, ${data.user_name || 'Usuario'}`);
+      }
+    } catch (err) {
+      toast.error('Error inesperado al iniciar sesión');
+      setPinCode('');
+    } finally {
+      setPinLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="imb-gradient px-6 py-10 text-center relative overflow-hidden">
@@ -140,19 +181,55 @@ const Login = () => {
           <CardHeader className="text-center pb-2">
             <CardTitle className="font-display text-xl">Acceder al Sistema</CardTitle>
             <CardDescription>
-              Inicia sesión con tus credenciales o con la placa de tu vehículo
+              Ingresa con tu PIN, placa de vehículo o credenciales
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="credentials" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-4">
-                <TabsTrigger value="credentials" className="text-xs gap-1.5">
-                  <Mail className="w-3.5 h-3.5" /> Credenciales
+            <Tabs defaultValue="pin" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mb-4">
+                <TabsTrigger value="pin" className="text-xs gap-1.5">
+                  <KeyRound className="w-3.5 h-3.5" /> PIN
                 </TabsTrigger>
                 <TabsTrigger value="plate" className="text-xs gap-1.5">
-                  <Car className="w-3.5 h-3.5" /> Placa del Vehículo
+                  <Car className="w-3.5 h-3.5" /> Placa
+                </TabsTrigger>
+                <TabsTrigger value="credentials" className="text-xs gap-1.5">
+                  <Mail className="w-3.5 h-3.5" /> Correo
                 </TabsTrigger>
               </TabsList>
+
+              <TabsContent value="pin">
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center mb-2">
+                    <KeyRound className="w-10 h-10 text-primary mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">
+                      Ingresa tu código PIN de 4 dígitos para acceder al sistema
+                    </p>
+                  </div>
+
+                  <div className="flex justify-center">
+                    <InputOTP
+                      maxLength={4}
+                      value={pinCode}
+                      onChange={handlePinLogin}
+                      disabled={pinLoading}
+                    >
+                      <InputOTPGroup>
+                        <InputOTPSlot index={0} className="w-14 h-14 text-2xl" />
+                        <InputOTPSlot index={1} className="w-14 h-14 text-2xl" />
+                        <InputOTPSlot index={2} className="w-14 h-14 text-2xl" />
+                        <InputOTPSlot index={3} className="w-14 h-14 text-2xl" />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+
+                  {pinLoading && (
+                    <div className="flex justify-center">
+                      <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
 
               <TabsContent value="credentials">
                 <form onSubmit={handleSubmit} className="space-y-4">
