@@ -1,8 +1,93 @@
+import { supabase } from '@/integrations/supabase/client';
+
 /**
- * Build a WhatsApp URL to send a reservation confirmation message.
- * Uses only emojis from the Unicode standard supported by WhatsApp.
+ * Normalize a phone number for WhatsApp (Venezuelan format).
  */
-export function buildWhatsAppReservationUrl(params: {
+function normalizePhone(phone: string): string | null {
+  const cleaned = phone.replace(/[\s\-()]/g, '');
+  let num = cleaned;
+  if (num.startsWith('0')) num = '58' + num.slice(1);
+  if (!num.startsWith('+')) num = num.startsWith('58') ? num : '58' + num;
+  num = num.replace('+', '');
+  if (num.length < 10) return null;
+  return num;
+}
+
+/**
+ * Format a date string to a human-readable Spanish format.
+ */
+function formatDate(d: string): string {
+  const date = new Date(d + 'T00:00:00');
+  return date.toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+/**
+ * Format a time string (HH:mm) to 12-hour format.
+ */
+function formatTime(t: string): string {
+  const [h, m] = t.split(':');
+  const hour = parseInt(h);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const h12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
+  return `${h12}:${m} ${ampm}`;
+}
+
+/**
+ * Default template used when no DB template is available.
+ */
+const DEFAULT_TEMPLATE = `Hola {{cliente}},
+
+Tu cita de servicio ha sido *confirmada* ✅
+
+📅 *Fecha:* {{fecha}}
+⏰ *Hora:* {{hora}}
+🔧 *Servicio:* {{servicio}}
+{{#vehiculo}}🚗 *Vehiculo:* {{vehiculo}}
+{{/vehiculo}}{{#placa}}🔖 *Placa:* {{placa}}
+{{/placa}}{{#concesionario}}📍 *Concesionario:* {{concesionario}}
+{{/concesionario}}{{#kilometraje}}📏 *Kilometraje:* {{kilometraje}} km
+{{/kilometraje}}{{#notas}}📝 *Notas:* {{notas}}
+{{/notas}}
+Te esperamos. Gracias por confiar en nosotros 🙏`;
+
+/**
+ * Process a template string by replacing variables and handling conditional blocks.
+ */
+function processTemplate(template: string, vars: Record<string, string | undefined>): string {
+  let result = template;
+
+  // Handle conditional blocks: {{#key}}...{{/key}} - only show if key has a value
+  result = result.replace(/\{\{#(\w+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, key, content) => {
+    return vars[key] ? content : '';
+  });
+
+  // Replace simple variables: {{key}}
+  result = result.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '');
+
+  // Clean up extra blank lines
+  result = result.replace(/\n{3,}/g, '\n\n');
+
+  return result.trim();
+}
+
+/**
+ * Fetch the template from the database, falling back to the default.
+ */
+async function fetchTemplate(templateKey: string): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('message_templates')
+      .select('content')
+      .eq('template_key', templateKey)
+      .eq('is_active', true)
+      .single();
+    return data?.content || DEFAULT_TEMPLATE;
+  } catch {
+    return DEFAULT_TEMPLATE;
+  }
+}
+
+export interface WhatsAppReservationParams {
   phone: string;
   clientName: string;
   date: string;
@@ -15,44 +100,55 @@ export function buildWhatsAppReservationUrl(params: {
   dealershipName?: string;
   mileage?: number;
   notes?: string;
-}): string | null {
-  const cleaned = params.phone.replace(/[\s\-()]/g, '');
-  // Normalize Venezuelan numbers
-  let num = cleaned;
-  if (num.startsWith('0')) num = '58' + num.slice(1);
-  if (!num.startsWith('+')) num = num.startsWith('58') ? num : '58' + num;
-  num = num.replace('+', '');
+}
 
-  if (num.length < 10) return null;
+/**
+ * Build a WhatsApp URL using the DB template (async version).
+ */
+export async function buildWhatsAppReservationUrlAsync(params: WhatsAppReservationParams): Promise<string | null> {
+  const num = normalizePhone(params.phone);
+  if (!num) return null;
 
-  const formatDate = (d: string) => {
-    const date = new Date(d + 'T00:00:00');
-    return date.toLocaleDateString('es-VE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const template = await fetchTemplate('reservation_confirmed');
+  const vehicle = [params.vehicleBrand, params.vehicleModel, params.vehicleYear].filter(Boolean).join(' ');
+
+  const vars: Record<string, string | undefined> = {
+    cliente: params.clientName,
+    fecha: formatDate(params.date),
+    hora: formatTime(params.time),
+    servicio: params.serviceType,
+    vehiculo: vehicle || undefined,
+    placa: params.vehiclePlate || undefined,
+    concesionario: params.dealershipName || undefined,
+    kilometraje: params.mileage && params.mileage > 0 ? params.mileage.toLocaleString() : undefined,
+    notas: params.notes || undefined,
   };
 
-  const formatTime = (t: string) => {
-    const [h, m] = t.split(':');
-    const hour = parseInt(h);
-    const ampm = hour >= 12 ? 'PM' : 'AM';
-    const h12 = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-    return `${h12}:${m} ${ampm}`;
-  };
+  const msg = processTemplate(template, vars);
+  return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
+}
+
+/**
+ * Build a WhatsApp URL (sync version, uses default template).
+ */
+export function buildWhatsAppReservationUrl(params: WhatsAppReservationParams): string | null {
+  const num = normalizePhone(params.phone);
+  if (!num) return null;
 
   const vehicle = [params.vehicleBrand, params.vehicleModel, params.vehicleYear].filter(Boolean).join(' ');
 
-  let msg = `Hola ${params.clientName},\n\n`;
-  msg += `Tu cita de servicio ha sido *confirmada* \u2705\n\n`;
-  msg += `\uD83D\uDCC5 *Fecha:* ${formatDate(params.date)}\n`;
-  msg += `\u23F0 *Hora:* ${formatTime(params.time)}\n`;
-  msg += `\uD83D\uDD27 *Servicio:* ${params.serviceType}\n`;
+  const vars: Record<string, string | undefined> = {
+    cliente: params.clientName,
+    fecha: formatDate(params.date),
+    hora: formatTime(params.time),
+    servicio: params.serviceType,
+    vehiculo: vehicle || undefined,
+    placa: params.vehiclePlate || undefined,
+    concesionario: params.dealershipName || undefined,
+    kilometraje: params.mileage && params.mileage > 0 ? params.mileage.toLocaleString() : undefined,
+    notas: params.notes || undefined,
+  };
 
-  if (vehicle) msg += `\uD83D\uDE97 *Vehiculo:* ${vehicle}\n`;
-  if (params.vehiclePlate) msg += `\uD83C\uDD94 *Placa:* ${params.vehiclePlate}\n`;
-  if (params.dealershipName) msg += `\uD83D\uDCCD *Concesionario:* ${params.dealershipName}\n`;
-  if (params.mileage && params.mileage > 0) msg += `\uD83D\uDCCF *Kilometraje:* ${params.mileage.toLocaleString()} km\n`;
-  if (params.notes) msg += `\uD83D\uDCDD *Notas:* ${params.notes}\n`;
-
-  msg += `\nTe esperamos. Gracias por confiar en nosotros \uD83D\uDE4F`;
-
+  const msg = processTemplate(DEFAULT_TEMPLATE, vars);
   return `https://wa.me/${num}?text=${encodeURIComponent(msg)}`;
 }
