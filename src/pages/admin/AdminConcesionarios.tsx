@@ -338,6 +338,11 @@ const AdminConcesionarios = () => {
             </div>
           )}
           <DialogFooter>
+            {canDelete && detailDealer && (
+              <Button variant="destructive" size="sm" className="mr-auto" onClick={() => { setDetailOpen(false); setDeleteTarget(detailDealer); }}>
+                <Trash2 className="w-3.5 h-3.5 mr-1" /> Eliminar
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setDetailOpen(false)}>Cerrar</Button>
             {canEdit && (
               <Button className="imb-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
