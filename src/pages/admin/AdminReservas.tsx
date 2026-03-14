@@ -147,7 +147,7 @@ const AdminReservas = () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, dealerships(id, name, city), clients(full_name, cedula), vehicles(plate, year, vehicle_models(name, brand))');
+      .select('*, dealerships(id, name, city), clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand))');
 
     if (view === 'matrix') {
       query = query.eq('reservation_date', selectedDate);
