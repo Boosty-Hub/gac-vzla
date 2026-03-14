@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, Users, Shield, KeyRound, Settings, Wrench, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, Users, Shield, KeyRound, Settings, Wrench, ShieldCheck, SlidersHorizontal, MessageCircle } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import imbLogo from '@/assets/imb-logo.png';
 
