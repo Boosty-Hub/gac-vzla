@@ -121,6 +121,41 @@ const Login = () => {
     }
   };
 
+  const handlePinLogin = async (value: string) => {
+    if (value.length !== 4) return;
+    setPinCode(value);
+    setPinLoading(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('login-by-pin', {
+        body: { pin: value },
+      });
+
+      if (error || data?.error) {
+        toast.error(data?.error || 'Código PIN no válido');
+        setPinCode('');
+        setPinLoading(false);
+        return;
+      }
+
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: data.token_hash,
+        type: 'magiclink',
+      });
+
+      if (verifyError) {
+        toast.error('Error al iniciar sesión: ' + verifyError.message);
+        setPinCode('');
+      } else {
+        toast.success(`Bienvenido, ${data.user_name || 'Usuario'}`);
+      }
+    } catch (err) {
+      toast.error('Error inesperado al iniciar sesión');
+      setPinCode('');
+    } finally {
+      setPinLoading(false);
+    }
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="imb-gradient px-6 py-10 text-center relative overflow-hidden">
