@@ -5,3 +5,9 @@ verify_jwt = false
 
 [functions.verify-magic-link]
 verify_jwt = false
+
+[functions.login-by-pin]
+verify_jwt = false
+
+[functions.login-by-plate]
+verify_jwt = false
