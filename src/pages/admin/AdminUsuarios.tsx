@@ -340,7 +340,7 @@ const AdminUsuarios = () => {
                       </Avatar>
                       <span className="font-medium">{u.full_name || 'Sin nombre'}</span>
                       {u.pin_code && (
-                        <KeyRound className="w-3 h-3 text-primary" title={`PIN: ${u.pin_code}`} />
+                        <span title={`PIN: ${u.pin_code}`}><KeyRound className="w-3 h-3 text-primary" /></span>
                       )}
                     </div>
                   </TableCell>
