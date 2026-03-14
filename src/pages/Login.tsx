@@ -181,7 +181,7 @@ const Login = () => {
           <CardHeader className="text-center pb-2">
             <CardTitle className="font-display text-xl">Acceder al Sistema</CardTitle>
             <CardDescription>
-              Inicia sesión con tus credenciales o con la placa de tu vehículo
+              Ingresa con tu PIN, placa de vehículo o credenciales
             </CardDescription>
           </CardHeader>
           <CardContent>
