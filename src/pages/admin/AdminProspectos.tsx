@@ -844,10 +844,10 @@ const AdminProspectos = () => {
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none">Sin especificar</SelectItem>
-                    {Array.from(new Set(vehicleModels.map(m => m.brand))).map(brand => (
+                    {prospectBrands.map(brand => (
                       <SelectGroup key={brand}>
                         <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
-                        {vehicleModels.filter(m => m.brand === brand).map(m => (
+                        {prospectModels.filter(m => m.brand === brand).map(m => (
                           <SelectItem key={m.id} value={`${m.brand} ${m.name}`}>{m.brand} {m.name}</SelectItem>
                         ))}
                       </SelectGroup>
