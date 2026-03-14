@@ -38,6 +38,7 @@ const AdminConcesionarios = () => {
   const { hasPermission } = useAuth();
   const canCreate = hasPermission('concesionarios.create');
   const canEdit = hasPermission('concesionarios.edit');
+  const canDelete = hasPermission('concesionarios.delete');
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
