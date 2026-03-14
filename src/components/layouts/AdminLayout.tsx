@@ -184,6 +184,9 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
           <h2 className="text-sm font-medium text-muted-foreground">
             {menuItems.flatMap(g => g.items).find(i => i.path === location.pathname || location.pathname.startsWith(i.path + '/'))?.label || 'Dashboard'}
           </h2>
+          <div className="ml-auto">
+            <NotificationCenter />
+          </div>
         </header>
         <main className="flex-1 p-6">
           {children}
