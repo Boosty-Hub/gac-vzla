@@ -46,6 +46,7 @@ const AdminConcesionarios = () => {
   const [editing, setEditing] = useState<Dealership | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailDealer, setDetailDealer] = useState<Dealership | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Dealership | null>(null);
 
   const [filterBrand, setFilterBrand] = useState('todos');
 
