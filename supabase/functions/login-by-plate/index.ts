@@ -47,17 +47,36 @@ Deno.serve(async (req) => {
       .select("id, profile_id, full_name")
       .eq("id", vehicle.client_id)
       .eq("is_active", true)
-      .single();
+      .maybeSingle();
 
-    if (clientError || !client || !client.profile_id) {
+    if (clientError || !client) {
       return new Response(
         JSON.stringify({ error: "No se encontró un cliente asociado a este vehículo" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    // Try profile_id from clients table, fallback to client_users table
+    let profileId = client.profile_id;
+    if (!profileId) {
+      const { data: clientUser } = await adminClient
+        .from("client_users")
+        .select("profile_id")
+        .eq("client_id", client.id)
+        .limit(1)
+        .maybeSingle();
+      profileId = clientUser?.profile_id || null;
+    }
+
+    if (!profileId) {
+      return new Response(
+        JSON.stringify({ error: "Este cliente no tiene una cuenta de usuario vinculada. Contacte al administrador." }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // 3. Get user email from auth
-    const { data: userData, error: userError } = await adminClient.auth.admin.getUserById(client.profile_id);
+    const { data: userData, error: userError } = await adminClient.auth.admin.getUserById(profileId);
     if (userError || !userData?.user?.email) {
       return new Response(
         JSON.stringify({ error: "No se encontró la cuenta de usuario asociada" }),
