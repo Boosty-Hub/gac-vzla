@@ -549,6 +549,22 @@ const AdminUsuarios = () => {
                 <p className="text-xs text-muted-foreground">El usuario solo verá reservas y prospectos de este concesionario</p>
               </div>
             )}
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <KeyRound className="w-3.5 h-3.5" /> Código PIN (4 dígitos)
+              </Label>
+              <Input
+                value={createPinCode}
+                onChange={e => {
+                  const v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                  setCreatePinCode(v);
+                }}
+                placeholder="Ej: 1234"
+                maxLength={4}
+                className="font-mono text-lg tracking-widest"
+              />
+              <p className="text-xs text-muted-foreground">PIN para inicio de sesión rápido (opcional)</p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>Cancelar</Button>
