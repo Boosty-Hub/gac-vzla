@@ -139,7 +139,7 @@ const AdminGeneral = () => {
               <div className="flex items-start gap-6">
                 <div className="w-24 h-24 rounded-lg border-2 border-dashed border-border flex items-center justify-center bg-muted/50 shrink-0 overflow-hidden">
                   <img
-                    src={config.defaultSrc}
+                    src={resolvedUrls[config.key] || config.defaultSrc}
                     alt={config.label}
                     className="max-w-full max-h-full object-contain p-2"
                   />
