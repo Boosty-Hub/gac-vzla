@@ -12,22 +12,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import ProspectStatusManager from '@/components/ProspectStatusManager';
 import SalespersonManager from '@/components/SalespersonManager';
+import ProspectModelManager from '@/components/ProspectModelManager';
+import { useProspectModels } from '@/hooks/useProspectModels';
 import { useSalespersons } from '@/hooks/useSalespersons';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 
-interface VehicleModel {
-  id: string;
-  name: string;
-  brand: string;
-}
 
 interface Dealership {
   id: string;
@@ -69,10 +66,11 @@ const AdminProspectos = () => {
   const canCreate = hasPermission('prospectos.create');
   const canEdit = hasPermission('prospectos.edit');
   const canDelete = hasPermission('prospectos.delete');
+  const { models: prospectModels, brands: prospectBrands, fetchModels: refetchProspectModels } = useProspectModels();
   const [statusManagerOpen, setStatusManagerOpen] = useState(false);
   const [salespersonManagerOpen, setSalespersonManagerOpen] = useState(false);
+  const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
-  const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -122,15 +120,6 @@ const AdminProspectos = () => {
     if (data) setDealerships(data);
   };
 
-  const fetchModels = async () => {
-    const { data } = await supabase
-      .from('vehicle_models')
-      .select('id, name, brand')
-      .eq('is_active', true)
-      .order('brand')
-      .order('name');
-    if (data) setVehicleModels(data as VehicleModel[]);
-  };
 
   const fetchProspects = async () => {
     setLoading(true);
@@ -144,7 +133,6 @@ const AdminProspectos = () => {
 
   useEffect(() => {
     fetchDealerships();
-    fetchModels();
     fetchProspects();
   }, []);
 
@@ -466,6 +454,9 @@ const AdminProspectos = () => {
           </Button>
           <Button size="sm" variant="outline" onClick={() => setSalespersonManagerOpen(true)} className="gap-1">
             <UserCog className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Vendedores</span>
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setModelManagerOpen(true)} className="gap-1">
+            <Car className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Modelos</span>
           </Button>
           {canCreate && (
             <>
@@ -856,10 +847,10 @@ const AdminProspectos = () => {
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none">Sin especificar</SelectItem>
-                    {Array.from(new Set(vehicleModels.map(m => m.brand))).map(brand => (
+                    {prospectBrands.map(brand => (
                       <SelectGroup key={brand}>
                         <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
-                        {vehicleModels.filter(m => m.brand === brand).map(m => (
+                        {prospectModels.filter(m => m.brand === brand).map(m => (
                           <SelectItem key={m.id} value={`${m.brand} ${m.name}`}>{m.brand} {m.name}</SelectItem>
                         ))}
                       </SelectGroup>
@@ -946,6 +937,13 @@ const AdminProspectos = () => {
         open={salespersonManagerOpen}
         onOpenChange={setSalespersonManagerOpen}
         onSalespersonsChanged={refetchSalespersons}
+      />
+
+      {/* PROSPECT MODEL MANAGER */}
+      <ProspectModelManager
+        open={modelManagerOpen}
+        onOpenChange={setModelManagerOpen}
+        onModelsChanged={refetchProspectModels}
       />
     </div>
   );

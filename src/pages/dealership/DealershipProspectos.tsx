@@ -18,12 +18,8 @@ import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useSalespersons } from '@/hooks/useSalespersons';
 import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useProspectModels } from '@/hooks/useProspectModels';
 
-interface VehicleModel {
-  id: string;
-  name: string;
-  brand: string;
-}
 
 interface Prospect {
   id: string;
@@ -55,8 +51,8 @@ const DealershipProspectos = () => {
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
   const isMobile = useIsMobile();
+  const { models: prospectModels, brands: prospectBrands } = useProspectModels();
   const [prospects, setProspects] = useState<Prospect[]>([]);
-  const [vehicleModels, setVehicleModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [prosSearch, setProsSearch] = useState('');
@@ -74,15 +70,6 @@ const DealershipProspectos = () => {
   const [pNotes, setPNotes] = useState('');
   const [pSalesperson, setPSalesperson] = useState('');
 
-  const fetchModels = async () => {
-    const { data } = await supabase
-      .from('vehicle_models')
-      .select('id, name, brand')
-      .eq('is_active', true)
-      .order('brand')
-      .order('name');
-    if (data) setVehicleModels(data as VehicleModel[]);
-  };
 
   const fetchProspects = async () => {
     if (!selectedDealership) return;
@@ -103,7 +90,7 @@ const DealershipProspectos = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchModels(); }, []);
+  
 
   useEffect(() => {
     if (loadingAccess) return;
@@ -359,10 +346,10 @@ const DealershipProspectos = () => {
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none">Sin especificar</SelectItem>
-                    {Array.from(new Set(vehicleModels.map(m => m.brand))).map(brand => (
+                    {prospectBrands.map(brand => (
                       <SelectGroup key={brand}>
                         <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
-                        {vehicleModels.filter(m => m.brand === brand).map(m => (
+                        {prospectModels.filter(m => m.brand === brand).map(m => (
                           <SelectItem key={m.id} value={`${m.brand} ${m.name}`}>{m.brand} {m.name}</SelectItem>
                         ))}
                       </SelectGroup>
