@@ -150,6 +150,7 @@ export type Database = {
           id: string
           instagram: string | null
           is_active: boolean | null
+          is_service_center: boolean
           name: string
           phone: string | null
           schedule: string | null
@@ -168,6 +169,7 @@ export type Database = {
           id?: string
           instagram?: string | null
           is_active?: boolean | null
+          is_service_center?: boolean
           name: string
           phone?: string | null
           schedule?: string | null
@@ -186,6 +188,7 @@ export type Database = {
           id?: string
           instagram?: string | null
           is_active?: boolean | null
+          is_service_center?: boolean
           name?: string
           phone?: string | null
           schedule?: string | null
