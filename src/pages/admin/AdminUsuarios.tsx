@@ -183,6 +183,7 @@ const AdminUsuarios = () => {
     setEditFullName(user.full_name || '');
     setEditRoleId(user.role_id || '');
     setEditIsActive(user.is_active);
+    setEditPinCode(user.pin_code || '');
     setEditDealershipId('');
     // Load current dealership link
     const { data } = await supabase.from('dealership_users').select('dealership_id').eq('profile_id', user.id).limit(1);
