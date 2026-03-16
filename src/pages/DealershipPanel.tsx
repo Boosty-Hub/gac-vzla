@@ -448,6 +448,7 @@ const DealershipPanel = () => {
       source: pSource,
       status: pStatus,
       notes: pNotes.trim() || null,
+      event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     });
     if (error) { toast.error('Error al crear prospecto'); console.error(error); }
     else { toast.success('Prospecto creado'); setProspectDialogOpen(false); fetchProspects(); }
