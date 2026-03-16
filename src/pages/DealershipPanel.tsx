@@ -108,13 +108,12 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 const PROSPECT_SOURCES = [
-  { value: 'presencial', label: 'Presencial' },
-  { value: 'telefono', label: 'Teléfono' },
-  { value: 'web', label: 'Web' },
-  { value: 'redes_sociales', label: 'Redes Sociales' },
-  { value: 'referido', label: 'Referido' },
+  { value: 'concesionario', label: 'Concesionario' },
+  { value: 'visita', label: 'Visita' },
   { value: 'evento', label: 'Evento' },
-  { value: 'otro', label: 'Otro' },
+  { value: 'referido', label: 'Referido' },
+  { value: 'pagina_web', label: 'Página Web' },
+  { value: 'redes_sociales', label: 'Redes Sociales' },
 ];
 
 const PROSPECT_STATUSES = [
