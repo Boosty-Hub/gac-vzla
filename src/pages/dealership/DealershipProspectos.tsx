@@ -68,6 +68,7 @@ const DealershipProspectos = () => {
   const [pStatus, setPStatus] = useState('nuevo');
   const [pNotes, setPNotes] = useState('');
   const [pSalesperson, setPSalesperson] = useState('');
+  const [pEventName, setPEventName] = useState('');
 
 
   const fetchProspects = async () => {
