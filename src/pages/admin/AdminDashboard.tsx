@@ -132,17 +132,40 @@ const AdminDashboard = () => {
     return Object.values(days);
   }, [prospects, reservations]);
 
-  // ─── Chart: Prospects by source (bar) ───
+  // ─── Chart: Prospects by contact type (bar) ───
+  const SOURCE_LABELS: Record<string, string> = {
+    concesionario: 'Concesionario', visita: 'Visita', evento: 'Evento',
+    referido: 'Referido', pagina_web: 'Página Web', redes_sociales: 'Redes Sociales',
+    presencial: 'Presencial', telefono: 'Teléfono', web: 'Web', otro: 'Otro',
+  };
   const prospectsBySource = useMemo(() => {
     const map: Record<string, number> = {};
     prospects.forEach(p => { map[p.source] = (map[p.source] || 0) + 1; });
-    const labels: Record<string, string> = {
-      presencial: 'Presencial', telefono: 'Teléfono', web: 'Web',
-      redes_sociales: 'Redes', referido: 'Referido', evento: 'Evento', otro: 'Otro',
-    };
     return Object.entries(map)
-      .map(([key, value]) => ({ name: labels[key] || key, value }))
+      .map(([key, value]) => ({ name: SOURCE_LABELS[key] || key, value }))
       .sort((a, b) => b.value - a.value);
+  }, [prospects]);
+
+  // ─── Chart: Contact type by salesperson (stacked bar) ───
+  const contactTypeBySalesperson = useMemo(() => {
+    const map: Record<string, Record<string, number>> = {};
+    const sourceSet = new Set<string>();
+    prospects.forEach(p => {
+      const sp = p.salesperson || 'Sin asignar';
+      if (!map[sp]) map[sp] = {};
+      const srcLabel = SOURCE_LABELS[p.source] || p.source;
+      map[sp][srcLabel] = (map[sp][srcLabel] || 0) + 1;
+      sourceSet.add(srcLabel);
+    });
+    const sources = Array.from(sourceSet);
+    const data = Object.entries(map)
+      .map(([name, sources]) => ({ name, ...sources }))
+      .sort((a, b) => {
+        const totalA = Object.values(a).reduce((sum: number, v) => typeof v === 'number' ? sum + v : sum, 0);
+        const totalB = Object.values(b).reduce((sum: number, v) => typeof v === 'number' ? sum + v : sum, 0);
+        return (totalB as number) - (totalA as number);
+      });
+    return { data, sources };
   }, [prospects]);
 
   // ─── Salesperson performance ───
