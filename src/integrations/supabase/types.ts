@@ -449,6 +449,7 @@ export type Database = {
           created_at: string
           dealership_id: string
           email: string | null
+          event_name: string | null
           id: string
           model_interest: string | null
           name: string
@@ -463,6 +464,7 @@ export type Database = {
           created_at?: string
           dealership_id: string
           email?: string | null
+          event_name?: string | null
           id?: string
           model_interest?: string | null
           name: string
@@ -477,6 +479,7 @@ export type Database = {
           created_at?: string
           dealership_id?: string
           email?: string | null
+          event_name?: string | null
           id?: string
           model_interest?: string | null
           name?: string

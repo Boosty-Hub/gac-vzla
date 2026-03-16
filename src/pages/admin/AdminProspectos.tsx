@@ -47,13 +47,12 @@ interface Prospect {
 }
 
 const PROSPECT_SOURCES = [
-  { value: 'presencial', label: 'Presencial' },
-  { value: 'telefono', label: 'Teléfono' },
-  { value: 'web', label: 'Web' },
-  { value: 'redes_sociales', label: 'Redes Sociales' },
-  { value: 'referido', label: 'Referido' },
+  { value: 'concesionario', label: 'Concesionario' },
+  { value: 'visita', label: 'Visita' },
   { value: 'evento', label: 'Evento' },
-  { value: 'otro', label: 'Otro' },
+  { value: 'referido', label: 'Referido' },
+  { value: 'pagina_web', label: 'Página Web' },
+  { value: 'redes_sociales', label: 'Redes Sociales' },
 ];
 
 const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 'bg-gray-100 text-gray-800', sort_order: 0, is_active: true };
@@ -89,10 +88,11 @@ const AdminProspectos = () => {
   const [pPhone, setPPhone] = useState('');
   const [pEmail, setPEmail] = useState('');
   const [pModel, setPModel] = useState('');
-  const [pSource, setPSource] = useState('presencial');
+  const [pSource, setPSource] = useState('concesionario');
   const [pStatus, setPStatus] = useState('nuevo');
   const [pNotes, setPNotes] = useState('');
   const [pSalesperson, setPSalesperson] = useState('');
+  const [pEventName, setPEventName] = useState('');
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -157,7 +157,8 @@ const AdminProspectos = () => {
     setEditing(null);
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
-    setPSource('presencial'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
+    setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
+    setPEventName('');
     setDialogOpen(true);
   };
 
@@ -172,6 +173,7 @@ const AdminProspectos = () => {
     setPStatus(p.status);
     setPNotes(p.notes || '');
     setPSalesperson((p as any).salesperson || '');
+    setPEventName((p as any).event_name || '');
     setDialogOpen(true);
   };
 
@@ -190,6 +192,7 @@ const AdminProspectos = () => {
       status: pStatus,
       notes: pNotes.trim() || null,
       salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson : null,
+      event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     };
 
     if (editing) {
@@ -878,14 +881,20 @@ const AdminProspectos = () => {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Fuente</Label>
-                <Select value={pSource} onValueChange={setPSource}>
+                <Label className="text-xs">Tipo de contacto</Label>
+                <Select value={pSource} onValueChange={v => { setPSource(v); if (v !== 'evento') setPEventName(''); }}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
+              {pSource === 'evento' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Nombre de evento</Label>
+                  <Input value={pEventName} onChange={e => setPEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" className="h-8 text-xs" />
+                </div>
+              )}
               <div className="space-y-1">
                 <Label className="text-xs">Vendedor</Label>
                 <Select value={pSalesperson} onValueChange={setPSalesperson}>
