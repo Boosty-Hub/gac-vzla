@@ -116,7 +116,8 @@ const DealershipProspectos = () => {
 
   const openDialog = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
-    setPSource('presencial'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
+    setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
+    setPEventName('');
     setDialogOpen(true);
   };
 
