@@ -192,6 +192,7 @@ const AdminProspectos = () => {
       status: pStatus,
       notes: pNotes.trim() || null,
       salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson : null,
+      event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     };
 
     if (editing) {
