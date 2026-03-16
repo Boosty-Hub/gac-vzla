@@ -313,11 +313,11 @@ const AdminDashboard = () => {
 
       {/* Row: Source bar + Salesperson table */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Prospects by Source */}
+        {/* Prospects by Contact Type */}
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-muted-foreground" /> Prospectos por Fuente
+              <MapPin className="w-4 h-4 text-muted-foreground" /> Prospectos por Tipo de Contacto
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -328,7 +328,7 @@ const AdminDashboard = () => {
                 <BarChart data={prospectsBySource} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
                   <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={70} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={90} />
                   <Tooltip contentStyle={{ fontSize: 12 }} />
                   <Bar dataKey="value" name="Prospectos" fill="hsl(220, 70%, 55%)" radius={[0, 4, 4, 0]} />
                 </BarChart>
@@ -382,6 +382,33 @@ const AdminDashboard = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Contact Type by Salesperson */}
+      <Card className="gac-shadow">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-display flex items-center gap-2">
+            <UserCheck className="w-4 h-4 text-muted-foreground" /> Tipo de Contacto por Vendedor
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {contactTypeBySalesperson.data.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(200, contactTypeBySalesperson.data.length * 40)}>
+              <BarChart data={contactTypeBySalesperson.data} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100} />
+                <Tooltip contentStyle={{ fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {contactTypeBySalesperson.sources.map((src, i) => (
+                  <Bar key={src} dataKey={src} stackId="a" fill={COLORS[i % COLORS.length]} radius={i === contactTypeBySalesperson.sources.length - 1 ? [0, 4, 4, 0] : undefined} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };
