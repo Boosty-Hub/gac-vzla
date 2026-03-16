@@ -42,7 +42,10 @@ interface Prospect {
   source: string;
   status: string;
   notes: string | null;
+  salesperson: string | null;
+  event_name: string | null;
   created_at: string;
+  updated_at: string;
   dealerships: { name: string } | null;
 }
 
