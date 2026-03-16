@@ -431,7 +431,8 @@ const DealershipPanel = () => {
   // Prospects CRUD
   const openProspectDialog = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
-    setPSource('presencial'); setPStatus('nuevo'); setPNotes('');
+    setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
+    setPEventName('');
     setProspectDialogOpen(true);
   };
 
