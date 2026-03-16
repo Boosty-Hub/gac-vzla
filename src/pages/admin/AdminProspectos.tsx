@@ -175,8 +175,8 @@ const AdminProspectos = () => {
     setPSource(p.source);
     setPStatus(p.status);
     setPNotes(p.notes || '');
-    setPSalesperson((p as any).salesperson || '');
-    setPEventName((p as any).event_name || '');
+    setPSalesperson(p.salesperson || '');
+    setPEventName(p.event_name || '');
     setDialogOpen(true);
   };
 
