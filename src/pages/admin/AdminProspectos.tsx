@@ -697,14 +697,23 @@ const AdminProspectos = () => {
                     <div className="flex items-center gap-2"><Mail className="w-4 h-4 text-muted-foreground shrink-0" /><span className="truncate">{detailProspect.email}</span></div>
                   )}
                   {detailProspect.model_interest && (
-                    <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-muted-foreground shrink-0" /><span>Interés: {detailProspect.model_interest}</span></div>
+                    <div className="flex items-center gap-2"><Car className="w-4 h-4 text-muted-foreground shrink-0" /><span>Modelo: {detailProspect.model_interest}</span></div>
                   )}
                   <Separator />
                   <div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-muted-foreground shrink-0" /><span>{detailProspect.dealerships?.name || '-'}</span></div>
+                  {detailProspect.salesperson && (
+                    <div className="flex items-center gap-2"><User className="w-4 h-4 text-muted-foreground shrink-0" /><span>Vendedor: {detailProspect.salesperson}</span></div>
+                  )}
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="text-xs capitalize">{src?.label || detailProspect.source}</Badge>
                   </div>
-                  <div className="flex items-center gap-2"><CalendarDays className="w-4 h-4 text-muted-foreground shrink-0" /><span>{new Date(detailProspect.created_at).toLocaleDateString('es-VE')}</span></div>
+                  {detailProspect.source === 'evento' && detailProspect.event_name && (
+                    <div className="flex items-center gap-2"><CalendarDays className="w-4 h-4 text-muted-foreground shrink-0" /><span>Evento: {detailProspect.event_name}</span></div>
+                  )}
+                  <div className="flex items-center gap-2"><CalendarDays className="w-4 h-4 text-muted-foreground shrink-0" /><span>Creado: {new Date(detailProspect.created_at).toLocaleDateString('es-VE')}</span></div>
+                  {detailProspect.updated_at && detailProspect.updated_at !== detailProspect.created_at && (
+                    <div className="flex items-center gap-2 text-muted-foreground"><CalendarDays className="w-4 h-4 shrink-0" /><span>Actualizado: {new Date(detailProspect.updated_at).toLocaleDateString('es-VE')}</span></div>
+                  )}
                 </div>
                 {detailProspect.notes && (
                   <div className="bg-muted/50 rounded-md p-2.5 text-xs">
