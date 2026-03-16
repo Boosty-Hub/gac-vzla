@@ -194,9 +194,10 @@ const DealershipPanel = () => {
   const [pPhone, setPPhone] = useState('');
   const [pEmail, setPEmail] = useState('');
   const [pModel, setPModel] = useState('');
-  const [pSource, setPSource] = useState('presencial');
+  const [pSource, setPSource] = useState('concesionario');
   const [pStatus, setPStatus] = useState('nuevo');
   const [pNotes, setPNotes] = useState('');
+  const [pEventName, setPEventName] = useState('');
 
   const handleSignOut = async () => {
     await signOut();
