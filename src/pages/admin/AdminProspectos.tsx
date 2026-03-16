@@ -157,7 +157,8 @@ const AdminProspectos = () => {
     setEditing(null);
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
-    setPSource('presencial'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
+    setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
+    setPEventName('');
     setDialogOpen(true);
   };
 
