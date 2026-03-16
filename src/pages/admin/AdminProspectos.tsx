@@ -47,13 +47,12 @@ interface Prospect {
 }
 
 const PROSPECT_SOURCES = [
-  { value: 'presencial', label: 'Presencial' },
-  { value: 'telefono', label: 'Teléfono' },
-  { value: 'web', label: 'Web' },
-  { value: 'redes_sociales', label: 'Redes Sociales' },
-  { value: 'referido', label: 'Referido' },
+  { value: 'concesionario', label: 'Concesionario' },
+  { value: 'visita', label: 'Visita' },
   { value: 'evento', label: 'Evento' },
-  { value: 'otro', label: 'Otro' },
+  { value: 'referido', label: 'Referido' },
+  { value: 'pagina_web', label: 'Página Web' },
+  { value: 'redes_sociales', label: 'Redes Sociales' },
 ];
 
 const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 'bg-gray-100 text-gray-800', sort_order: 0, is_active: true };
