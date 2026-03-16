@@ -134,6 +134,7 @@ const DealershipProspectos = () => {
       status: pStatus,
       notes: pNotes.trim() || null,
       salesperson: (pSalesperson.trim() && pSalesperson !== '__none') ? pSalesperson.trim() : null,
+      event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     });
     if (error) { toast.error('Error al crear prospecto'); console.error(error); }
     else { toast.success('Prospecto creado'); setDialogOpen(false); fetchProspects(); }
