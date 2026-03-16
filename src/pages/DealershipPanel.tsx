@@ -772,14 +772,20 @@ const DealershipPanel = () => {
                 <Input value={pModel} onChange={e => setPModel(e.target.value)} placeholder="Ej: GS8, Emkoo" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Fuente</Label>
-                <Select value={pSource} onValueChange={setPSource}>
+                <Label className="text-xs">Tipo de contacto</Label>
+                <Select value={pSource} onValueChange={v => { setPSource(v); if (v !== 'evento') setPEventName(''); }}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
+              {pSource === 'evento' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Nombre de evento</Label>
+                  <Input value={pEventName} onChange={e => setPEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" className="h-8 text-xs" />
+                </div>
+              )}
               <div className="space-y-1 col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
