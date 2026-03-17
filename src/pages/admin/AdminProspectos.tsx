@@ -156,12 +156,16 @@ const AdminProspectos = () => {
     return true;
   });
 
-  const openCreate = () => {
+  const resetForm = () => {
     setEditing(null);
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setPEventName('');
+  };
+
+  const openCreate = () => {
+    resetForm();
     setDialogOpen(true);
   };
 
@@ -206,11 +210,11 @@ const AdminProspectos = () => {
     if (editing) {
       const { error } = await supabase.from('prospects').update(payload).eq('id', editing.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
-      else { toast.success('Prospecto actualizado'); setDialogOpen(false); fetchProspects(); }
+      else { toast.success('Prospecto actualizado'); setDialogOpen(false); resetForm(); fetchProspects(); }
     } else {
       const { error } = await supabase.from('prospects').insert(payload);
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
-      else { toast.success('Prospecto creado'); setDialogOpen(false); fetchProspects(); }
+      else { toast.success('Prospecto creado'); setDialogOpen(false); resetForm(); fetchProspects(); }
     }
     setSaving(false);
   };

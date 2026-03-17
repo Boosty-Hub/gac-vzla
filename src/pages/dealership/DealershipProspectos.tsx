@@ -114,10 +114,14 @@ const DealershipProspectos = () => {
   const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
   const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
 
-  const openDialog = () => {
+  const resetForm = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setPEventName('');
+  };
+
+  const openDialog = () => {
+    resetForm();
     setDialogOpen(true);
   };
 
@@ -142,7 +146,7 @@ const DealershipProspectos = () => {
       event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     });
     if (error) { toast.error('Error al crear prospecto'); console.error(error); }
-    else { toast.success('Prospecto creado'); setDialogOpen(false); fetchProspects(); }
+    else { toast.success('Prospecto creado'); setDialogOpen(false); resetForm(); fetchProspects(); }
     setSaving(false);
   };
 
