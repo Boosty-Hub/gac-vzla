@@ -873,19 +873,18 @@ const AdminProspectos = () => {
                 <Input value={pName} onChange={e => setPName(e.target.value)} placeholder="Nombre completo" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Teléfono</Label>
+                <Label className="text-xs">Teléfono *</Label>
                 <Input value={pPhone} onChange={e => setPPhone(e.target.value)} placeholder="+58 412 1234567" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Email</Label>
+                <Label className="text-xs">Email *</Label>
                 <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Modelo de interés</Label>
+                <Label className="text-xs">Modelo de interés *</Label>
                 <Select value={pModel} onValueChange={setPModel}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none">Sin especificar</SelectItem>
                     {prospectBrands.map(brand => (
                       <SelectGroup key={brand}>
                         <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
@@ -898,7 +897,7 @@ const AdminProspectos = () => {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Tipo de contacto</Label>
+                <Label className="text-xs">Tipo de contacto *</Label>
                 <Select value={pSource} onValueChange={v => { setPSource(v); if (v !== 'evento') setPEventName(''); }}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -913,7 +912,7 @@ const AdminProspectos = () => {
                 </div>
               )}
               <div className="space-y-1">
-                <Label className="text-xs">Vendedor</Label>
+                <Label className="text-xs">Vendedor *</Label>
                 <Select value={pSalesperson} onValueChange={setPSalesperson}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
                   <SelectContent>

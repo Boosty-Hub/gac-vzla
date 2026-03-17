@@ -380,7 +380,7 @@ const DealershipProspectos = () => {
                 </div>
               )}
               <div className="space-y-1">
-                <Label className="text-xs">Vendedor</Label>
+                <Label className="text-xs">Vendedor *</Label>
                 <Select value={pSalesperson} onValueChange={setPSalesperson}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
                   <SelectContent>
