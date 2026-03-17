@@ -210,11 +210,11 @@ const AdminProspectos = () => {
     if (editing) {
       const { error } = await supabase.from('prospects').update(payload).eq('id', editing.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
-      else { toast.success('Prospecto actualizado'); setDialogOpen(false); fetchProspects(); }
+      else { toast.success('Prospecto actualizado'); setDialogOpen(false); resetForm(); fetchProspects(); }
     } else {
       const { error } = await supabase.from('prospects').insert(payload);
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
-      else { toast.success('Prospecto creado'); setDialogOpen(false); fetchProspects(); }
+      else { toast.success('Prospecto creado'); setDialogOpen(false); resetForm(); fetchProspects(); }
     }
     setSaving(false);
   };

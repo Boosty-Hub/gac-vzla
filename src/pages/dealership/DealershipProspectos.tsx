@@ -114,10 +114,14 @@ const DealershipProspectos = () => {
   const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
   const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
 
-  const openDialog = () => {
+  const resetForm = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setPEventName('');
+  };
+
+  const openDialog = () => {
+    resetForm();
     setDialogOpen(true);
   };
 
