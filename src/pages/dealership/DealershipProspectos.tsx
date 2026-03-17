@@ -365,7 +365,7 @@ const DealershipProspectos = () => {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Tipo de contacto</Label>
+                <Label className="text-xs">Tipo de contacto *</Label>
                 <Select value={pSource} onValueChange={v => { setPSource(v); if (v !== 'evento') setPEventName(''); }}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
