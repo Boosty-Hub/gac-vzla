@@ -384,7 +384,7 @@ const DealershipProspectos = () => {
                 <Select value={pSalesperson} onValueChange={setPSalesperson}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none">Sin asignar</SelectItem>
+                    
                     {salespersons.map(sp => (
                       <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
                     ))}
