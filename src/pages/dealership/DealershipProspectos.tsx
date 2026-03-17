@@ -348,7 +348,7 @@ const DealershipProspectos = () => {
                 <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Modelo de interés</Label>
+                <Label className="text-xs">Modelo de interés *</Label>
                 <Select value={pModel} onValueChange={setPModel}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
