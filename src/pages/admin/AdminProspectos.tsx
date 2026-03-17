@@ -156,12 +156,16 @@ const AdminProspectos = () => {
     return true;
   });
 
-  const openCreate = () => {
+  const resetForm = () => {
     setEditing(null);
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setPEventName('');
+  };
+
+  const openCreate = () => {
+    resetForm();
     setDialogOpen(true);
   };
 
