@@ -340,7 +340,7 @@ const DealershipProspectos = () => {
                 <Input value={pName} onChange={e => setPName(e.target.value)} placeholder="Nombre completo" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Teléfono</Label>
+                <Label className="text-xs">Teléfono *</Label>
                 <Input value={pPhone} onChange={e => setPPhone(e.target.value)} placeholder="+58 412 1234567" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
