@@ -182,6 +182,11 @@ const AdminProspectos = () => {
 
   const handleSave = async () => {
     if (!pName.trim()) { toast.error('El nombre es requerido'); return; }
+    if (!pPhone.trim()) { toast.error('El teléfono es requerido'); return; }
+    if (!pEmail.trim()) { toast.error('El correo es requerido'); return; }
+    if (!pModel.trim() || pModel === '__none') { toast.error('El modelo de interés es requerido'); return; }
+    if (!pSource) { toast.error('El tipo de contacto es requerido'); return; }
+    if (!pSalesperson || pSalesperson === '__none') { toast.error('El vendedor es requerido'); return; }
     if (!pDealership) { toast.error('Seleccione un concesionario'); return; }
     setSaving(true);
 
