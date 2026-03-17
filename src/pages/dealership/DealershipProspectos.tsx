@@ -352,7 +352,7 @@ const DealershipProspectos = () => {
                 <Select value={pModel} onValueChange={setPModel}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    
                     {prospectBrands.map(brand => (
                       <SelectGroup key={brand}>
                         <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
