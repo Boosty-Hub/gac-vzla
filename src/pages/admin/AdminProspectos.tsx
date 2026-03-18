@@ -686,13 +686,12 @@ const AdminProspectos = () => {
       </Tabs>
 
       {/* DETAIL DIALOG */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className={cn("max-w-md", isMobile && "max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto")}>
-          <DialogHeader>
-            <DialogTitle className="font-display flex items-center gap-2">
+      <ResponsiveModal open={detailOpen} onOpenChange={setDetailOpen} className="max-w-md">
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle className="font-display flex items-center gap-2">
               <User className="w-4 h-4" /> Detalle del Prospecto
-            </DialogTitle>
-          </DialogHeader>
+            </ResponsiveModalTitle>
+          </ResponsiveModalHeader>
           {detailProspect && (() => {
             const st = PROSPECT_STATUSES.find(s => s.name === detailProspect.status) || FALLBACK_STATUS;
             const src = PROSPECT_SOURCES.find(s => s.value === detailProspect.source);
@@ -734,16 +733,15 @@ const AdminProspectos = () => {
                     <p className="text-muted-foreground whitespace-pre-wrap">{detailProspect.notes}</p>
                   </div>
                 )}
-                <div className="flex justify-end gap-2 pt-2">
+                <ResponsiveModalFooter className="flex-col sm:flex-row gap-2">
                   {canEdit && (
-                    <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); openEdit(detailProspect); }}>Editar</Button>
+                    <Button size="sm" variant="outline" className="text-xs w-full sm:w-auto" onClick={() => { setDetailOpen(false); openEdit(detailProspect); }}>Editar</Button>
                   )}
-                </div>
+                </ResponsiveModalFooter>
               </div>
             );
           })()}
-        </DialogContent>
-      </Dialog>
+      </ResponsiveModal>
 
       {/* IMPORT PREVIEW DIALOG */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
