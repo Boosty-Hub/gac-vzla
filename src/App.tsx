@@ -31,6 +31,7 @@ import AdminGeneral from './pages/admin/config/AdminGeneral';
 import AdminPlantillas from './pages/admin/config/AdminPlantillas';
 import ConfigLayout from "./components/layouts/ConfigLayout";
 import PublicReserva from "./pages/PublicReserva";
+import PublicProspectos from "./pages/PublicProspectos";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -59,6 +60,7 @@ const App = () => (
             <Route path="/magic-login" element={<MagicLogin />} />
             <Route path="/" element={<RedirectByRole />} />
             <Route path="/reservar" element={<PublicReserva />} />
+            <Route path="/prospectos" element={<PublicProspectos />} />
 
             {/* Cliente routes */}
             <Route path="/usuario" element={

@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Search, Users, Phone, Mail } from 'lucide-react';
+import { Plus, Search, Users, Phone, Mail, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
@@ -214,6 +214,9 @@ const DealershipProspectos = () => {
               </SelectContent>
             </Select>
           )}
+          <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/prospectos`); toast.success('Enlace copiado al portapapeles'); }} className="gap-1">
+            <ExternalLink className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Landing</span>
+          </Button>
           <Button size="sm" onClick={openDialog} className="gac-gradient">
             <Plus className="w-3.5 h-3.5 sm:mr-1" /> <span className="hidden sm:inline">Nuevo Prospecto</span>
           </Button>

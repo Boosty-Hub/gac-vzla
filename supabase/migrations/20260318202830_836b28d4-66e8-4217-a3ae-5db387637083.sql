@@ -1,0 +1,1 @@
+CREATE POLICY "anon_insert_prospects" ON public.prospects FOR INSERT TO anon WITH CHECK (true);
