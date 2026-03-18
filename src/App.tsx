@@ -59,6 +59,7 @@ const App = () => (
             <Route path="/magic-login" element={<MagicLogin />} />
             <Route path="/" element={<RedirectByRole />} />
             <Route path="/reservar" element={<PublicReserva />} />
+            <Route path="/prospectos" element={<PublicProspectos />} />
 
             {/* Cliente routes */}
             <Route path="/usuario" element={
