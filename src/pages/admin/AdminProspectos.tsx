@@ -858,16 +858,15 @@ const AdminProspectos = () => {
       </Dialog>
 
       {/* CREATE/EDIT DIALOG */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className={cn(isMobile && "max-w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto")}>
-          <DialogHeader>
-            <DialogTitle className="font-display">{editing ? 'Editar Prospecto' : 'Nuevo Prospecto'}</DialogTitle>
-          </DialogHeader>
+      <ResponsiveModal open={dialogOpen} onOpenChange={setDialogOpen}>
+          <ResponsiveModalHeader>
+            <ResponsiveModalTitle className="font-display">{editing ? 'Editar Prospecto' : 'Nuevo Prospecto'}</ResponsiveModalTitle>
+          </ResponsiveModalHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1">
               <Label className="text-xs">Concesionario *</Label>
               <Select value={pDealership} onValueChange={setPDealership}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
                 <SelectContent>
                   {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}{d.city ? ` — ${d.city}` : ''}</SelectItem>)}
                 </SelectContent>
@@ -876,20 +875,20 @@ const AdminProspectos = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Nombre *</Label>
-                <Input value={pName} onChange={e => setPName(e.target.value)} placeholder="Nombre completo" className="h-8 text-xs" />
+                <Input value={pName} onChange={e => setPName(e.target.value)} placeholder="Nombre completo" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Teléfono *</Label>
-                <Input value={pPhone} onChange={e => setPPhone(e.target.value)} placeholder="+58 412 1234567" className="h-8 text-xs" />
+                <Input value={pPhone} onChange={e => setPPhone(e.target.value)} placeholder="+58 412 1234567" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Email *</Label>
-                <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-8 text-xs" />
+                <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Modelo de interés *</Label>
                 <Select value={pModel} onValueChange={setPModel}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
                     {prospectBrands.map(brand => (
                       <SelectGroup key={brand}>
@@ -905,7 +904,7 @@ const AdminProspectos = () => {
               <div className="space-y-1">
                 <Label className="text-xs">Tipo de contacto *</Label>
                 <Select value={pSource} onValueChange={v => { setPSource(v); if (v !== 'evento') setPEventName(''); }}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                   </SelectContent>
@@ -914,15 +913,14 @@ const AdminProspectos = () => {
               {pSource === 'evento' && (
                 <div className="space-y-1">
                   <Label className="text-xs">Nombre de evento</Label>
-                  <Input value={pEventName} onChange={e => setPEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" className="h-8 text-xs" />
+                  <Input value={pEventName} onChange={e => setPEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" className="h-9 text-xs" />
                 </div>
               )}
               <div className="space-y-1">
                 <Label className="text-xs">Vendedor *</Label>
                 <Select value={pSalesperson} onValueChange={setPSalesperson}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
                   <SelectContent>
-                    
                     {salespersons.map(sp => (
                       <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
                     ))}
@@ -932,7 +930,7 @@ const AdminProspectos = () => {
               <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
-                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {PROSPECT_STATUSES.map(s => (
                       <SelectItem key={s.name} value={s.name}>
@@ -948,14 +946,13 @@ const AdminProspectos = () => {
               <Textarea value={pNotes} onChange={e => setPNotes(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones..." />
             </div>
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <ResponsiveModalFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setDialogOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
             <Button onClick={handleSave} disabled={saving} className="gac-gradient w-full sm:w-auto">
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editing ? 'Guardar Cambios' : 'Crear Prospecto'}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </ResponsiveModalFooter>
+      </ResponsiveModal>
 
       {/* DELETE CONFIRMATION */}
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
