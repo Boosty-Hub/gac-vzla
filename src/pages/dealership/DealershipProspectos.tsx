@@ -287,7 +287,7 @@ const DealershipProspectos = () => {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
                   <TableHead>Modelo</TableHead>
-                  <TableHead>Vendedor</TableHead>
+                  {!isSalesperson && <TableHead>Vendedor</TableHead>}
                   <TableHead>Fuente</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Fecha</TableHead>
