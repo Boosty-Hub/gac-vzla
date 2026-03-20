@@ -167,7 +167,7 @@ const DealershipProspectos = () => {
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold truncate">{p.name}</p>
-              {p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
+              {!isSalesperson && p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
             </div>
             <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
               <SelectTrigger className="h-6 w-auto text-[10px] px-1.5 py-0 border-0 bg-transparent shrink-0">
@@ -287,7 +287,7 @@ const DealershipProspectos = () => {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
                   <TableHead>Modelo</TableHead>
-                  <TableHead>Vendedor</TableHead>
+                  {!isSalesperson && <TableHead>Vendedor</TableHead>}
                   <TableHead>Fuente</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Fecha</TableHead>
@@ -305,7 +305,7 @@ const DealershipProspectos = () => {
                         {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                       </TableCell>
                       <TableCell>{p.model_interest || '-'}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>
+                      {!isSalesperson && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
                       <TableCell>
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
                       </TableCell>
