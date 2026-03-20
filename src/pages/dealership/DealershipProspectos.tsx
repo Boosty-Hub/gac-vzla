@@ -167,7 +167,7 @@ const DealershipProspectos = () => {
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold truncate">{p.name}</p>
-              {p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
+              {!isSalesperson && p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
             </div>
             <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
               <SelectTrigger className="h-6 w-auto text-[10px] px-1.5 py-0 border-0 bg-transparent shrink-0">
