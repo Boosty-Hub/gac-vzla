@@ -305,7 +305,7 @@ const DealershipProspectos = () => {
                         {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                       </TableCell>
                       <TableCell>{p.model_interest || '-'}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>
+                      {!isSalesperson && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
                       <TableCell>
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
                       </TableCell>
