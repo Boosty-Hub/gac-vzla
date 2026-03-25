@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import NotificationCenter from '@/components/NotificationCenter';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -23,9 +24,9 @@ import {
   CalendarDays,
   LogOut,
   Users,
-  Car,
   LayoutDashboard,
 } from 'lucide-react';
+import imbLogo from '@/assets/imb-logo.png';
 
 interface DealershipLayoutProps {
   children: ReactNode;
@@ -66,11 +67,9 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
       <Sidebar collapsible="icon">
         <SidebarHeader className="p-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <Car className="w-4 h-4" />
-            </div>
+            <img src={imbLogo} alt="IMB" className="w-8 h-8 rounded-lg object-contain brightness-0 invert" />
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-              <span className="text-sm font-display font-bold text-sidebar-foreground">GAC Motor</span>
+              <span className="text-sm font-display font-bold text-sidebar-foreground">IMB Movilidad</span>
               <span className="text-xs text-sidebar-foreground/60">Concesionario</span>
             </div>
           </div>
@@ -139,6 +138,9 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
           <h2 className="text-sm font-medium text-muted-foreground">
             {menuItems.flatMap(g => g.items).find(i => location.pathname === i.path || (i.path !== '/concesionario' && location.pathname.startsWith(i.path + '/')))?.label || 'Inicio'}
           </h2>
+          <div className="ml-auto">
+            <NotificationCenter />
+          </div>
         </header>
         <main className="flex-1 p-6">
           {children}

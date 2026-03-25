@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,8 +8,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Switch } from '@/components/ui/switch';
-import { MapPin, Plus, Pencil, Phone, Clock, Car } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Dealership {
@@ -19,17 +23,32 @@ interface Dealership {
   address: string | null;
   phone: string | null;
   schedule: string | null;
-  daily_capacity: number;
+  bays: number;
   is_active: boolean;
+  brand: string;
+  type: string;
+  is_service_center: boolean;
+  email: string | null;
+  instagram: string | null;
+  website: string | null;
   created_at: string;
 }
 
 const AdminConcesionarios = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('concesionarios.create');
+  const canEdit = hasPermission('concesionarios.edit');
+  const canDelete = hasPermission('concesionarios.delete');
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<Dealership | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailDealer, setDetailDealer] = useState<Dealership | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Dealership | null>(null);
+
+  const [filterBrand, setFilterBrand] = useState('todos');
 
   // Form
   const [formName, setFormName] = useState('');
@@ -38,8 +57,13 @@ const AdminConcesionarios = () => {
   const [formAddress, setFormAddress] = useState('');
   const [formPhone, setFormPhone] = useState('');
   const [formSchedule, setFormSchedule] = useState('8:00 AM - 5:00 PM');
-  const [formCapacity, setFormCapacity] = useState('10');
+  const [formBays, setFormBays] = useState('3');
   const [formIsActive, setFormIsActive] = useState(true);
+  const [formBrand, setFormBrand] = useState('GAC');
+  const [formIsServiceCenter, setFormIsServiceCenter] = useState(false);
+  const [formEmail, setFormEmail] = useState('');
+  const [formInstagram, setFormInstagram] = useState('');
+  const [formWebsite, setFormWebsite] = useState('');
 
   const fetchDealerships = async () => {
     setLoading(true);
@@ -52,17 +76,23 @@ const AdminConcesionarios = () => {
       toast.error('Error al cargar concesionarios');
       console.error(error);
     } else {
-      setDealerships(data || []);
+      setDealerships((data as unknown as Dealership[]) || []);
     }
     setLoading(false);
   };
 
   useEffect(() => { fetchDealerships(); }, []);
 
+  const filteredDealerships = dealerships.filter(d => {
+    if (filterBrand !== 'todos' && d.brand !== filterBrand) return false;
+    return true;
+  });
+
   const openCreate = () => {
     setEditing(null);
     setFormName(''); setFormCity(''); setFormState(''); setFormAddress('');
-    setFormPhone(''); setFormSchedule('8:00 AM - 5:00 PM'); setFormCapacity('10'); setFormIsActive(true);
+    setFormPhone(''); setFormSchedule('8:00 AM - 5:00 PM'); setFormBays('3'); setFormIsActive(true);
+    setFormBrand('GAC'); setFormIsServiceCenter(false); setFormEmail(''); setFormInstagram(''); setFormWebsite('');
     setDialogOpen(true);
   };
 
@@ -74,8 +104,13 @@ const AdminConcesionarios = () => {
     setFormAddress(d.address || '');
     setFormPhone(d.phone || '');
     setFormSchedule(d.schedule || '8:00 AM - 5:00 PM');
-    setFormCapacity(String(d.daily_capacity));
+    setFormBays(String(d.bays));
     setFormIsActive(d.is_active);
+    setFormBrand(d.brand);
+    setFormIsServiceCenter(d.is_service_center ?? false);
+    setFormEmail(d.email || '');
+    setFormInstagram(d.instagram || '');
+    setFormWebsite(d.website || '');
     setDialogOpen(true);
   };
 
@@ -90,8 +125,14 @@ const AdminConcesionarios = () => {
       address: formAddress.trim() || null,
       phone: formPhone.trim() || null,
       schedule: formSchedule.trim() || null,
-      daily_capacity: parseInt(formCapacity) || 10,
+      bays: parseInt(formBays) || 3,
       is_active: formIsActive,
+      brand: formBrand,
+      type: 'concesionario' as const,
+      is_service_center: formIsServiceCenter,
+      email: formEmail.trim() || null,
+      instagram: formInstagram.trim() || null,
+      website: formWebsite.trim() || null,
     };
 
     if (editing) {
@@ -106,27 +147,47 @@ const AdminConcesionarios = () => {
     setSaving(false);
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    const { error } = await supabase.from('dealerships').delete().eq('id', deleteTarget.id);
+    if (error) { toast.error('Error al eliminar: ' + error.message); console.error(error); }
+    else { toast.success('Concesionario eliminado'); fetchDealerships(); }
+    setDeleteTarget(null);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-display font-bold">Concesionarios</h1>
           <Badge variant="outline" className="gap-1 text-xs">
-            <MapPin className="w-3 h-3" /> {dealerships.length}
+            <MapPin className="w-3 h-3" /> {filteredDealerships.length}
           </Badge>
         </div>
-        <Button size="sm" onClick={openCreate} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {canCreate && (
+          <Button size="sm" onClick={openCreate} className="imb-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
-      <Card className="gac-shadow">
+      <div className="flex flex-wrap items-center gap-3">
+        <Tabs value={filterBrand} onValueChange={setFilterBrand}>
+          <TabsList className="h-8">
+            <TabsTrigger value="todos" className="text-xs px-3 h-6">Todas</TabsTrigger>
+            <TabsTrigger value="GAC" className="text-xs px-3 h-6">GAC</TabsTrigger>
+            <TabsTrigger value="DFSK" className="text-xs px-3 h-6">DFSK</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      <Card className="imb-shadow">
         {loading ? (
           <CardContent className="p-8 text-center">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">Cargando concesionarios...</p>
           </CardContent>
-        ) : dealerships.length === 0 ? (
+        ) : filteredDealerships.length === 0 ? (
           <CardContent className="p-8 text-center">
             <MapPin className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No hay concesionarios</p>
@@ -136,38 +197,64 @@ const AdminConcesionarios = () => {
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                 <TableHead>Nombre</TableHead>
+                <TableHead>Marca</TableHead>
+                <TableHead>Centro Serv.</TableHead>
                 <TableHead>Ciudad</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead>Teléfono</TableHead>
-                <TableHead>Horario</TableHead>
-                <TableHead>Cap.</TableHead>
+                <TableHead>Contacto</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-right">Acc.</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {dealerships.map(d => (
-                <TableRow key={d.id} className="[&>td]:py-1.5">
-                  <TableCell className="font-medium">{d.name}</TableCell>
+              {filteredDealerships.map(d => (
+                <TableRow key={d.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => { setDetailDealer(d); setDetailOpen(true); }}>
+                  <TableCell className="font-medium max-w-[200px] truncate">{d.name}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${d.brand === 'GAC' ? 'border-primary text-primary' : 'border-orange-500 text-orange-600'}`}>
+                      {d.brand}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {d.is_service_center ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-emerald-500 text-emerald-600">
+                        <Wrench className="w-2.5 h-2.5" /> Sí
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">No</span>
+                    )}
+                  </TableCell>
                   <TableCell>{d.city || '-'}</TableCell>
                   <TableCell>{d.state || '-'}</TableCell>
                   <TableCell>{d.phone || '-'}</TableCell>
-                  <TableCell>{d.schedule || '-'}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
-                      <Car className="w-2.5 h-2.5" /> {d.daily_capacity}
-                    </Badge>
+                    <div className="flex items-center gap-1.5">
+                      {d.email && <span title={d.email}><Mail className="w-3 h-3 text-muted-foreground" /></span>}
+                      {d.instagram && <span title={d.instagram}><Instagram className="w-3 h-3 text-muted-foreground" /></span>}
+                      {d.website && <span title={d.website}><Globe className="w-3 h-3 text-muted-foreground" /></span>}
+                      {!d.email && !d.instagram && !d.website && '-'}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Badge variant={d.is_active ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
                       {d.is_active ? 'Activo' : 'Inactivo'}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(d)}>
-                      <Pencil className="w-3 h-3" />
-                    </Button>
-                  </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-0.5">
+                        {canEdit && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={(e) => { e.stopPropagation(); openEdit(d); }}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
+                        {canDelete && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteTarget(d); }}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -175,12 +262,114 @@ const AdminConcesionarios = () => {
         )}
       </Card>
 
+      {/* Detail dialog */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Building2 className="w-4 h-4" />
+              {detailDealer?.name}
+            </DialogTitle>
+          </DialogHeader>
+          {detailDealer && (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline" className={`text-xs px-2 py-0.5 ${detailDealer.brand === 'GAC' ? 'border-primary text-primary' : 'border-orange-500 text-orange-600'}`}>
+                  {detailDealer.brand}
+                </Badge>
+                {detailDealer.is_service_center && (
+                  <Badge variant="outline" className="text-xs px-2 py-0.5 gap-1 border-emerald-500 text-emerald-600">
+                    <Wrench className="w-3 h-3" /> Centro de Servicio
+                  </Badge>
+                )}
+                <Badge variant={detailDealer.is_active ? 'default' : 'secondary'} className="text-xs px-2 py-0.5">
+                  {detailDealer.is_active ? 'Activo' : 'Inactivo'}
+                </Badge>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 text-sm">
+                {detailDealer.address && (
+                  <div className="flex items-start gap-2">
+                    <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
+                    <span>{detailDealer.address}</span>
+                  </div>
+                )}
+                {(detailDealer.city || detailDealer.state) && (
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span>{[detailDealer.city, detailDealer.state].filter(Boolean).join(', ')}</span>
+                  </div>
+                )}
+                {detailDealer.phone && (
+                  <div className="flex items-center gap-2">
+                    <Phone className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span>{detailDealer.phone}</span>
+                  </div>
+                )}
+                {detailDealer.email && (
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span>{detailDealer.email}</span>
+                  </div>
+                )}
+                {detailDealer.instagram && (
+                  <div className="flex items-center gap-2">
+                    <Instagram className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span>{detailDealer.instagram}</span>
+                  </div>
+                )}
+                {detailDealer.website && (
+                  <div className="flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span>{detailDealer.website}</span>
+                  </div>
+                )}
+                {detailDealer.schedule && (
+                  <div className="flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span>{detailDealer.schedule}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <Car className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span>Bahías: {detailDealer.bays}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            {canDelete && detailDealer && (
+              <Button variant="destructive" size="sm" className="mr-auto" onClick={() => { setDetailOpen(false); setDeleteTarget(detailDealer); }}>
+                <Trash2 className="w-3.5 h-3.5 mr-1" /> Eliminar
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => setDetailOpen(false)}>Cerrar</Button>
+            {canEdit && (
+              <Button className="imb-gradient" onClick={() => { setDetailOpen(false); if (detailDealer) openEdit(detailDealer); }}>
+                <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create/Edit dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display">{editing ? 'Editar Concesionario' : 'Nuevo Concesionario'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
+            <div className="space-y-2">
+              <Label>Marca *</Label>
+              <Select value={formBrand} onValueChange={setFormBrand}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="GAC">GAC</SelectItem>
+                  <SelectItem value="DFSK">DFSK</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-2">
               <Label>Nombre *</Label>
               <Input value={formName} onChange={e => setFormName(e.target.value)} placeholder="Ej: GAC Motor Caracas Centro" />
@@ -202,16 +391,39 @@ const AdminConcesionarios = () => {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Teléfono</Label>
-                <Input value={formPhone} onChange={e => setFormPhone(e.target.value)} placeholder="0212-2631234" />
+                <Input value={formPhone} onChange={e => setFormPhone(e.target.value)} placeholder="(0412) 123 4567" />
               </div>
               <div className="space-y-2">
-                <Label>Capacidad diaria</Label>
-                <Input type="number" value={formCapacity} onChange={e => setFormCapacity(e.target.value)} placeholder="10" />
+                <Label>Correo</Label>
+                <Input value={formEmail} onChange={e => setFormEmail(e.target.value)} placeholder="correo@ejemplo.com" />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Horario</Label>
-              <Input value={formSchedule} onChange={e => setFormSchedule(e.target.value)} placeholder="8:00 AM - 5:00 PM" />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Instagram</Label>
+                <Input value={formInstagram} onChange={e => setFormInstagram(e.target.value)} placeholder="@cuenta" />
+              </div>
+              <div className="space-y-2">
+                <Label>Sitio Web</Label>
+                <Input value={formWebsite} onChange={e => setFormWebsite(e.target.value)} placeholder="www.ejemplo.com" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Bahías</Label>
+                <Input type="number" value={formBays} onChange={e => setFormBays(e.target.value)} placeholder="3" />
+              </div>
+              <div className="space-y-2">
+                <Label>Horario</Label>
+                <Input value={formSchedule} onChange={e => setFormSchedule(e.target.value)} placeholder="8:00 AM - 5:00 PM" />
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Centro de Servicio</Label>
+                <p className="text-xs text-muted-foreground">Este concesionario también opera como centro de servicio</p>
+              </div>
+              <Switch checked={formIsServiceCenter} onCheckedChange={setFormIsServiceCenter} />
             </div>
             <div className="flex items-center justify-between">
               <div>
@@ -223,12 +435,30 @@ const AdminConcesionarios = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSave} disabled={saving} className="gac-gradient">
+            <Button onClick={handleSave} disabled={saving} className="imb-gradient">
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editing ? 'Guardar' : 'Crear'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar concesionario?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará permanentemente <strong>{deleteTarget?.name}</strong>. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

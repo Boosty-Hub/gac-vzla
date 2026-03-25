@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -46,6 +47,23 @@ interface ClientUser {
   } | null;
 }
 
+interface ServiceRecord {
+  id: string;
+  reservation_date: string;
+  reservation_time: string;
+  service_type: string;
+  current_mileage: number;
+  status: string;
+  service_notes: string | null;
+  completed_at: string | null;
+  dealerships: { name: string } | null;
+}
+
+interface ClientVehicleInfo {
+  id: string;
+  warranty_active: boolean;
+}
+
 interface Client {
   id: string;
   full_name: string;
@@ -57,11 +75,14 @@ interface Client {
   state: string | null;
   is_active: boolean;
   created_at: string;
-  vehicles: { count: number }[];
+  vehicles: ClientVehicleInfo[];
   client_users: { count: number }[];
 }
 
 const AdminClientes = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('clientes.create');
+  const canEdit = hasPermission('clientes.edit');
   const [clients, setClients] = useState<Client[]>([]);
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,6 +90,11 @@ const AdminClientes = () => {
   const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Filters
+  const [filterStatus, setFilterStatus] = useState('todos');
+  const [filterWarranty, setFilterWarranty] = useState('todos');
+  const [filterCity, setFilterCity] = useState('todos');
 
   // Client dialog
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
@@ -110,14 +136,42 @@ const AdminClientes = () => {
   const [cuShowPassword, setCuShowPassword] = useState(false);
   const [creatingUser, setCreatingUser] = useState(false);
 
+  // Vehicle detail dialog
+  const [vDetailOpen, setVDetailOpen] = useState(false);
+  const [vDetailVehicle, setVDetailVehicle] = useState<Vehicle | null>(null);
+  const [vDetailHistory, setVDetailHistory] = useState<ServiceRecord[]>([]);
+  const [vDetailLoading, setVDetailLoading] = useState(false);
+
+  const openVehicleDetail = async (v: Vehicle) => {
+    setVDetailVehicle(v);
+    setVDetailHistory([]);
+    setVDetailOpen(true);
+    setVDetailLoading(true);
+    const { data } = await supabase
+      .from('reservations')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, completed_at, dealerships(name)')
+      .eq('vehicle_id', v.id)
+      .order('reservation_date', { ascending: false })
+      .limit(50);
+    setVDetailHistory((data || []) as ServiceRecord[]);
+    setVDetailLoading(false);
+  };
+
   const fetchClients = async () => {
     setLoading(true);
     let query = supabase
       .from('clients')
-      .select('*, vehicles(count), client_users(count)', { count: 'exact' });
+      .select('*, vehicles(id, warranty_active), client_users(count)', { count: 'exact' });
 
     if (busqueda.trim()) {
       query = query.or(`full_name.ilike.%${busqueda}%,cedula.ilike.%${busqueda}%,email.ilike.%${busqueda}%,phone.ilike.%${busqueda}%`);
+    }
+
+    if (filterStatus !== 'todos') {
+      query = query.eq('is_active', filterStatus === 'activo');
+    }
+    if (filterCity !== 'todos') {
+      query = query.eq('city', filterCity);
     }
 
     const { data, error, count } = await query
@@ -128,8 +182,16 @@ const AdminClientes = () => {
       toast.error('Error al cargar clientes');
       console.error(error);
     } else {
-      setClients(data || []);
-      setTotalCount(count || 0);
+      let filtered = data || [];
+      // Client-side warranty filter since it depends on nested vehicles
+      if (filterWarranty !== 'todos') {
+        filtered = filtered.filter(c => {
+          const hasActiveWarranty = c.vehicles?.some((v: any) => v.warranty_active);
+          return filterWarranty === 'activa' ? hasActiveWarranty : !hasActiveWarranty;
+        });
+      }
+      setClients(filtered as Client[]);
+      setTotalCount(filterWarranty !== 'todos' ? filtered.length : (count || 0));
     }
     setLoading(false);
   };
@@ -158,11 +220,11 @@ const AdminClientes = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [busqueda, pageSize]);
+  }, [busqueda, pageSize, filterStatus, filterWarranty, filterCity]);
 
   useEffect(() => {
     fetchClients();
-  }, [page, busqueda, pageSize]);
+  }, [page, busqueda, pageSize, filterStatus, filterWarranty, filterCity]);
 
   useEffect(() => {
     fetchModels();
@@ -360,16 +422,43 @@ const AdminClientes = () => {
             <Users className="w-3 h-3" /> {totalCount}
           </Badge>
         </div>
-        <Button size="sm" onClick={openCreateClient} className="gac-gradient">
-          <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-        </Button>
+        {canCreate && (
+          <Button size="sm" onClick={openCreateClient} className="gac-gradient">
+            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+          </Button>
+        )}
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-[180px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Buscar nombre, cédula, correo, teléfono..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
         </div>
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-[120px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todos</SelectItem>
+            <SelectItem value="activo">Activos</SelectItem>
+            <SelectItem value="inactivo">Inactivos</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterWarranty} onValueChange={setFilterWarranty}>
+          <SelectTrigger className="w-[150px] h-8 text-xs"><SelectValue placeholder="Garantía" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todas las garantías</SelectItem>
+            <SelectItem value="activa">Garantía activa</SelectItem>
+            <SelectItem value="inactiva">Sin garantía activa</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={filterCity} onValueChange={setFilterCity}>
+          <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Ciudad" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Todas las ciudades</SelectItem>
+            {Array.from(new Set(clients.map(c => c.city).filter(Boolean))).sort().map(city => (
+              <SelectItem key={city!} value={city!}>{city}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
           <SelectTrigger className="w-[100px] h-8 text-xs">
             <SelectValue />
@@ -404,6 +493,7 @@ const AdminClientes = () => {
                 <TableHead>Correo</TableHead>
                 <TableHead>Ciudad</TableHead>
                 <TableHead>Veh.</TableHead>
+                <TableHead>Garantía</TableHead>
                 <TableHead>Usr.</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-right">Acc.</TableHead>
@@ -425,8 +515,21 @@ const AdminClientes = () => {
                     <TableCell>{c.city || '-'}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
-                        <Car className="w-2.5 h-2.5" /> {c.vehicles?.[0]?.count ?? 0}
+                        <Car className="w-2.5 h-2.5" /> {c.vehicles?.length ?? 0}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {c.vehicles?.length > 0 ? (
+                        c.vehicles.some(v => v.warranty_active) ? (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-800 gap-0.5">
+                            <ShieldCheck className="w-2.5 h-2.5" /> Activa
+                          </Badge>
+                        ) : (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-800 gap-0.5">
+                            <ShieldX className="w-2.5 h-2.5" /> Inactiva
+                          </Badge>
+                        )
+                      ) : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       <Button variant="ghost" size="icon" className="h-6 w-6 relative" onClick={() => openUsersDialog(c)} title="Gestionar usuarios">
@@ -444,9 +547,11 @@ const AdminClientes = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right" onClick={e => e.stopPropagation()}>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
-                        <Pencil className="w-3 h-3" />
-                      </Button>
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
                     </TableCell>
                   </TableRow>
                   {expandedClient === c.id && (
@@ -467,7 +572,7 @@ const AdminClientes = () => {
                         ) : (
                           <div className="space-y-2">
                             {clientVehicles[c.id].map(v => (
-                              <div key={v.id} className="flex items-center justify-between bg-background rounded-lg p-3 border">
+                              <div key={v.id} className="flex items-center justify-between bg-background rounded-lg p-3 border cursor-pointer hover:shadow-md transition-shadow" onClick={() => openVehicleDetail(v)}>
                                 <div className="flex items-center gap-3">
                                   <Car className="w-5 h-5 text-muted-foreground" />
                                   <div>
@@ -488,9 +593,11 @@ const AdminClientes = () => {
                                   <Badge variant={v.warranty_active ? "default" : "secondary"} className="text-xs">
                                     {v.warranty_active ? 'Garantía' : 'Sin garantía'}
                                   </Badge>
-                                  <Button variant="ghost" size="sm" onClick={() => openEditVehicle(v)}>
-                                    <Pencil className="w-3 h-3" />
-                                  </Button>
+                                  {canEdit && (
+                                    <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditVehicle(v); }}>
+                                      <Pencil className="w-3 h-3" />
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             ))}
@@ -668,6 +775,78 @@ const AdminClientes = () => {
               {creatingUser ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <><UserPlus className="w-3.5 h-3.5 mr-1" /> Crear y vincular usuario</>}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Vehicle Detail Dialog */}
+      <Dialog open={vDetailOpen} onOpenChange={setVDetailOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Car className="w-4 h-4" /> Detalle del Vehículo
+            </DialogTitle>
+          </DialogHeader>
+          {vDetailVehicle && (() => {
+            const v = vDetailVehicle;
+            return (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-display font-bold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
+                    <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
+                  </div>
+                  <Badge className={cn("text-xs flex items-center gap-1", v.warranty_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                    {v.warranty_active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                    {v.warranty_active ? 'Garantía' : 'Sin Garantía'}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Hash className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Kilometraje</p><p className="font-medium">{v.mileage.toLocaleString()} km</p></div></div>
+                  {v.color && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Car className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Color</p><p className="font-medium">{v.color}</p></div></div>}
+                  {v.purchase_date && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Compra</p><p className="font-medium">{v.purchase_date}</p></div></div>}
+                </div>
+
+                <Separator />
+                <h4 className="font-semibold text-xs">Historial de Servicios ({vDetailHistory.length})</h4>
+
+                {vDetailLoading ? (
+                  <div className="text-center py-4">
+                    <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                    <p className="text-xs text-muted-foreground">Cargando historial...</p>
+                  </div>
+                ) : vDetailHistory.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-4">Sin servicios registrados</p>
+                ) : (
+                  <div className="space-y-2">
+                    {vDetailHistory.map(h => {
+                      const isCompleted = h.status === 'completada';
+                      return (
+                        <div key={h.id} className="border rounded-md p-2.5 text-xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">{h.service_type}</span>
+                            <Badge className={cn("text-[10px] px-1.5 py-0", isCompleted ? "bg-green-100 text-green-800" : h.status === 'cancelada' ? "bg-red-100 text-red-800" : "bg-yellow-100 text-yellow-800")}>{h.status}</Badge>
+                          </div>
+                          <div className="flex items-center gap-3 text-muted-foreground">
+                            <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{h.reservation_date}</span>
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{h.reservation_time?.slice(0, 5)}</span>
+                            <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
+                          </div>
+                          {h.dealerships && <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>}
+                          {h.service_notes && (
+                            <div className="bg-green-50 border border-green-200 rounded p-1.5">
+                              <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo realizado:</p>
+                              <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

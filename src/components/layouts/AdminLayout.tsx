@@ -1,5 +1,6 @@
-import { ReactNode, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { ReactNode } from 'react';
+import NotificationCenter from '@/components/NotificationCenter';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Sidebar,
@@ -27,12 +28,12 @@ import {
   MapPin,
   ShieldCheck,
   Users,
-  Wrench,
   ClipboardList,
   Settings,
   BookOpen,
   UserCheck,
 } from 'lucide-react';
+import imbLogo from '@/assets/imb-logo.png';
 
 interface AdminLayoutProps {
   children: ReactNode;
@@ -42,30 +43,31 @@ const menuItems = [
   {
     group: 'General',
     items: [
-      { label: 'Dashboard', icon: BarChart3, path: '/admin' },
+      { label: 'Dashboard', icon: BarChart3, path: '/admin', module: 'dashboard' },
     ],
   },
   {
     group: 'Operaciones',
     items: [
-      { label: 'Reservas', icon: CalendarDays, path: '/admin/reservas' },
-      { label: 'Garantías', icon: ShieldCheck, path: '/admin/garantias' },
-      { label: 'Historial de Servicios', icon: ClipboardList, path: '/admin/historial' },
+      { label: 'Reservas', icon: CalendarDays, path: '/admin/reservas', module: 'reservas' },
+      { label: 'Garantías', icon: ShieldCheck, path: '/admin/garantias', module: 'garantias' },
+      { label: 'Historial de Servicios', icon: ClipboardList, path: '/admin/historial', module: 'historial' },
     ],
   },
   {
     group: 'Gestión',
     items: [
-      { label: 'Clientes', icon: UserCheck, path: '/admin/clientes' },
-      { label: 'Modelos', icon: BookOpen, path: '/admin/modelos' },
-      { label: 'Concesionarios', icon: MapPin, path: '/admin/concesionarios' },
-      { label: 'Vehículos', icon: Car, path: '/admin/vehiculos' },
+      { label: 'Clientes', icon: UserCheck, path: '/admin/clientes', module: 'clientes' },
+      { label: 'Prospectos', icon: Users, path: '/admin/prospectos', module: 'prospectos' },
+      { label: 'Modelos', icon: BookOpen, path: '/admin/modelos', module: 'modelos' },
+      { label: 'Concesionarios', icon: MapPin, path: '/admin/concesionarios', module: 'concesionarios' },
+      { label: 'Vehículos', icon: Car, path: '/admin/vehiculos', module: 'vehiculos' },
     ],
   },
   {
     group: 'Administración',
     items: [
-      { label: 'Configuración', icon: Settings, path: '/admin/configuracion' },
+      { label: 'Configuración', icon: Settings, path: '/admin/configuracion', module: 'configuracion' },
     ],
   },
 ];
@@ -73,7 +75,24 @@ const menuItems = [
 export default function AdminLayout({ children }: AdminLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, role, signOut } = useAuth();
+  const { profile, role, signOut, hasPermission } = useAuth();
+
+  const filteredMenuItems = menuItems
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => {
+        if (item.module === 'configuracion') {
+          return role?.name === 'superadmin' || role?.name === 'admin' || hasPermission('roles.view') || hasPermission('usuarios.view');
+        }
+        return hasPermission(`${item.module}.view`);
+      }),
+    }))
+    .filter(group => group.items.length > 0);
+
+  const allFilteredItems = filteredMenuItems.flatMap(g => g.items);
+  if (location.pathname === '/admin' && !hasPermission('dashboard.view') && allFilteredItems.length > 0) {
+    return <Navigate to={allFilteredItems[0].path} replace />;
+  }
 
   const handleSignOut = async () => {
     await signOut();
@@ -89,11 +108,9 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       <Sidebar collapsible="icon">
         <SidebarHeader className="p-4">
           <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-              <Wrench className="w-4 h-4" />
-            </div>
+            <img src={imbLogo} alt="IMB" className="w-8 h-8 rounded-lg object-contain brightness-0 invert" />
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-              <span className="text-sm font-display font-bold text-sidebar-foreground">GAC Motor</span>
+              <span className="text-sm font-display font-bold text-sidebar-foreground">IMB Movilidad</span>
               <span className="text-xs text-sidebar-foreground/60">Panel Admin</span>
             </div>
           </div>
@@ -102,7 +119,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         <Separator className="bg-sidebar-border" />
 
         <SidebarContent>
-          {menuItems.map((group) => (
+          {filteredMenuItems.map((group) => (
             <SidebarGroup key={group.group}>
               <SidebarGroupLabel>{group.group}</SidebarGroupLabel>
               <SidebarGroupContent>
@@ -162,6 +179,9 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
           <h2 className="text-sm font-medium text-muted-foreground">
             {menuItems.flatMap(g => g.items).find(i => i.path === location.pathname || location.pathname.startsWith(i.path + '/'))?.label || 'Dashboard'}
           </h2>
+          <div className="ml-auto">
+            <NotificationCenter />
+          </div>
         </header>
         <main className="flex-1 p-6">
           {children}

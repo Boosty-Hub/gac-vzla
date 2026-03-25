@@ -11,10 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { CalendarDays, Plus, LogOut, ClipboardList, Search, CheckCircle, Car, User, AlertCircle, Users, Phone, Mail } from 'lucide-react';
+import { CalendarDays, Plus, LogOut, ClipboardList, Search, CheckCircle, Car, User, AlertCircle, Users, Phone, Mail, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { toast } from 'sonner';
 
 interface Dealership {
@@ -37,6 +38,8 @@ interface Reservation {
   walkin_client_name: string | null;
   walkin_client_phone: string | null;
   walkin_plate: string | null;
+  service_notes: string | null;
+  completed_at: string | null;
   created_at: string;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
@@ -65,10 +68,36 @@ interface PlateResult {
   clients: { id: string; full_name: string; phone: string | null; cedula: string | null } | null;
 }
 
-const SERVICE_TYPES = [
-  'Mantenimiento Preventivo', 'Mantenimiento Correctivo', 'Revisión General',
-  'Cambio de Aceite', 'Alineación y Balanceo', 'Diagnóstico', 'Garantía', 'Otro',
-];
+interface ServiceType {
+  id: number;
+  name: string;
+  duration_minutes: number;
+}
+
+interface VehicleDetail {
+  id: string;
+  plate: string | null;
+  year: number;
+  color: string | null;
+  vin: string | null;
+  mileage: number;
+  warranty_active: boolean;
+  vehicle_models: { name: string; brand: string } | null;
+  clients: { full_name: string; cedula: string | null; phone: string | null } | null;
+}
+
+interface HistoryRecord {
+  id: string;
+  reservation_date: string;
+  reservation_time: string;
+  service_type: string;
+  current_mileage: number;
+  status: string;
+  notes: string | null;
+  service_notes: string | null;
+  completed_at: string | null;
+  dealerships: { name: string } | null;
+}
 
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
@@ -79,13 +108,12 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 const PROSPECT_SOURCES = [
-  { value: 'presencial', label: 'Presencial' },
-  { value: 'telefono', label: 'Teléfono' },
-  { value: 'web', label: 'Web' },
-  { value: 'redes_sociales', label: 'Redes Sociales' },
-  { value: 'referido', label: 'Referido' },
+  { value: 'concesionario', label: 'Concesionario' },
+  { value: 'visita', label: 'Visita' },
   { value: 'evento', label: 'Evento' },
-  { value: 'otro', label: 'Otro' },
+  { value: 'referido', label: 'Referido' },
+  { value: 'pagina_web', label: 'Página Web' },
+  { value: 'redes_sociales', label: 'Redes Sociales' },
 ];
 
 const PROSPECT_STATUSES = [
@@ -107,11 +135,26 @@ const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
 const DealershipPanel = () => {
   const navigate = useNavigate();
   const { signOut } = useAuth();
+  const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
 
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [selectedDealership, setSelectedDealership] = useState<string>('');
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Detail dialog
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailRes, setDetailRes] = useState<Reservation | null>(null);
+  const [vehicleDetail, setVehicleDetail] = useState<VehicleDetail | null>(null);
+  const [vehicleHistory, setVehicleHistory] = useState<HistoryRecord[]>([]);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Complete dialog
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
+  const [serviceNotes, setServiceNotes] = useState('');
+  const [completing, setCompleting] = useState(false);
 
   // Create reservation dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -151,9 +194,10 @@ const DealershipPanel = () => {
   const [pPhone, setPPhone] = useState('');
   const [pEmail, setPEmail] = useState('');
   const [pModel, setPModel] = useState('');
-  const [pSource, setPSource] = useState('presencial');
+  const [pSource, setPSource] = useState('concesionario');
   const [pStatus, setPStatus] = useState('nuevo');
   const [pNotes, setPNotes] = useState('');
+  const [pEventName, setPEventName] = useState('');
 
   const handleSignOut = async () => {
     await signOut();
@@ -186,25 +230,41 @@ const DealershipPanel = () => {
     setLoading(false);
   };
 
-  const fetchProspects = async () => {
+  const fetchProspects = async (salespersonName?: string | null) => {
     if (!selectedDealership) return;
     setLoadingProspects(true);
-    const { data } = await supabase
+    let query = supabase
       .from('prospects')
       .select('*')
       .eq('dealership_id', selectedDealership)
       .order('created_at', { ascending: false });
+
+    // If a salesperson name is provided, filter by it
+    if (salespersonName) {
+      query = query.eq('salesperson', salespersonName);
+    }
+
+    const { data } = await query;
     setProspects((data || []) as Prospect[]);
     setLoadingProspects(false);
   };
 
-  useEffect(() => { fetchDealerships(); }, []);
+  const fetchServiceTypes = async () => {
+    const { data } = await supabase
+      .from('service_types')
+      .select('id, name, duration_minutes')
+      .eq('is_active', true)
+      .order('name');
+    if (data) setServiceTypes(data);
+  };
+
+  useEffect(() => { fetchDealerships(); fetchServiceTypes(); }, []);
   useEffect(() => {
     if (selectedDealership) {
       fetchReservations();
-      fetchProspects();
+      fetchProspects(isSalesperson ? currentSalesperson?.name : null);
     }
-  }, [selectedDealership]);
+  }, [selectedDealership, currentSalesperson]);
 
   // Stats
   const pendientes = reservations.filter(r => r.status === 'pendiente').length;
@@ -320,10 +380,59 @@ const DealershipPanel = () => {
     else { toast.success('Estado actualizado'); fetchReservations(); }
   };
 
+  const openDetail = async (r: Reservation) => {
+    setDetailRes(r);
+    setVehicleDetail(null);
+    setVehicleHistory([]);
+    setDetailOpen(true);
+
+    if (r.vehicle_id) {
+      setLoadingDetail(true);
+      const { data: veh } = await supabase
+        .from('vehicles')
+        .select('id, plate, year, color, vin, mileage, warranty_active, vehicle_models(name, brand), clients(full_name, cedula, phone)')
+        .eq('id', r.vehicle_id)
+        .single();
+      if (veh) setVehicleDetail(veh as unknown as VehicleDetail);
+
+      const { data: history } = await supabase
+        .from('reservations')
+        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name)')
+        .eq('vehicle_id', r.vehicle_id)
+        .neq('id', r.id)
+        .order('reservation_date', { ascending: false })
+        .order('reservation_time', { ascending: false })
+        .limit(50);
+      setVehicleHistory((history || []) as HistoryRecord[]);
+      setLoadingDetail(false);
+    }
+  };
+
+  const openCompleteDialog = (r: Reservation) => {
+    setCompletingRes(r);
+    setServiceNotes(r.service_notes || '');
+    setCompleteOpen(true);
+  };
+
+  const handleCompleteService = async () => {
+    if (!completingRes) return;
+    if (!serviceNotes.trim()) { toast.error('Describe lo que se realizó en el servicio'); return; }
+    setCompleting(true);
+    const { error } = await supabase.from('reservations').update({
+      status: 'completada',
+      service_notes: serviceNotes.trim(),
+      completed_at: new Date().toISOString(),
+    }).eq('id', completingRes.id);
+    if (error) { toast.error('Error al completar'); console.error(error); }
+    else { toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations(); }
+    setCompleting(false);
+  };
+
   // Prospects CRUD
   const openProspectDialog = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
-    setPSource('presencial'); setPStatus('nuevo'); setPNotes('');
+    setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
+    setPEventName('');
     setProspectDialogOpen(true);
   };
 
@@ -339,6 +448,7 @@ const DealershipPanel = () => {
       source: pSource,
       status: pStatus,
       notes: pNotes.trim() || null,
+      event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     });
     if (error) { toast.error('Error al crear prospecto'); console.error(error); }
     else { toast.success('Prospecto creado'); setProspectDialogOpen(false); fetchProspects(); }
@@ -452,7 +562,7 @@ const DealershipPanel = () => {
                 <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue placeholder="Servicio" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los servicios</SelectItem>
-                  {SERVICE_TYPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  {serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -492,7 +602,7 @@ const DealershipPanel = () => {
                       const st = STATUS_CONFIG[r.status] || STATUS_CONFIG.pendiente;
 
                       return (
-                        <TableRow key={r.id} className="[&>td]:py-1.5">
+                        <TableRow key={r.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(r)}>
                           <TableCell className="font-medium">{r.reservation_date}</TableCell>
                           <TableCell>{r.reservation_time?.slice(0, 5)}</TableCell>
                           <TableCell>
@@ -513,22 +623,22 @@ const DealershipPanel = () => {
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1">
                               {r.status === 'pendiente' && (
-                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={() => updateStatus(r.id, 'confirmada')}>
+                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'confirmada'); }}>
                                   Confirmar
                                 </Button>
                               )}
                               {r.status === 'confirmada' && (
-                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={() => updateStatus(r.id, 'en_proceso')}>
+                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'en_proceso'); }}>
                                   Iniciar
                                 </Button>
                               )}
                               {r.status === 'en_proceso' && (
-                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={() => updateStatus(r.id, 'completada')}>
-                                  Completar
+                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); openCompleteDialog(r); }}>
+                                  <ClipboardCheck className="w-3 h-3" /> Completar
                                 </Button>
                               )}
                               {(r.status === 'pendiente' || r.status === 'confirmada') && (
-                                <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2 text-destructive" onClick={() => updateStatus(r.id, 'cancelada')}>
+                                <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2 text-destructive" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'cancelada'); }}>
                                   Cancelar
                                 </Button>
                               )}
@@ -662,14 +772,20 @@ const DealershipPanel = () => {
                 <Input value={pModel} onChange={e => setPModel(e.target.value)} placeholder="Ej: GS8, Emkoo" className="h-8 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Fuente</Label>
-                <Select value={pSource} onValueChange={setPSource}>
+                <Label className="text-xs">Tipo de contacto</Label>
+                <Select value={pSource} onValueChange={v => { setPSource(v); if (v !== 'evento') setPEventName(''); }}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
+              {pSource === 'evento' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Nombre de evento</Label>
+                  <Input value={pEventName} onChange={e => setPEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" className="h-8 text-xs" />
+                </div>
+              )}
               <div className="space-y-1 col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
@@ -693,6 +809,200 @@ const DealershipPanel = () => {
             <Button variant="outline" onClick={() => setProspectDialogOpen(false)}>Cancelar</Button>
             <Button onClick={handleSaveProspect} disabled={savingProspect} className="gac-gradient">
               {savingProspect ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Crear Prospecto'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DETAIL DIALOG */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <CalendarDays className="w-4 h-4" /> Detalle de Cita
+            </DialogTitle>
+          </DialogHeader>
+          {detailRes && (() => {
+            const st = STATUS_CONFIG[detailRes.status] || STATUS_CONFIG.pendiente;
+            const clientName = detailRes.clients?.full_name || detailRes.walkin_client_name || '-';
+            return (
+              <Tabs defaultValue="cita" className="w-full">
+                <TabsList className="w-full grid grid-cols-3">
+                  <TabsTrigger value="cita" className="text-xs">Cita</TabsTrigger>
+                  <TabsTrigger value="vehiculo" className="text-xs">Vehículo</TabsTrigger>
+                  <TabsTrigger value="historial" className="text-xs">Historial ({vehicleHistory.length})</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="cita" className="space-y-3 mt-3">
+                  <div className="flex items-center justify-between">
+                    <Badge className={cn("text-xs px-2 py-0.5", st.color)}>{st.label}</Badge>
+                    <span className="text-[10px] text-muted-foreground">{detailRes.created_at ? new Date(detailRes.created_at).toLocaleDateString('es-VE') : ''}</span>
+                  </div>
+                  <div className="space-y-2 text-xs">
+                    <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
+                      {detailRes.clients?.cedula && <span className="text-muted-foreground">· {detailRes.clients.cedula}</span>}
+                      {detailRes.clients?.phone && <span className="text-muted-foreground">· {detailRes.clients.phone}</span>}
+                    </div>
+                    {!detailRes.clients && detailRes.walkin_client_phone && (
+                      <div className="flex items-center gap-2 text-muted-foreground"><span>Tel: {detailRes.walkin_client_phone}</span></div>
+                    )}
+                    <div className="flex items-center gap-2"><Car className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <span>{detailRes.vehicles ? `${detailRes.vehicles.vehicle_models?.brand} ${detailRes.vehicles.vehicle_models?.name} ${detailRes.vehicles.year}` : detailRes.walkin_plate || '-'}</span>
+                      <span className="text-muted-foreground">{detailRes.vehicles?.plate || detailRes.walkin_plate || ''}</span>
+                    </div>
+                    <Separator />
+                    <div className="flex items-center gap-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_date}</span></div>
+                    <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_time?.slice(0, 5)}</span></div>
+                    <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
+                    <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>
+                  </div>
+                  {detailRes.notes && (
+                    <div className="bg-muted/50 rounded-md p-2.5 text-xs">
+                      <p className="font-semibold mb-1">Notas</p>
+                      <p className="text-muted-foreground whitespace-pre-wrap">{detailRes.notes}</p>
+                    </div>
+                  )}
+                  {detailRes.status === 'completada' && detailRes.service_notes && (
+                    <div className="bg-green-50 border border-green-200 rounded-md p-2.5 text-xs">
+                      <p className="font-semibold text-green-800 mb-1 flex items-center gap-1"><ClipboardCheck className="w-3.5 h-3.5" /> Trabajo realizado</p>
+                      <p className="text-green-700 whitespace-pre-wrap">{detailRes.service_notes}</p>
+                      {detailRes.completed_at && <p className="text-green-600 mt-1.5 text-[10px]">Completado: {new Date(detailRes.completed_at).toLocaleString('es-VE')}</p>}
+                    </div>
+                  )}
+                  <div className="flex justify-end gap-2 pt-2">
+                    {detailRes.status === 'pendiente' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'confirmada'); }}>Confirmar</Button>}
+                    {detailRes.status === 'confirmada' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'en_proceso'); }}>Iniciar</Button>}
+                    {detailRes.status === 'en_proceso' && <Button size="sm" className="text-xs gac-gradient gap-1" onClick={() => { setDetailOpen(false); openCompleteDialog(detailRes); }}><ClipboardCheck className="w-3 h-3" /> Completar</Button>}
+                    {(detailRes.status === 'pendiente' || detailRes.status === 'confirmada') && <Button size="sm" variant="ghost" className="text-xs text-destructive" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'cancelada'); }}>Cancelar</Button>}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="vehiculo" className="space-y-3 mt-3">
+                  {loadingDetail ? (
+                    <div className="text-center py-6">
+                      <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                      <p className="text-xs text-muted-foreground">Cargando datos del vehículo...</p>
+                    </div>
+                  ) : vehicleDetail ? (
+                    <div className="space-y-3">
+                      <div className="text-center pb-2">
+                        <Car className="w-10 h-10 text-primary mx-auto mb-1" />
+                        <h3 className="font-display font-bold text-sm">{vehicleDetail.vehicle_models?.brand} {vehicleDetail.vehicle_models?.name}</h3>
+                        <p className="text-xs text-muted-foreground">{vehicleDetail.year}</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Hash className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Placa</p><p className="font-medium">{vehicleDetail.plate || '-'}</p></div></div>
+                        <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Palette className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Color</p><p className="font-medium">{vehicleDetail.color || '-'}</p></div></div>
+                        <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Clock className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Kilometraje</p><p className="font-medium">{vehicleDetail.mileage.toLocaleString()} km</p></div></div>
+                        <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Shield className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Garantía</p><p className={cn("font-medium", vehicleDetail.warranty_active ? "text-green-700" : "text-red-600")}>{vehicleDetail.warranty_active ? 'Activa' : 'Vencida'}</p></div></div>
+                      </div>
+                      {vehicleDetail.vin && (
+                        <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2 text-xs"><FileText className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">VIN</p><p className="font-mono font-medium text-[11px]">{vehicleDetail.vin}</p></div></div>
+                      )}
+                      <Separator />
+                      <div className="text-xs">
+                        <p className="font-semibold mb-1">Propietario</p>
+                        <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-muted-foreground" /><span>{vehicleDetail.clients?.full_name || '-'}</span></div>
+                        {vehicleDetail.clients?.cedula && <p className="text-muted-foreground ml-5.5">CI: {vehicleDetail.clients.cedula}</p>}
+                        {vehicleDetail.clients?.phone && <p className="text-muted-foreground ml-5.5">Tel: {vehicleDetail.clients.phone}</p>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-xs text-muted-foreground">
+                      <Car className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p>No hay datos del vehículo registrado</p>
+                      {detailRes.walkin_plate && <p className="mt-1">Placa walk-in: <strong>{detailRes.walkin_plate}</strong></p>}
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="historial" className="space-y-3 mt-3">
+                  {loadingDetail ? (
+                    <div className="text-center py-6">
+                      <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                      <p className="text-xs text-muted-foreground">Cargando historial...</p>
+                    </div>
+                  ) : !detailRes.vehicle_id ? (
+                    <div className="text-center py-6 text-xs text-muted-foreground">
+                      <FileText className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p>Sin historial (cliente walk-in)</p>
+                    </div>
+                  ) : vehicleHistory.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-muted-foreground">
+                      <FileText className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p>Este vehículo no tiene servicios previos</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">{vehicleHistory.length} servicio(s) previo(s)</p>
+                      {vehicleHistory.map(h => {
+                        const hst = STATUS_CONFIG[h.status] || STATUS_CONFIG.pendiente;
+                        return (
+                          <div key={h.id} className="border rounded-md p-2.5 text-xs space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold">{h.service_type}</span>
+                              <Badge className={cn("text-[10px] px-1.5 py-0", hst.color)}>{hst.label}</Badge>
+                            </div>
+                            <div className="flex items-center gap-3 text-muted-foreground">
+                              <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{h.reservation_date}</span>
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{h.reservation_time?.slice(0, 5)}</span>
+                              <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
+                            </div>
+                            {h.dealerships && (
+                              <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>
+                            )}
+                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Notas:</span> {h.notes}</p>}
+                            {h.service_notes && (
+                              <div className="bg-green-50 border border-green-200 rounded p-1.5">
+                                <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo realizado:</p>
+                                <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
+                                {h.completed_at && <p className="text-green-600 text-[10px] mt-1">Completado: {new Date(h.completed_at).toLocaleString('es-VE')}</p>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* COMPLETE SERVICE DIALOG */}
+      <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <ClipboardCheck className="w-4 h-4" /> Completar Servicio
+            </DialogTitle>
+          </DialogHeader>
+          {completingRes && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-md border p-3 bg-muted/30 text-xs space-y-1">
+                <p><span className="font-semibold">Cliente:</span> {completingRes.clients?.full_name || completingRes.walkin_client_name || '-'}</p>
+                <p><span className="font-semibold">Vehículo:</span> {completingRes.vehicles ? `${completingRes.vehicles.vehicle_models?.brand} ${completingRes.vehicles.vehicle_models?.name} ${completingRes.vehicles.year}` : completingRes.walkin_plate || '-'}</p>
+                <p><span className="font-semibold">Placa:</span> {completingRes.vehicles?.plate || completingRes.walkin_plate || '-'}</p>
+                <p><span className="font-semibold">Servicio:</span> {completingRes.service_type}</p>
+                <p><span className="font-semibold">Km:</span> {completingRes.current_mileage.toLocaleString()}</p>
+              </div>
+              <div className="space-y-2">
+                <Label>¿Qué se realizó en el servicio? *</Label>
+                <Textarea
+                  value={serviceNotes}
+                  onChange={e => setServiceNotes(e.target.value)}
+                  rows={4}
+                  placeholder="Describa los trabajos realizados, repuestos cambiados, observaciones..."
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompleteOpen(false)}>Cancelar</Button>
+            <Button onClick={handleCompleteService} disabled={completing} className="gac-gradient">
+              {completing ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Marcar como Completado'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -798,7 +1108,7 @@ const DealershipPanel = () => {
                 <Select value={fService} onValueChange={setFService}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
                   <SelectContent>
-                    {SERVICE_TYPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                    {serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

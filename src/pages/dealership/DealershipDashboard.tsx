@@ -10,7 +10,8 @@ const DealershipDashboard = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!selectedDealership) return;
+    if (loadingAccess) return;
+    if (!selectedDealership) { setLoading(false); return; }
     const fetchStats = async () => {
       setLoading(true);
       const hoy = new Date().toISOString().split('T')[0];
@@ -31,7 +32,7 @@ const DealershipDashboard = () => {
       setLoading(false);
     };
     fetchStats();
-  }, [selectedDealership]);
+  }, [selectedDealership, loadingAccess]);
 
   const cards = [
     { label: 'Total Reservas', value: stats.total, icon: CalendarDays, color: 'text-primary' },

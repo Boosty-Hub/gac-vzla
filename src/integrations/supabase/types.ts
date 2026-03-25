@@ -7,233 +7,31 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.1"
   }
   public: {
     Tables: {
-      dealerships: {
-        Row: {
-          id: string
-          name: string
-          city: string | null
-          state: string | null
-          address: string | null
-          phone: string | null
-          schedule: string | null
-          daily_capacity: number
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          name: string
-          city?: string | null
-          state?: string | null
-          address?: string | null
-          phone?: string | null
-          schedule?: string | null
-          daily_capacity?: number
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          name?: string
-          city?: string | null
-          state?: string | null
-          address?: string | null
-          phone?: string | null
-          schedule?: string | null
-          daily_capacity?: number
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      reservations: {
-        Row: {
-          id: string
-          dealership_id: string
-          client_id: string | null
-          vehicle_id: string | null
-          reservation_date: string
-          reservation_time: string
-          service_type: string
-          current_mileage: number
-          status: string
-          notes: string | null
-          walkin_client_name: string | null
-          walkin_client_phone: string | null
-          walkin_plate: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          dealership_id: string
-          client_id?: string | null
-          vehicle_id?: string | null
-          reservation_date: string
-          reservation_time: string
-          service_type: string
-          current_mileage?: number
-          status?: string
-          notes?: string | null
-          walkin_client_name?: string | null
-          walkin_client_phone?: string | null
-          walkin_plate?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          dealership_id?: string
-          client_id?: string | null
-          vehicle_id?: string | null
-          reservation_date?: string
-          reservation_time?: string
-          service_type?: string
-          current_mileage?: number
-          status?: string
-          notes?: string | null
-          walkin_client_name?: string | null
-          walkin_client_phone?: string | null
-          walkin_plate?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "reservations_dealership_id_fkey"
-            columns: ["dealership_id"]
-            isOneToOne: false
-            referencedRelation: "dealerships"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "reservations_client_id_fkey"
-            columns: ["client_id"]
-            isOneToOne: false
-            referencedRelation: "clients"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "reservations_vehicle_id_fkey"
-            columns: ["vehicle_id"]
-            isOneToOne: false
-            referencedRelation: "vehicles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      prospects: {
-        Row: {
-          id: string
-          dealership_id: string
-          name: string
-          phone: string | null
-          email: string | null
-          model_interest: string | null
-          source: string
-          status: string
-          notes: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          dealership_id: string
-          name: string
-          phone?: string | null
-          email?: string | null
-          model_interest?: string | null
-          source?: string
-          status?: string
-          notes?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          dealership_id?: string
-          name?: string
-          phone?: string | null
-          email?: string | null
-          model_interest?: string | null
-          source?: string
-          status?: string
-          notes?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "prospects_dealership_id_fkey"
-            columns: ["dealership_id"]
-            isOneToOne: false
-            referencedRelation: "dealerships"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      dealership_users: {
-        Row: {
-          id: string
-          dealership_id: string
-          profile_id: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          dealership_id: string
-          profile_id: string
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          dealership_id?: string
-          profile_id?: string
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "dealership_users_dealership_id_fkey"
-            columns: ["dealership_id"]
-            isOneToOne: false
-            referencedRelation: "dealerships"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "dealership_users_profile_id_fkey"
-            columns: ["profile_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       client_users: {
         Row: {
-          id: string
           client_id: string
-          profile_id: string
           created_at: string
+          id: string
+          profile_id: string
         }
         Insert: {
-          id?: string
           client_id: string
-          profile_id: string
           created_at?: string
+          id?: string
+          profile_id: string
         }
         Update: {
-          id?: string
           client_id?: string
-          profile_id?: string
           created_at?: string
+          id?: string
+          profile_id?: string
         }
         Relationships: [
           {
@@ -305,6 +103,216 @@ export type Database = {
           },
         ]
       }
+      dealership_users: {
+        Row: {
+          created_at: string
+          dealership_id: string
+          id: string
+          profile_id: string
+        }
+        Insert: {
+          created_at?: string
+          dealership_id: string
+          id?: string
+          profile_id: string
+        }
+        Update: {
+          created_at?: string
+          dealership_id?: string
+          id?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dealership_users_dealership_id_fkey"
+            columns: ["dealership_id"]
+            isOneToOne: false
+            referencedRelation: "dealerships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dealership_users_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dealerships: {
+        Row: {
+          address: string | null
+          bays: number | null
+          brand: string
+          city: string | null
+          created_at: string | null
+          email: string | null
+          id: string
+          instagram: string | null
+          is_active: boolean | null
+          is_service_center: boolean
+          name: string
+          phone: string | null
+          schedule: string | null
+          state: string | null
+          type: string
+          updated_at: string | null
+          website: string | null
+        }
+        Insert: {
+          address?: string | null
+          bays?: number | null
+          brand?: string
+          city?: string | null
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          instagram?: string | null
+          is_active?: boolean | null
+          is_service_center?: boolean
+          name: string
+          phone?: string | null
+          schedule?: string | null
+          state?: string | null
+          type?: string
+          updated_at?: string | null
+          website?: string | null
+        }
+        Update: {
+          address?: string | null
+          bays?: number | null
+          brand?: string
+          city?: string | null
+          created_at?: string | null
+          email?: string | null
+          id?: string
+          instagram?: string | null
+          is_active?: boolean | null
+          is_service_center?: boolean
+          name?: string
+          phone?: string | null
+          schedule?: string | null
+          state?: string | null
+          type?: string
+          updated_at?: string | null
+          website?: string | null
+        }
+        Relationships: []
+      }
+      magic_links: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          expires_at: string
+          id: string
+          token: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          expires_at: string
+          id?: string
+          token?: string
+          used_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string
+          id?: string
+          token?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      message_templates: {
+        Row: {
+          content: string
+          created_at: string
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          template_key: string
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          template_key: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          template_key?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      notifications: {
+        Row: {
+          created_at: string
+          id: string
+          is_read: boolean
+          message: string
+          metadata: Json | null
+          recipient_dealership_id: string | null
+          recipient_profile_id: string | null
+          title: string
+          type: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          message: string
+          metadata?: Json | null
+          recipient_dealership_id?: string | null
+          recipient_profile_id?: string | null
+          title: string
+          type?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_read?: boolean
+          message?: string
+          metadata?: Json | null
+          recipient_dealership_id?: string | null
+          recipient_profile_id?: string | null
+          title?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_recipient_dealership_id_fkey"
+            columns: ["recipient_dealership_id"]
+            isOneToOne: false
+            referencedRelation: "dealerships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_recipient_profile_id_fkey"
+            columns: ["recipient_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       permissions: {
         Row: {
           created_at: string
@@ -337,6 +345,7 @@ export type Database = {
           full_name: string | null
           id: string
           is_active: boolean
+          pin_code: string | null
           role_id: string | null
           updated_at: string
         }
@@ -347,6 +356,7 @@ export type Database = {
           full_name?: string | null
           id: string
           is_active?: boolean
+          pin_code?: string | null
           role_id?: string | null
           updated_at?: string
         }
@@ -357,6 +367,7 @@ export type Database = {
           full_name?: string | null
           id?: string
           is_active?: boolean
+          pin_code?: string | null
           role_id?: string | null
           updated_at?: string
         }
@@ -366,6 +377,207 @@ export type Database = {
             columns: ["role_id"]
             isOneToOne: false
             referencedRelation: "roles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prospect_models: {
+        Row: {
+          brand: string
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          brand: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          brand?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      prospect_statuses: {
+        Row: {
+          color: string
+          created_at: string
+          id: string
+          is_active: boolean
+          label: string
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label: string
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          color?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string
+          name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      prospects: {
+        Row: {
+          created_at: string
+          dealership_id: string
+          email: string | null
+          event_name: string | null
+          id: string
+          model_interest: string | null
+          name: string
+          notes: string | null
+          phone: string | null
+          salesperson: string | null
+          source: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          dealership_id: string
+          email?: string | null
+          event_name?: string | null
+          id?: string
+          model_interest?: string | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          salesperson?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          dealership_id?: string
+          email?: string | null
+          event_name?: string | null
+          id?: string
+          model_interest?: string | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          salesperson?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospects_dealership_id_fkey"
+            columns: ["dealership_id"]
+            isOneToOne: false
+            referencedRelation: "dealerships"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reservations: {
+        Row: {
+          client_id: string | null
+          completed_at: string | null
+          created_at: string | null
+          current_mileage: number | null
+          dealership_id: string
+          id: string
+          notes: string | null
+          reservation_date: string
+          reservation_time: string
+          service_notes: string | null
+          service_type: string
+          status: string
+          updated_at: string | null
+          vehicle_id: string | null
+          walkin_client_name: string | null
+          walkin_client_phone: string | null
+          walkin_plate: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          completed_at?: string | null
+          created_at?: string | null
+          current_mileage?: number | null
+          dealership_id: string
+          id?: string
+          notes?: string | null
+          reservation_date: string
+          reservation_time: string
+          service_notes?: string | null
+          service_type: string
+          status?: string
+          updated_at?: string | null
+          vehicle_id?: string | null
+          walkin_client_name?: string | null
+          walkin_client_phone?: string | null
+          walkin_plate?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          completed_at?: string | null
+          created_at?: string | null
+          current_mileage?: number | null
+          dealership_id?: string
+          id?: string
+          notes?: string | null
+          reservation_date?: string
+          reservation_time?: string
+          service_notes?: string | null
+          service_type?: string
+          status?: string
+          updated_at?: string | null
+          vehicle_id?: string | null
+          walkin_client_name?: string | null
+          walkin_client_phone?: string | null
+          walkin_plate?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reservations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservations_dealership_id_fkey"
+            columns: ["dealership_id"]
+            isOneToOne: false
+            referencedRelation: "dealerships"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reservations_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
             referencedColumns: ["id"]
           },
         ]
@@ -412,18 +624,86 @@ export type Database = {
           description: string | null
           id: string
           name: string
+          redirect_portal: string
         }
         Insert: {
           created_at?: string
           description?: string | null
           id?: string
           name: string
+          redirect_portal?: string
         }
         Update: {
           created_at?: string
           description?: string | null
           id?: string
           name?: string
+          redirect_portal?: string
+        }
+        Relationships: []
+      }
+      salespersons: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          phone: string | null
+          profile_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          phone?: string | null
+          profile_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          phone?: string | null
+          profile_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "salespersons_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_types: {
+        Row: {
+          created_at: string
+          duration_minutes: number
+          id: number
+          is_active: boolean
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          duration_minutes?: number
+          id?: never
+          is_active?: boolean
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          duration_minutes?: number
+          id?: never
+          is_active?: boolean
+          name?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -525,6 +805,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      warranty_conditions: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: number
+          is_active: boolean
+          max_km: number
+          max_months: number
+          name: string
+          service_interval_km: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: never
+          is_active?: boolean
+          max_km: number
+          max_months: number
+          name: string
+          service_interval_km?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: never
+          is_active?: boolean
+          max_km?: number
+          max_months?: number
+          name?: string
+          service_interval_km?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
     }
     Views: {

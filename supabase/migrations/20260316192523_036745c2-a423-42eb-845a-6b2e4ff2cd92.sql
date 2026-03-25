@@ -1,0 +1,1 @@
+ALTER TABLE public.prospects ADD COLUMN event_name text;

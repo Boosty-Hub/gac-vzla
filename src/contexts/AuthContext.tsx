@@ -19,6 +19,7 @@ interface RoleData {
   id: string;
   name: UserRole;
   description: string | null;
+  redirect_portal: string;
 }
 
 interface AuthContextType {
@@ -42,7 +43,7 @@ async function loadUserProfile(userId: string) {
   // 1. Get profile with role join
   const { data: profileData, error: profileError } = await supabase
     .from('profiles')
-    .select('*, roles(id, name, description)')
+    .select('*, roles(id, name, description, redirect_portal)')
     .eq('id', userId)
     .single();
 

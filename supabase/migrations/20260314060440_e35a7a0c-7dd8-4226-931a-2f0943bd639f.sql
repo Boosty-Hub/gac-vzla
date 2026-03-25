@@ -1,0 +1,1 @@
+ALTER TABLE public.dealerships ADD COLUMN is_service_center boolean NOT NULL DEFAULT false;

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,14 +11,23 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil } from 'lucide-react';
+import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 
 interface Dealership {
   id: string;
   name: string;
   city: string | null;
+  bays: number;
+}
+
+interface ServiceType {
+  id: number;
+  name: string;
+  duration_minutes: number;
+  is_active: boolean;
 }
 
 interface ClientOption {
@@ -45,7 +55,7 @@ interface Reservation {
   status: string;
   notes: string | null;
   dealerships: { id: string; name: string; city: string | null } | null;
-  clients: { full_name: string; cedula: string | null } | null;
+  clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
 
@@ -76,21 +86,16 @@ const STATUS_LABELS: Record<string, string> = {
   cancelada: 'Cancelada',
 };
 
-const SERVICE_TYPES = [
-  'Mantenimiento preventivo',
-  'Mantenimiento correctivo',
-  'Revisión general',
-  'Cambio de aceite',
-  'Alineación y balanceo',
-  'Diagnóstico',
-  'Garantía',
-  'Otro',
-];
 
 const AdminReservas = () => {
+  const { hasPermission } = useAuth();
+  const canCreate = hasPermission('reservas.create');
+  const canEdit = hasPermission('reservas.edit');
   const [view, setView] = useState<'table' | 'matrix'>('table');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+  const [capacityWarning, setCapacityWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
   const [filtroConc, setFiltroConc] = useState('todos');
@@ -124,17 +129,26 @@ const AdminReservas = () => {
   const fetchDealerships = async () => {
     const { data } = await supabase
       .from('dealerships')
-      .select('id, name, city')
+      .select('id, name, city, bays')
       .eq('is_active', true)
       .order('name');
     if (data) setDealerships(data);
+  };
+
+  const fetchServiceTypes = async () => {
+    const { data } = await supabase
+      .from('service_types')
+      .select('*')
+      .eq('is_active', true)
+      .order('name');
+    if (data) setServiceTypes(data);
   };
 
   const fetchReservations = async () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, dealerships(id, name, city), clients(full_name, cedula), vehicles(plate, year, vehicle_models(name, brand))');
+      .select('*, dealerships(id, name, city), clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand))');
 
     if (view === 'matrix') {
       query = query.eq('reservation_date', selectedDate);
@@ -156,23 +170,39 @@ const AdminReservas = () => {
 
   useEffect(() => {
     fetchDealerships();
+    fetchServiceTypes();
   }, []);
 
   useEffect(() => {
     fetchReservations();
   }, [view, selectedDate, filtroConc]);
 
-  // Client search with debounce
+  // Client search with debounce (by name, cedula, or vehicle plate)
   useEffect(() => {
     if (fClientSearch.trim().length < 2) { setClientResults([]); return; }
     const timer = setTimeout(async () => {
       setSearchingClients(true);
-      const { data } = await supabase
+      // Search by name or cedula
+      const { data: directClients } = await supabase
         .from('clients')
         .select('id, full_name, cedula')
         .or(`full_name.ilike.%${fClientSearch}%,cedula.ilike.%${fClientSearch}%`)
         .limit(10);
-      setClientResults(data || []);
+
+      // Search by vehicle plate
+      const { data: vehicleMatches } = await supabase
+        .from('vehicles')
+        .select('client_id, plate, clients(id, full_name, cedula)')
+        .ilike('plate', `%${fClientSearch}%`)
+        .limit(10);
+
+      const results = new Map<string, ClientOption>();
+      (directClients || []).forEach(c => results.set(c.id, c));
+      (vehicleMatches || []).forEach((v: any) => {
+        if (v.clients) results.set(v.clients.id, v.clients);
+      });
+
+      setClientResults(Array.from(results.values()));
       setSearchingClients(false);
     }, 300);
     return () => clearTimeout(timer);
@@ -191,12 +221,71 @@ const AdminReservas = () => {
     })();
   }, [fClientId]);
 
+  const getServiceDuration = (serviceName: string): number => {
+    const st = serviceTypes.find(s => s.name === serviceName);
+    return st ? st.duration_minutes : 60;
+  };
+
+  const checkCapacity = async (dealershipId: string, date: string, time: string, serviceName: string, excludeReservationId?: string) => {
+    setCapacityWarning('');
+    if (!dealershipId || !date || !time || !serviceName) return true;
+
+    const dealer = dealerships.find(d => d.id === dealershipId);
+    if (!dealer) return true;
+
+    const duration = getServiceDuration(serviceName);
+    const [startH, startM] = time.split(':').map(Number);
+    const startMin = startH * 60 + startM;
+    const endMin = startMin + duration;
+
+    // Fetch all non-cancelled reservations for this dealership on this date
+    let query = supabase
+      .from('reservations')
+      .select('id, reservation_time, service_type')
+      .eq('dealership_id', dealershipId)
+      .eq('reservation_date', date)
+      .neq('status', 'cancelada');
+
+    if (excludeReservationId) {
+      query = query.neq('id', excludeReservationId);
+    }
+
+    const { data: dayReservations } = await query;
+    if (!dayReservations) return true;
+
+    // For each minute in the new reservation's range, count how many bays are occupied
+    for (let m = startMin; m < endMin; m++) {
+      let occupied = 0;
+      for (const r of dayReservations) {
+        const [rH, rM] = r.reservation_time.split(':').map(Number);
+        const rStart = rH * 60 + rM;
+        const rDuration = getServiceDuration(r.service_type);
+        const rEnd = rStart + rDuration;
+        if (m >= rStart && m < rEnd) {
+          occupied++;
+        }
+      }
+      if (occupied >= dealer.bays) {
+        const conflictHour = Math.floor(m / 60);
+        const conflictMin = m % 60;
+        const ampm = conflictHour >= 12 ? 'PM' : 'AM';
+        const h12 = conflictHour > 12 ? conflictHour - 12 : conflictHour === 0 ? 12 : conflictHour;
+        setCapacityWarning(
+          `Sin disponibilidad: las ${dealer.bays} bahía(s) están ocupadas a las ${h12}:${String(conflictMin).padStart(2, '0')} ${ampm}. Servicio de ${duration} min no cabe en este horario.`
+        );
+        return false;
+      }
+    }
+    return true;
+  };
+
   const openCreate = () => {
     setEditingRes(null);
     setFDealership(''); setFClientSearch(''); setFClientId(''); setFVehicleId('');
     setFDate(new Date().toISOString().split('T')[0]); setFTime('08:00');
     setFService(''); setFMileage('0'); setFStatus('pendiente'); setFNotes('');
     setClientResults([]); setClientVehicles([]);
+    setCapacityWarning('');
     setDialogOpen(true);
   };
 
@@ -235,6 +324,13 @@ const AdminReservas = () => {
       toast.error('Completa los campos requeridos'); return;
     }
     setSaving(true);
+
+    // Validate capacity
+    const hasCapacity = await checkCapacity(fDealership, fDate, fTime, fService, editingRes?.id);
+    if (!hasCapacity) {
+      setSaving(false);
+      return;
+    }
 
     const payload = {
       dealership_id: fDealership,
@@ -318,9 +414,11 @@ const AdminReservas = () => {
               <TabsTrigger value="matrix" className="gap-1 text-xs h-7"><LayoutGrid className="w-3.5 h-3.5" /> Matriz</TabsTrigger>
             </TabsList>
           </Tabs>
-          <Button size="sm" onClick={openCreate} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Nueva
-          </Button>
+          {canCreate && (
+            <Button size="sm" onClick={openCreate} className="gac-gradient">
+              <Plus className="w-3.5 h-3.5 mr-1" /> Nueva
+            </Button>
+          )}
         </div>
       </div>
 
@@ -409,9 +507,36 @@ const AdminReservas = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
-                        <Pencil className="w-3 h-3" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-0.5">
+                        {r.status === 'confirmada' && r.clients?.phone && (() => {
+                          const waUrl = buildWhatsAppReservationUrl({
+                            phone: r.clients.phone,
+                            clientName: r.clients.full_name,
+                            date: r.reservation_date,
+                            time: r.reservation_time,
+                            serviceType: r.service_type,
+                            vehicleBrand: r.vehicles?.vehicle_models?.brand,
+                            vehicleModel: r.vehicles?.vehicle_models?.name,
+                            vehicleYear: r.vehicles?.year,
+                            vehiclePlate: r.vehicles?.plate || undefined,
+                            dealershipName: r.dealerships?.name || undefined,
+                            mileage: r.current_mileage,
+                            notes: r.notes || undefined,
+                          });
+                          return waUrl ? (
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:text-green-700" asChild>
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp de confirmación">
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              </a>
+                            </Button>
+                          ) : null;
+                        })()}
+                        {canEdit && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -518,7 +643,7 @@ const AdminReservas = () => {
                 <Input
                   value={fClientSearch}
                   onChange={e => { setFClientSearch(e.target.value); if (fClientId) { setFClientId(''); setFVehicleId(''); } }}
-                  placeholder="Buscar por nombre o cédula..."
+                  placeholder="Buscar por nombre, cédula o placa..."
                 />
                 {clientResults.length > 0 && !fClientId && (
                   <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-40 overflow-y-auto">
@@ -581,15 +706,25 @@ const AdminReservas = () => {
             {/* Servicio */}
             <div className="space-y-2">
               <Label>Tipo de Servicio *</Label>
-              <Select value={fService} onValueChange={setFService}>
+              <Select value={fService} onValueChange={v => { setFService(v); setCapacityWarning(''); }}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar servicio" /></SelectTrigger>
                 <SelectContent>
-                  {SERVICE_TYPES.map(s => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  {serviceTypes.map(s => (
+                    <SelectItem key={s.id} value={s.name}>
+                      {s.name} ({s.duration_minutes >= 60 ? `${Math.floor(s.duration_minutes / 60)}h${s.duration_minutes % 60 > 0 ? ` ${s.duration_minutes % 60}min` : ''}` : `${s.duration_minutes}min`})
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Capacity warning */}
+            {capacityWarning && (
+              <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{capacityWarning}</span>
+              </div>
+            )}
 
             {/* Km y Estado */}
             <div className="grid grid-cols-2 gap-4">

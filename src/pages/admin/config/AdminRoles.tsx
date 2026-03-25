@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -48,6 +49,7 @@ const MODULE_LABELS: Record<string, string> = {
   reservas: 'Reservas',
   garantias: 'Garantías',
   historial: 'Historial',
+  prospectos: 'Prospectos',
   usuarios: 'Usuarios',
   roles: 'Roles',
 };
@@ -64,6 +66,7 @@ const AdminRoles = () => {
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [formName, setFormName] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  const [formRedirectPortal, setFormRedirectPortal] = useState('cliente');
 
   // Permissions dialog
   const [permDialogOpen, setPermDialogOpen] = useState(false);
@@ -95,6 +98,7 @@ const AdminRoles = () => {
     setEditingRole(null);
     setFormName('');
     setFormDescription('');
+    setFormRedirectPortal('cliente');
     setDialogOpen(true);
   };
 
@@ -102,13 +106,14 @@ const AdminRoles = () => {
     setEditingRole(role);
     setFormName(role.name);
     setFormDescription(role.description || '');
+    setFormRedirectPortal((role as any).redirect_portal || 'cliente');
     setDialogOpen(true);
   };
 
   const handleSave = async () => {
     if (!formName.trim()) { toast.error('El nombre es requerido'); return; }
     setSaving(true);
-    const payload = { name: formName.trim(), description: formDescription.trim() || null };
+    const payload = { name: formName.trim(), description: formDescription.trim() || null, redirect_portal: formRedirectPortal };
 
     if (editingRole) {
       const { error } = await supabase.from('roles').update(payload).eq('id', editingRole.id);
@@ -275,6 +280,20 @@ const AdminRoles = () => {
             <div className="space-y-2">
               <Label>Descripción</Label>
               <Input value={formDescription} onChange={e => setFormDescription(e.target.value)} placeholder="Descripción del rol" />
+            </div>
+            <div className="space-y-2">
+              <Label>Portal de Redirección</Label>
+              <Select value={formRedirectPortal} onValueChange={setFormRedirectPortal}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="concesionario">Concesionario</SelectItem>
+                  <SelectItem value="cliente">Cliente</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">Define a qué portal será redirigido el usuario al iniciar sesión</p>
             </div>
           </div>
           <DialogFooter>
