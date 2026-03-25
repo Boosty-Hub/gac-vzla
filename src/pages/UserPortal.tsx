@@ -11,7 +11,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
-import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle } from 'lucide-react';
+import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText } from 'lucide-react';
+import gacLogo from '@/assets/gac-logo.png';
+import dfskLogo from '@/assets/dfsk-logo.png';
+import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -57,6 +60,7 @@ interface VehicleServiceRecord {
   current_mileage: number;
   status: string;
   service_notes: string | null;
+  technical_report_url: string | null;
   completed_at: string | null;
   dealerships: { name: string } | null;
 }
@@ -74,6 +78,7 @@ interface ServiceType {
   id: number;
   name: string;
   duration_minutes: number;
+  requires_description: boolean;
 }
 
 interface Reservation {
@@ -85,6 +90,7 @@ interface Reservation {
   status: string;
   notes: string | null;
   service_notes: string | null;
+  technical_report_url: string | null;
   completed_at: string | null;
   dealerships: { name: string } | null;
   vehicles: { plate: string; year: number; vehicle_models: { name: string; brand: string } | null } | null;
@@ -207,11 +213,11 @@ const UserPortal = () => {
         // Fetch reservations for this client
         const { data: res } = await supabase
           .from('reservations')
-          .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+          .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
           .eq('client_id', clientId)
           .order('reservation_date', { ascending: false })
           .limit(50);
-        setReservations((res || []) as Reservation[]);
+        setReservations((res || []) as unknown as Reservation[]);
       }
 
       // Fetch dealerships
@@ -225,10 +231,10 @@ const UserPortal = () => {
       // Fetch service types
       const { data: stData } = await supabase
         .from('service_types')
-        .select('id, name, duration_minutes')
+        .select('id, name, duration_minutes, requires_description')
         .eq('is_active', true)
         .order('name');
-      setServiceTypes((stData || []) as ServiceType[]);
+      setServiceTypes((stData || []) as unknown as ServiceType[]);
 
       // Fetch warranty conditions
       const { data: wcData } = await supabase
@@ -285,11 +291,11 @@ const UserPortal = () => {
     setLoadingVehHistory(true);
     const { data } = await supabase
       .from('reservations')
-      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, completed_at, dealerships(name)')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, technical_report_url, completed_at, dealerships(name)')
       .eq('vehicle_id', v.id)
       .order('reservation_date', { ascending: false })
       .limit(50);
-    setVehHistory((data || []) as VehicleServiceRecord[]);
+    setVehHistory((data || []) as unknown as VehicleServiceRecord[]);
     setLoadingVehHistory(false);
   };
 
@@ -327,11 +333,11 @@ const UserPortal = () => {
       // Refresh reservations
       const { data: res } = await supabase
         .from('reservations')
-        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
         .eq('client_id', clientData.id)
         .order('reservation_date', { ascending: false })
         .limit(50);
-      setReservations((res || []) as Reservation[]);
+      setReservations((res || []) as unknown as Reservation[]);
     }
     setSaving(false);
   };
@@ -346,11 +352,11 @@ const UserPortal = () => {
     if (!clientData) return;
     const { data: res } = await supabase
       .from('reservations')
-      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
       .eq('client_id', clientData.id)
       .order('reservation_date', { ascending: false })
       .limit(50);
-    setReservations((res || []) as Reservation[]);
+    setReservations((res || []) as unknown as Reservation[]);
   };
 
   const openEditReservation = (r: Reservation) => {
@@ -464,22 +470,36 @@ const UserPortal = () => {
   return (
     <div className="min-h-screen bg-background max-w-md mx-auto relative">
       {/* Header */}
-      <header className="sticky top-0 z-50 gac-gradient px-4 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-50 bg-gac-charcoal px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           {vista !== 'inicio' && (
-            <button onClick={volverInicio} className="text-primary-foreground">
+            <button onClick={volverInicio} className="text-white/70 hover:text-white">
               <ArrowLeft className="w-5 h-5" />
             </button>
           )}
-          <div>
-            <h1 className="text-lg font-display font-bold text-primary-foreground tracking-tight">GAC Motor</h1>
-            <p className="text-xs text-primary-foreground/70">
-              {clientData ? clientData.full_name : profile?.full_name || 'Portal Cliente'}
-            </p>
+          <div className="flex items-center gap-2">
+            {(() => {
+              const brands = Array.from(new Set(vehicles.map(v => v.vehicle_models?.brand).filter(Boolean) as string[]));
+              const hasGac = brands.some(b => b.toUpperCase() === 'GAC');
+              const hasDfsk = brands.some(b => b.toUpperCase() === 'DFSK');
+              if (!hasGac && !hasDfsk) return null;
+              return (
+                <div className="flex items-center gap-2">
+                  {hasGac && <img src={gacLogo} alt="GAC" className="h-5 brightness-0 invert" />}
+                  {hasGac && hasDfsk && <div className="w-px h-4 bg-white/30" />}
+                  {hasDfsk && <img src={dfskLogo} alt="DFSK" className="h-4 brightness-0 invert" />}
+                </div>
+              );
+            })()}
+            <div>
+              <p className="text-xs text-white/60 leading-tight">
+                {clientData ? clientData.full_name : profile?.full_name || 'Portal Cliente'}
+              </p>
+            </div>
           </div>
         </div>
-        <button onClick={handleSignOut} className="p-2 rounded-lg text-primary-foreground/70 hover:bg-white/10">
-          <LogOut className="w-5 h-5 text-primary-foreground" />
+        <button onClick={handleSignOut} className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10">
+          <LogOut className="w-5 h-5" />
         </button>
       </header>
 
@@ -622,18 +642,30 @@ const UserPortal = () => {
                 </div>
                 <div>
                   <Label>Tipo de Servicio</Label>
-                  <Select value={selectedService} onValueChange={setSelectedService}>
+                  <Select value={selectedService} onValueChange={v => { setSelectedService(v); setNotes(''); }}>
                     <SelectTrigger className="mt-1"><SelectValue placeholder="Selecciona el servicio" /></SelectTrigger>
                     <SelectContent>
                       {serviceTypes.map(t => <SelectItem key={t.id} value={t.name}>{t.name} ({t.duration_minutes >= 60 ? `${Math.floor(t.duration_minutes / 60)}h${t.duration_minutes % 60 > 0 ? ` ${t.duration_minutes % 60}min` : ''}` : `${t.duration_minutes}min`})</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {selectedService && serviceTypes.find(s => s.name === selectedService)?.requires_description && (
+                    <div className="mt-3">
+                      <Label className="text-sm">Descripción de la incidencia *</Label>
+                      <Textarea
+                        value={notes}
+                        onChange={e => setNotes(e.target.value)}
+                        rows={3}
+                        className="mt-1"
+                        placeholder="Describa la falla, desperfecto o tipo de servicio que solicita..."
+                      />
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Label>Kilometraje Actual</Label>
                   <Input className="mt-1" type="number" placeholder="Ej: 20000" value={mileage} onChange={e => setMileage(e.target.value)} />
                 </div>
-                <Button className="w-full gac-gradient text-primary-foreground" disabled={!selectedVehicle || !selectedService || !mileage} onClick={() => setPaso(2)}>
+                <Button className="w-full gac-gradient text-primary-foreground" disabled={!selectedVehicle || !selectedService || !mileage || (!!serviceTypes.find(s => s.name === selectedService)?.requires_description && !notes.trim())} onClick={() => setPaso(2)}>
                   Continuar
                 </Button>
               </div>
@@ -827,6 +859,19 @@ const UserPortal = () => {
                             Completado: {new Date(detailRes.completed_at).toLocaleString('es-VE')}
                           </p>
                         )}
+                      </div>
+                    )}
+                    {detailRes.technical_report_url && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold flex items-center gap-1">
+                          <FileText className="w-3.5 h-3.5 text-blue-600" /> Informe Técnico
+                        </p>
+                        <TechnicalReportUploader
+                          reservationId={detailRes.id}
+                          value={detailRes.technical_report_url}
+                          onChange={() => {}}
+                          readonly
+                        />
                       </div>
                     )}
                     {detailRes.status === 'cancelada' && (
@@ -1093,6 +1138,9 @@ const UserPortal = () => {
                             <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
                             {h.completed_at && <p className="text-green-600 text-[10px] mt-1">Completado: {new Date(h.completed_at).toLocaleString('es-VE')}</p>}
                           </div>
+                        )}
+                        {h.technical_report_url && (
+                          <TechnicalReportUploader reservationId={h.id} value={h.technical_report_url} onChange={() => {}} readonly />
                         )}
                       </CardContent>
                     </Card>

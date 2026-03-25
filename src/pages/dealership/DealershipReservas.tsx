@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle } from 'lucide-react';
+import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
@@ -32,6 +33,7 @@ interface Reservation {
   walkin_client_phone: string | null;
   walkin_plate: string | null;
   service_notes: string | null;
+  technical_report_url: string | null;
   completed_at: string | null;
   created_at: string;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
@@ -52,6 +54,7 @@ interface ServiceType {
   id: number;
   name: string;
   duration_minutes: number;
+  requires_description: boolean;
 }
 
 interface VehicleDetail {
@@ -75,6 +78,7 @@ interface HistoryRecord {
   status: string;
   notes: string | null;
   service_notes: string | null;
+  technical_report_url: string | null;
   completed_at: string | null;
   dealerships: { name: string } | null;
 }
@@ -103,6 +107,8 @@ const DealershipReservas = () => {
   const [resSearch, setResSearch] = useState('');
   const [resStatusFilter, setResStatusFilter] = useState('todos');
   const [resServiceFilter, setResServiceFilter] = useState('todos');
+  const [resFechaDesde, setResFechaDesde] = useState('');
+  const [resFechaHasta, setResFechaHasta] = useState('');
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -115,6 +121,7 @@ const DealershipReservas = () => {
   const [completeOpen, setCompleteOpen] = useState(false);
   const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
   const [serviceNotes, setServiceNotes] = useState('');
+  const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
 
   // Create dialog
@@ -156,10 +163,10 @@ const DealershipReservas = () => {
     (async () => {
       const { data } = await supabase
         .from('service_types')
-        .select('id, name, duration_minutes')
+        .select('id, name, duration_minutes, requires_description')
         .eq('is_active', true)
         .order('name');
-      if (data) setServiceTypes(data);
+      if (data) setServiceTypes(data as unknown as ServiceType[]);
     })();
   }, []);
 
@@ -168,6 +175,8 @@ const DealershipReservas = () => {
   const filteredReservations = reservations.filter(r => {
     if (resStatusFilter !== 'todos' && r.status !== resStatusFilter) return false;
     if (resServiceFilter !== 'todos' && r.service_type !== resServiceFilter) return false;
+    if (resFechaDesde && r.reservation_date < resFechaDesde) return false;
+    if (resFechaHasta && r.reservation_date > resFechaHasta) return false;
     if (resSearch.trim()) {
       const q = resSearch.toLowerCase();
       const client = (r.clients?.full_name || r.walkin_client_name || '').toLowerCase();
@@ -239,13 +248,13 @@ const DealershipReservas = () => {
       // Fetch all service history for this vehicle across ALL dealerships
       const { data: history } = await supabase
         .from('reservations')
-        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name)')
+        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name)')
         .eq('vehicle_id', r.vehicle_id)
         .neq('id', r.id)
         .order('reservation_date', { ascending: false })
         .order('reservation_time', { ascending: false })
         .limit(50);
-      setVehicleHistory((history || []) as HistoryRecord[]);
+      setVehicleHistory((history || []) as unknown as HistoryRecord[]);
       setLoadingDetail(false);
     }
   };
@@ -253,6 +262,7 @@ const DealershipReservas = () => {
   const openComplete = (r: Reservation) => {
     setCompletingRes(r);
     setServiceNotes(r.service_notes || '');
+    setTechnicalReportUrl(r.technical_report_url || null);
     setCompleteOpen(true);
   };
 
@@ -263,6 +273,7 @@ const DealershipReservas = () => {
     const { error } = await supabase.from('reservations').update({
       status: 'completada',
       service_notes: serviceNotes.trim(),
+      technical_report_url: technicalReportUrl || null,
       completed_at: new Date().toISOString(),
     }).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
@@ -274,7 +285,7 @@ const DealershipReservas = () => {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-display font-bold">Reservas</h1>
+          <h1 className="text-lg font-display font-bold">Reservas / Servicios</h1>
           <Badge variant="outline" className="gap-1 text-xs">
             <CalendarDays className="w-3 h-3" /> {reservations.length}
           </Badge>
@@ -294,25 +305,42 @@ const DealershipReservas = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[180px] max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input placeholder="Buscar cliente, placa, fecha..." className="pl-8 h-8 text-xs" value={resSearch} onChange={e => setResSearch(e.target.value)} />
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[160px] max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input placeholder="Buscar cliente, placa..." className="pl-8 h-8 text-xs" value={resSearch} onChange={e => setResSearch(e.target.value)} />
+          </div>
+          <Select value={resStatusFilter} onValueChange={setResStatusFilter}>
+            <SelectTrigger className="w-[130px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los estados</SelectItem>
+              {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={resServiceFilter} onValueChange={setResServiceFilter}>
+            <SelectTrigger className="w-[160px] h-8 text-xs shrink-0"><SelectValue placeholder="Servicio" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los servicios</SelectItem>
+              {serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
-        <Select value={resStatusFilter} onValueChange={setResStatusFilter}>
-          <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los estados</SelectItem>
-            {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={resServiceFilter} onValueChange={setResServiceFilter}>
-          <SelectTrigger className="w-[160px] h-8 text-xs"><SelectValue placeholder="Servicio" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los servicios</SelectItem>
-            {serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground shrink-0">Desde</span>
+            <Input type="date" value={resFechaDesde} onChange={e => setResFechaDesde(e.target.value)} className="h-8 text-xs w-[140px]" />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
+            <Input type="date" value={resFechaHasta} onChange={e => setResFechaHasta(e.target.value)} className="h-8 text-xs w-[140px]" />
+          </div>
+          {(resFechaDesde || resFechaHasta || resStatusFilter !== 'todos' || resServiceFilter !== 'todos') && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setResFechaDesde(''); setResFechaHasta(''); setResStatusFilter('todos'); setResServiceFilter('todos'); setResSearch(''); }}>
+              Limpiar filtros
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card className="gac-shadow">
@@ -337,7 +365,6 @@ const DealershipReservas = () => {
                 <TableHead>Servicio</TableHead>
                 <TableHead>Km</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -362,9 +389,24 @@ const DealershipReservas = () => {
                     </TableCell>
                     <TableCell>{r.service_type}</TableCell>
                     <TableCell>{r.current_mileage.toLocaleString()}</TableCell>
-                    <TableCell><Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge></TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
+                    <TableCell onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        <Select
+                          value={r.status}
+                          onValueChange={val => {
+                            if (val === 'completada') { openComplete(r); }
+                            else { updateStatus(r.id, val); }
+                          }}
+                        >
+                          <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[110px]', st.color)}>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                              <SelectItem key={k} value={k} className="text-xs">{v.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         {r.status === 'confirmada' && (r.clients?.phone || r.walkin_client_phone) && (() => {
                           const phone = r.clients?.phone || r.walkin_client_phone || '';
                           const name = r.clients?.full_name || r.walkin_client_name || 'Cliente';
@@ -384,17 +426,14 @@ const DealershipReservas = () => {
                             notes: r.notes || undefined,
                           });
                           return waUrl ? (
-                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600 hover:text-green-700" asChild onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600 hover:text-green-700 shrink-0" asChild onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                               <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp">
                                 <MessageCircle className="w-3.5 h-3.5" />
                               </a>
+
                             </Button>
                           ) : null;
                         })()}
-                        {r.status === 'pendiente' && <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'confirmada'); }}>Confirmar</Button>}
-                        {r.status === 'confirmada' && <Button size="sm" variant="outline" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'en_proceso'); }}>Iniciar</Button>}
-                        {r.status === 'en_proceso' && <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); openComplete(r); }}><ClipboardCheck className="w-3 h-3" /> Completar</Button>}
-                        {(r.status === 'pendiente' || r.status === 'confirmada') && <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2 text-destructive" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'cancelada'); }}>Cancelar</Button>}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -459,6 +498,12 @@ const DealershipReservas = () => {
                       <p className="font-semibold text-green-800 mb-1 flex items-center gap-1"><ClipboardCheck className="w-3.5 h-3.5" /> Trabajo realizado</p>
                       <p className="text-green-700 whitespace-pre-wrap">{detailRes.service_notes}</p>
                       {detailRes.completed_at && <p className="text-green-600 mt-1.5 text-[10px]">Completado: {new Date(detailRes.completed_at).toLocaleString('es-VE')}</p>}
+                    </div>
+                  )}
+                  {detailRes.technical_report_url && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-blue-600" /> Informe Técnico</p>
+                      <TechnicalReportUploader reservationId={detailRes.id} value={detailRes.technical_report_url} onChange={() => {}} readonly />
                     </div>
                   )}
                   <div className="flex justify-end gap-2 pt-2">
@@ -553,6 +598,9 @@ const DealershipReservas = () => {
                                 {h.completed_at && <p className="text-green-600 text-[10px] mt-1">Completado: {new Date(h.completed_at).toLocaleString('es-VE')}</p>}
                               </div>
                             )}
+                            {h.technical_report_url && (
+                              <TechnicalReportUploader reservationId={h.id} value={h.technical_report_url} onChange={() => {}} readonly />
+                            )}
                           </div>
                         );
                       })}
@@ -589,6 +637,14 @@ const DealershipReservas = () => {
                   onChange={e => setServiceNotes(e.target.value)}
                   rows={4}
                   placeholder="Describa los trabajos realizados, repuestos cambiados, observaciones..." 
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Informe Técnico (PDF)</Label>
+                <TechnicalReportUploader
+                  reservationId={completingRes.id}
+                  value={technicalReportUrl}
+                  onChange={setTechnicalReportUrl}
                 />
               </div>
             </div>
@@ -654,10 +710,16 @@ const DealershipReservas = () => {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1"><Label className="text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" /></div>
               <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-1"><Label className="text-xs">Servicio *</Label><Select value={fService} onValueChange={setFService}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger><SelectContent>{serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-1 col-span-2"><Label className="text-xs">Servicio *</Label><Select value={fService} onValueChange={v => { setFService(v); setFNotes(''); }}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger><SelectContent>{serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}</SelectContent></Select>
+              {fService && serviceTypes.find(s => s.name === fService)?.requires_description && (
+                <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="mt-2 text-xs" placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." />
+              )}
+              </div>
               <div className="space-y-1"><Label className="text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-8 text-xs" /></div>
             </div>
-            <div className="space-y-1"><Label className="text-xs">Notas</Label><Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones adicionales..." /></div>
+            {fService && !serviceTypes.find(s => s.name === fService)?.requires_description && (
+              <div className="space-y-1"><Label className="text-xs">Notas</Label><Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones adicionales..." /></div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancelar</Button>

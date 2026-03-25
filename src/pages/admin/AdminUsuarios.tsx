@@ -117,6 +117,7 @@ const AdminUsuarios = () => {
   };
 
   const getSelectedRoleName = (roleId: string) => roles.find(r => r.id === roleId)?.name || '';
+  const needsDealership = (roleId: string) => ['concesionario', 'vendedor'].includes(getSelectedRoleName(roleId).toLowerCase());
 
   const handleGenerateMagicLink = async (userId: string) => {
     setGeneratingLink(userId);
@@ -149,6 +150,10 @@ const AdminUsuarios = () => {
       toast.error('La contraseña debe tener al menos 6 caracteres');
       return;
     }
+    if (needsDealership(createRoleId) && !createDealershipId) {
+      toast.error('Debe seleccionar un concesionario para este rol');
+      return;
+    }
     const pinValue = createPinCode.trim();
     if (pinValue && !/^\d{4}$/.test(pinValue)) {
       toast.error('El PIN debe ser de exactamente 4 dígitos numéricos');
@@ -163,7 +168,7 @@ const AdminUsuarios = () => {
           password: createPassword,
           full_name: createFullName.trim() || null,
           role_id: createRoleId || null,
-          dealership_id: getSelectedRoleName(createRoleId) === 'concesionario' ? createDealershipId || null : null,
+          dealership_id: needsDealership(createRoleId) ? createDealershipId || null : null,
           pin_code: pinValue || null,
         },
       });
@@ -206,11 +211,16 @@ const AdminUsuarios = () => {
 
   const handleSaveUser = async () => {
     if (!editingUser) return;
+    if (needsDealership(editRoleId) && !editDealershipId) {
+      toast.error('Debe seleccionar un concesionario para este rol');
+      return;
+    }
     setSaving(true);
 
     const pinValue = editPinCode.trim();
     if (pinValue && !/^\d{4}$/.test(pinValue)) {
       toast.error('El PIN debe ser de exactamente 4 dígitos numéricos');
+      setSaving(false);
       return;
     }
 
@@ -229,11 +239,8 @@ const AdminUsuarios = () => {
       console.error(error);
     } else {
       // Update dealership link
-      const editRoleName = getSelectedRoleName(editRoleId);
-      // Remove existing links
       await supabase.from('dealership_users').delete().eq('profile_id', editingUser.id);
-      // Add new link if concesionario
-      if (editRoleName === 'concesionario' && editDealershipId) {
+      if (needsDealership(editRoleId) && editDealershipId) {
         await supabase.from('dealership_users').insert({ dealership_id: editDealershipId, profile_id: editingUser.id });
       }
       toast.success('Usuario actualizado correctamente');
@@ -416,7 +423,7 @@ const AdminUsuarios = () => {
 
               <div className="space-y-2">
                 <Label>Rol</Label>
-                <Select value={editRoleId} onValueChange={v => { setEditRoleId(v); if (getSelectedRoleName(v) !== 'concesionario') setEditDealershipId(''); }}>
+                <Select value={editRoleId} onValueChange={v => { setEditRoleId(v); if (!needsDealership(v)) setEditDealershipId(''); }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar rol" />
                   </SelectTrigger>
@@ -431,7 +438,7 @@ const AdminUsuarios = () => {
                 </Select>
               </div>
 
-              {getSelectedRoleName(editRoleId) === 'concesionario' && (
+              {needsDealership(editRoleId) && (
                 <div className="space-y-2">
                   <Label>Concesionario</Label>
                   <Select value={editDealershipId} onValueChange={setEditDealershipId}>
@@ -535,7 +542,7 @@ const AdminUsuarios = () => {
             </div>
             <div className="space-y-2">
               <Label>Rol</Label>
-              <Select value={createRoleId} onValueChange={v => { setCreateRoleId(v); if (getSelectedRoleName(v) !== 'concesionario') setCreateDealershipId(''); }}>
+              <Select value={createRoleId} onValueChange={v => { setCreateRoleId(v); if (!needsDealership(v)) setCreateDealershipId(''); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Seleccionar rol" />
                 </SelectTrigger>
@@ -549,9 +556,9 @@ const AdminUsuarios = () => {
                 </SelectContent>
               </Select>
             </div>
-            {getSelectedRoleName(createRoleId) === 'concesionario' && (
+            {needsDealership(createRoleId) && (
               <div className="space-y-2">
-                <Label>Concesionario *</Label>
+                <Label>Concesionario {getSelectedRoleName(createRoleId).toLowerCase() === 'concesionario' ? '*' : ''}</Label>
                 <Select value={createDealershipId} onValueChange={setCreateDealershipId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar concesionario" />
@@ -562,7 +569,12 @@ const AdminUsuarios = () => {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">El usuario solo verá reservas y prospectos de este concesionario</p>
+                <p className="text-xs text-muted-foreground">
+                  {getSelectedRoleName(createRoleId).toLowerCase() === 'concesionario'
+                    ? 'El usuario solo verá reservas y prospectos de este concesionario'
+                    : 'El vendedor estará asociado a este concesionario'
+                  }
+                </p>
               </div>
             )}
             <div className="space-y-2">

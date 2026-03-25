@@ -29,7 +29,11 @@ export const ResponsiveModal = ({ open, onOpenChange, children, className }: Res
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn("max-h-[85vh] overflow-y-auto", className)}>
+      <DialogContent
+        className={cn("max-h-[85vh] overflow-y-auto", className)}
+        onPointerDownOutside={e => e.preventDefault()}
+        onInteractOutside={e => e.preventDefault()}
+      >
         {children}
       </DialogContent>
     </Dialog>

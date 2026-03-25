@@ -43,6 +43,11 @@ const TEMPLATE_VAR_GROUPS: Record<string, { key: string; desc: string }[]> = {
     { key: 'notas', desc: 'Notas del prospecto' },
     { key: 'fecha', desc: 'Fecha de creación' },
   ],
+  prospect_greeting: [
+    { key: 'prospecto', desc: 'Nombre del prospecto' },
+    { key: 'vendedor', desc: 'Nombre del vendedor' },
+    { key: 'modelo', desc: 'Modelo de interés' },
+  ],
 };
 
 const ALL_VARS = Object.values(TEMPLATE_VAR_GROUPS).flat().filter((v, i, arr) => arr.findIndex(x => x.key === v.key) === i);
@@ -64,6 +69,8 @@ function processPreview(template: string): string {
     modelo: 'GAC GS4 2025',
     fuente: 'Instagram',
     estado: 'Nuevo',
+    prospecto: 'María González',
+    vendedor: 'Egerlyn Sánchez',
   };
 
   let result = template;

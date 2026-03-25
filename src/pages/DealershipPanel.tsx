@@ -11,17 +11,20 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { CalendarDays, Plus, LogOut, ClipboardList, Search, CheckCircle, Car, User, AlertCircle, Users, Phone, Mail, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette } from 'lucide-react';
+import { CalendarDays, Plus, LogOut, ClipboardList, Search, CheckCircle, Car, User, AlertCircle, Users, Phone, Mail, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, UserCog, Trophy, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
+import gacLogo from '@/assets/gac-logo.png';
+import dfskLogo from '@/assets/dfsk-logo.png';
 import { toast } from 'sonner';
 
 interface Dealership {
   id: string;
   name: string;
   city: string | null;
+  brand: string | null;
 }
 
 interface Reservation {
@@ -181,6 +184,10 @@ const DealershipPanel = () => {
   const [resStatusFilter, setResStatusFilter] = useState('todos');
   const [resServiceFilter, setResServiceFilter] = useState('todos');
 
+  // Vendedores
+  const [vendedores, setVendedores] = useState<Array<{ id: string; name: string; phone: string | null; is_active: boolean; total: number; ganados: number; perdidos: number }>>([]);
+  const [loadingVendedores, setLoadingVendedores] = useState(false);
+
   // Prospects
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loadingProspects, setLoadingProspects] = useState(true);
@@ -207,13 +214,10 @@ const DealershipPanel = () => {
   const fetchDealerships = async () => {
     const { data } = await supabase
       .from('dealerships')
-      .select('id, name, city')
+      .select('id, name, city, brand')
       .eq('is_active', true)
       .order('name');
-    if (data && data.length > 0) {
-      setDealerships(data);
-      setSelectedDealership(data[0].id);
-    }
+    if (data) setDealerships(data as Dealership[]);
   };
 
   const fetchReservations = async () => {
@@ -249,6 +253,51 @@ const DealershipPanel = () => {
     setLoadingProspects(false);
   };
 
+  const fetchVendedores = async (dealershipId: string) => {
+    setLoadingVendedores(true);
+    // Get profile_ids linked to this dealership
+    const { data: duData } = await supabase
+      .from('dealership_users')
+      .select('profile_id')
+      .eq('dealership_id', dealershipId);
+
+    if (!duData || duData.length === 0) { setVendedores([]); setLoadingVendedores(false); return; }
+
+    const profileIds = duData.map((d: any) => d.profile_id);
+
+    // Get salespersons matching those profile_ids
+    const { data: spData } = await (supabase
+      .from('salespersons' as any)
+      .select('id, name, phone, is_active, profile_id')
+      .in('profile_id', profileIds)
+      .eq('is_active', true)
+      .order('name') as any);
+
+    if (!spData || spData.length === 0) { setVendedores([]); setLoadingVendedores(false); return; }
+
+    // Get prospect counts per salesperson name for this dealership
+    const { data: prosData } = await supabase
+      .from('prospects')
+      .select('salesperson, status')
+      .eq('dealership_id', dealershipId);
+
+    const rows = (spData as any[]).map((sp: any) => {
+      const mine = (prosData || []).filter((p: any) => p.salesperson === sp.name);
+      return {
+        id: sp.id,
+        name: sp.name,
+        phone: sp.phone || null,
+        is_active: sp.is_active,
+        total: mine.length,
+        ganados: mine.filter((p: any) => p.status === 'ganado').length,
+        perdidos: mine.filter((p: any) => p.status === 'perdido').length,
+      };
+    }).sort((a: any, b: any) => b.total - a.total);
+
+    setVendedores(rows);
+    setLoadingVendedores(false);
+  };
+
   const fetchServiceTypes = async () => {
     const { data } = await supabase
       .from('service_types')
@@ -263,6 +312,7 @@ const DealershipPanel = () => {
     if (selectedDealership) {
       fetchReservations();
       fetchProspects(isSalesperson ? currentSalesperson?.name : null);
+      fetchVendedores(selectedDealership);
     }
   }, [selectedDealership, currentSalesperson]);
 
@@ -428,6 +478,18 @@ const DealershipPanel = () => {
     setCompleting(false);
   };
 
+  const checkDuplicateProspectPhone = async (phone: string): Promise<boolean> => {
+    const normalized = phone.replace(/\D/g, '');
+    if (!normalized) return false;
+    const { data } = await supabase.from('prospects').select('id, name, phone').not('phone', 'is', null);
+    const duplicate = (data || []).find((p: any) => p.phone.replace(/\D/g, '') === normalized);
+    if (duplicate) {
+      toast.error(`Ya existe un prospecto con ese teléfono: ${duplicate.name}`);
+      return true;
+    }
+    return false;
+  };
+
   // Prospects CRUD
   const openProspectDialog = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
@@ -438,6 +500,10 @@ const DealershipPanel = () => {
 
   const handleSaveProspect = async () => {
     if (!pName.trim()) { toast.error('El nombre es requerido'); return; }
+    if (pPhone.trim()) {
+      const isDuplicate = await checkDuplicateProspectPhone(pPhone.trim());
+      if (isDuplicate) return;
+    }
     setSavingProspect(true);
     const { error } = await supabase.from('prospects').insert({
       dealership_id: selectedDealership,
@@ -467,11 +533,26 @@ const DealershipPanel = () => {
     <div className="min-h-screen bg-background">
       <header className="bg-gac-charcoal text-primary-foreground px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div>
-            <h1 className="text-xl font-display font-bold tracking-tight">
-              {currentDealership?.name || 'Panel Concesionario'}
-            </h1>
-            <p className="text-xs text-gac-silver">Panel del Concesionario</p>
+          <div className="flex items-center gap-3">
+            {(() => {
+              const brand = (currentDealership?.brand || '').toUpperCase();
+              const hasGac = brand === 'GAC' || brand === 'AMBAS';
+              const hasDfsk = brand === 'DFSK' || brand === 'AMBAS';
+              if (!hasGac && !hasDfsk) return null;
+              return (
+                <div className="flex items-center gap-2.5">
+                  {hasGac && <img src={gacLogo} alt="GAC" className="h-6 brightness-0 invert" />}
+                  {hasGac && hasDfsk && <div className="w-px h-5 bg-white/30" />}
+                  {hasDfsk && <img src={dfskLogo} alt="DFSK" className="h-5 brightness-0 invert" />}
+                </div>
+              );
+            })()}
+            <div>
+              <h1 className="text-xl font-display font-bold tracking-tight">
+                {currentDealership?.name || 'Panel Concesionario'}
+              </h1>
+              <p className="text-xs text-gac-silver">Panel del Concesionario</p>
+            </div>
           </div>
           {dealerships.length > 1 && (
             <Select value={selectedDealership} onValueChange={setSelectedDealership}>
@@ -537,6 +618,7 @@ const DealershipPanel = () => {
           <TabsList className="bg-muted">
             <TabsTrigger value="reservas">Reservas ({reservations.length})</TabsTrigger>
             <TabsTrigger value="prospectos">Prospectos ({prospects.length})</TabsTrigger>
+            {!isSalesperson && <TabsTrigger value="vendedores">Vendedores ({vendedores.length})</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="reservas" className="space-y-3">
@@ -744,6 +826,96 @@ const DealershipPanel = () => {
               )}
             </Card>
           </TabsContent>
+
+          {!isSalesperson && (
+            <TabsContent value="vendedores" className="space-y-3">
+              <div className="flex items-center gap-3">
+                <h2 className="text-lg font-display font-bold">Vendedores</h2>
+                <Badge variant="outline" className="gap-1 text-xs">
+                  <UserCog className="w-3 h-3" /> {vendedores.length}
+                </Badge>
+              </div>
+
+              {loadingVendedores ? (
+                <Card className="gac-shadow">
+                  <CardContent className="p-8 text-center">
+                    <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">Cargando vendedores...</p>
+                  </CardContent>
+                </Card>
+              ) : vendedores.length === 0 ? (
+                <Card className="gac-shadow">
+                  <CardContent className="p-8 text-center">
+                    <UserCog className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">No hay vendedores asociados a este concesionario</p>
+                    <p className="text-xs text-muted-foreground mt-1">Los vendedores se asocian desde el módulo de Usuarios en el panel admin</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {vendedores.map((v, i) => {
+                    const conversion = v.total > 0 ? Math.round((v.ganados / v.total) * 100) : 0;
+                    const maxTotal = vendedores[0]?.total || 1;
+                    return (
+                      <Card key={v.id} className="gac-shadow">
+                        <CardContent className="p-4 space-y-3">
+                          <div className="flex items-center gap-3">
+                            <div className={cn(
+                              "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0",
+                              i === 0 ? "bg-amber-100 text-amber-800 ring-2 ring-amber-400" :
+                              i === 1 ? "bg-gray-100 text-gray-700 ring-2 ring-gray-300" :
+                              i === 2 ? "bg-orange-100 text-orange-800 ring-2 ring-orange-300" :
+                              "bg-muted text-muted-foreground"
+                            )}>
+                              {i < 3 ? <Trophy className="w-4 h-4" /> : i + 1}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold truncate">{v.name}</p>
+                              {v.phone && (
+                                <a href={`tel:${v.phone}`} className="text-[11px] text-muted-foreground flex items-center gap-1 hover:text-primary">
+                                  <Phone className="w-2.5 h-2.5" />{v.phone}
+                                </a>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                              <span>Prospectos</span>
+                              <span className="font-semibold text-foreground">{v.total}</span>
+                            </div>
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-primary transition-all"
+                                style={{ width: `${Math.round((v.total / maxTotal) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700">
+                                <ArrowUpRight className="w-2.5 h-2.5" />{v.ganados}
+                              </Badge>
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-red-300 text-red-600">
+                                <ArrowDownRight className="w-2.5 h-2.5" />{v.perdidos}
+                              </Badge>
+                            </div>
+                            <span className={cn("text-sm font-bold",
+                              conversion >= 50 ? "text-green-600" :
+                              conversion >= 20 ? "text-amber-600" : "text-muted-foreground"
+                            )}>
+                              {conversion}%
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </TabsContent>
+          )}
         </Tabs>
       </main>
 

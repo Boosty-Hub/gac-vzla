@@ -24,7 +24,6 @@ import AdminClientes from "./pages/admin/AdminClientes";
 import AdminProspectos from "./pages/admin/AdminProspectos";
 import AdminUsuarios from "./pages/admin/AdminUsuarios";
 import AdminRoles from "./pages/admin/config/AdminRoles";
-import AdminPermisos from "./pages/admin/config/AdminPermisos";
 import AdminServicios from './pages/admin/config/AdminServicios';
 import AdminCondicionesGarantia from './pages/admin/config/AdminCondicionesGarantia';
 import AdminGeneral from './pages/admin/config/AdminGeneral';
@@ -43,7 +42,7 @@ const AdminRoute = ({ children }: { children: React.ReactNode }) => (
 );
 
 const DealershipRoute = ({ children }: { children: React.ReactNode }) => (
-  <ProtectedRoute allowedRoles={['concesionario', 'superadmin', 'admin']}>
+  <ProtectedRoute allowedRoles={['concesionario', 'Vendedor', 'superadmin', 'admin']}>
     <DealershipLayout>{children}</DealershipLayout>
   </ProtectedRoute>
 );
@@ -88,7 +87,6 @@ const App = () => (
             <Route path="/admin/configuracion/general" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminGeneral /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/usuarios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminUsuarios /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/roles" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminRoles /></ConfigLayout></ProtectedRoute>} />
-            <Route path="/admin/configuracion/permisos" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminPermisos /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/servicios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminServicios /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/garantias" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminCondicionesGarantia /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/plantillas" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminPlantillas /></ConfigLayout></ProtectedRoute>} />

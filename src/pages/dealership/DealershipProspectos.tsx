@@ -9,17 +9,21 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ResponsiveModal, ResponsiveModalHeader, ResponsiveModalTitle, ResponsiveModalFooter } from '@/components/ui/responsive-modal';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Search, Users, Phone, Mail, ExternalLink } from 'lucide-react';
+import { Plus, Search, Users, Phone, Mail, ExternalLink, MessageCircle, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useSalespersons } from '@/hooks/useSalespersons';
 import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
+import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useProspectModels } from '@/hooks/useProspectModels';
+import { useProspectSources } from '@/hooks/useProspectSources';
+import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 
 
 interface Prospect {
@@ -36,20 +40,15 @@ interface Prospect {
   created_at: string;
 }
 
-const PROSPECT_SOURCES = [
-  { value: 'concesionario', label: 'Concesionario' },
-  { value: 'visita', label: 'Visita' },
-  { value: 'evento', label: 'Evento' },
-  { value: 'referido', label: 'Referido' },
-  { value: 'pagina_web', label: 'Página Web' },
-  { value: 'redes_sociales', label: 'Redes Sociales' },
-];
 
 const DealershipProspectos = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
+  const { sources: PROSPECT_SOURCES } = useProspectSources();
   const { salespersons } = useSalespersons();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
+  const { profile, role } = useAuth();
+  const isVendedor = role?.name?.toLowerCase() === 'vendedor';
   const isMobile = useIsMobile();
   const { models: prospectModels, brands: prospectBrands } = useProspectModels();
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -58,19 +57,64 @@ const DealershipProspectos = () => {
   const [prosSearch, setProsSearch] = useState('');
   const [prosStatusFilter, setProsStatusFilter] = useState('todos');
   const [prosSourceFilter, setProsSourceFilter] = useState('todos');
+  const [prosFechaDesde, setProsFechaDesde] = useState('');
+  const [prosFechaHasta, setProsFechaHasta] = useState('');
 
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // Dialog persisted in sessionStorage to survive navigation
+  const SS_KEY = 'dealership_prospectos_dialog';
+  const getSS = () => { try { return JSON.parse(sessionStorage.getItem(SS_KEY) || '{}'); } catch { return {}; } };
+  const [dialogOpen, setDialogOpenRaw] = useState<boolean>(() => !!getSS().dialogOpen);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [missingFields, setMissingFields] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [pName, setPName] = useState('');
-  const [pPhone, setPPhone] = useState('');
-  const [pEmail, setPEmail] = useState('');
-  const [pModel, setPModel] = useState('');
-  const [pSource, setPSource] = useState('concesionario');
-  const [pStatus, setPStatus] = useState('nuevo');
-  const [pNotes, setPNotes] = useState('');
-  const [pSalesperson, setPSalesperson] = useState('');
-  const [pEventName, setPEventName] = useState('');
+  const [pName, setPName] = useState<string>(() => getSS().pName || '');
+  const [pPhone, setPPhone] = useState<string>(() => getSS().pPhone || '');
+  const [pEmail, setPEmail] = useState<string>(() => getSS().pEmail || '');
+  const [pModel, setPModel] = useState<string>(() => getSS().pModel || '');
+  const [pSource, setPSource] = useState<string>(() => getSS().pSource || 'concesionario');
+  const [pStatus, setPStatus] = useState<string>(() => getSS().pStatus || 'nuevo');
+  const [pNotes, setPNotes] = useState<string>(() => getSS().pNotes || '');
+  const [pSalesperson, setPSalesperson] = useState<string>(() => getSS().pSalesperson || '');
+  const [pEventName, setPEventName] = useState<string>(() => getSS().pEventName || '');
 
+  const setDialogOpen = (open: boolean) => {
+    setDialogOpenRaw(open);
+    if (!open) { try { sessionStorage.removeItem(SS_KEY); } catch {} }
+  };
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    try {
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName }));
+    } catch {}
+  }, [dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName]);
+  const [greetingTemplate, setGreetingTemplate] = useState<string>('Hola {{prospecto}}, ¡es un gusto saludarte! Mi nombre es {{vendedor}}, seré el asesor de ventas encargado de brindarte información de nuestros vehículos. ¿En qué puedo ayudarte hoy? 🚗');
+  const [updatesSidebarProspect, setUpdatesSidebarProspect] = useState<Prospect | null>(null);
+
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('message_templates' as any)
+        .select('content')
+        .eq('template_key', 'prospect_greeting')
+        .eq('is_active', true)
+        .limit(1);
+      if (data && (data as any[]).length > 0) {
+        setGreetingTemplate((data as any[])[0].content);
+      }
+    })();
+  }, []);
+
+  const buildProspectWaUrl = (p: Prospect, salespersonName: string) => {
+    if (!p.phone) return null;
+    const msg = greetingTemplate
+      .replace(/{{prospecto}}/g, p.name)
+      .replace(/{{vendedor}}/g, salespersonName || 'el asesor')
+      .replace(/{{modelo}}/g, p.model_interest || '');
+    const phone = p.phone.replace(/\D/g, '');
+    return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+  };
 
   const fetchProspects = async () => {
     if (!selectedDealership) return;
@@ -81,9 +125,17 @@ const DealershipProspectos = () => {
       .eq('dealership_id', selectedDealership)
       .order('created_at', { ascending: false });
 
-    // If user is a linked salesperson, only show their assigned prospects
-    if (isSalesperson && currentSalesperson) {
-      query = query.eq('salesperson', currentSalesperson.name);
+    // Determine the salesperson name to filter by:
+    // 1. Linked salespersons record takes priority
+    // 2. Fallback: Vendedor role user uses their profile full_name
+    const salespersonName = isSalesperson && currentSalesperson
+      ? currentSalesperson.name
+      : isVendedor && profile?.full_name
+        ? profile.full_name
+        : null;
+
+    if (salespersonName) {
+      query = query.eq('salesperson', salespersonName);
     }
 
     const { data } = await query;
@@ -102,6 +154,8 @@ const DealershipProspectos = () => {
   const filteredProspects = prospects.filter(p => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
     if (prosSourceFilter !== 'todos' && p.source !== prosSourceFilter) return false;
+    if (prosFechaDesde && p.created_at.slice(0, 10) < prosFechaDesde) return false;
+    if (prosFechaHasta && p.created_at.slice(0, 10) > prosFechaHasta) return false;
     if (prosSearch.trim()) {
       const q = prosSearch.toLowerCase();
       if (!p.name.toLowerCase().includes(q) && !(p.phone || '').toLowerCase().includes(q) && !(p.email || '').toLowerCase().includes(q) && !(p.model_interest || '').toLowerCase().includes(q)) return false;
@@ -115,9 +169,16 @@ const DealershipProspectos = () => {
   const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
   const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
 
+  const autoSalesperson = isSalesperson && currentSalesperson
+    ? currentSalesperson.name
+    : isVendedor && profile?.full_name
+      ? profile.full_name
+      : '';
+
   const resetForm = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
-    setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
+    setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
+    setPSalesperson(autoSalesperson);
     setPEventName('');
   };
 
@@ -126,29 +187,55 @@ const DealershipProspectos = () => {
     setDialogOpen(true);
   };
 
-  const handleSave = async () => {
-    if (!pName.trim()) { toast.error('El nombre es requerido'); return; }
-    if (!pPhone.trim()) { toast.error('El teléfono es requerido'); return; }
-    if (!pEmail.trim()) { toast.error('El correo es requerido'); return; }
-    if (!pModel.trim() || pModel === '__none') { toast.error('El modelo de interés es requerido'); return; }
-    if (!pSource) { toast.error('El tipo de contacto es requerido'); return; }
-    if (!pSalesperson || pSalesperson === '__none') { toast.error('El vendedor es requerido'); return; }
+  const checkDuplicatePhone = async (phone: string): Promise<boolean> => {
+    const normalized = phone.replace(/\D/g, '');
+    if (!normalized) return false;
+    const { data } = await supabase.from('prospects').select('id, name, phone').not('phone', 'is', null);
+    const duplicate = (data || []).find((p: any) => p.phone.replace(/\D/g, '') === normalized);
+    if (duplicate) {
+      toast.error(`Ya existe un prospecto con ese teléfono: ${duplicate.name}`);
+      return true;
+    }
+    return false;
+  };
+
+  const doSave = async () => {
     setSaving(true);
+    const phone = pPhone.trim();
+    if (phone) {
+      const isDuplicate = await checkDuplicatePhone(phone);
+      if (isDuplicate) { setSaving(false); return; }
+    }
     const { error } = await supabase.from('prospects').insert({
       dealership_id: selectedDealership,
       name: pName.trim(),
-      phone: pPhone.trim() || null,
+      phone: phone || null,
       email: pEmail.trim() || null,
       model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
-      source: pSource,
-      status: pStatus,
+      source: pSource || 'concesionario',
+      status: pStatus || 'nuevo',
       notes: pNotes.trim() || null,
-      salesperson: (pSalesperson.trim() && pSalesperson !== '__none') ? pSalesperson.trim() : null,
+      salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : null,
       event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     });
     if (error) { toast.error('Error al crear prospecto'); console.error(error); }
-    else { toast.success('Prospecto creado'); setDialogOpen(false); resetForm(); fetchProspects(); }
+    else { toast.success('Prospecto creado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
     setSaving(false);
+  };
+
+  const handleSave = async () => {
+    if (!pName.trim()) { toast.error('El nombre es requerido'); return; }
+    if (!pPhone.trim()) { toast.error('El teléfono es requerido'); return; }
+    const missing: string[] = [];
+    if (!pEmail.trim()) missing.push('Correo electrónico');
+    if (!pModel.trim() || pModel === '__none') missing.push('Modelo de interés');
+    if (!isSalesperson && (!pSalesperson || pSalesperson === '__none')) missing.push('Vendedor');
+    if (missing.length > 0) {
+      setMissingFields(missing);
+      setConfirmOpen(true);
+      return;
+    }
+    await doSave();
   };
 
   const updateStatus = async (id: string, newStatus: string) => {
@@ -190,6 +277,17 @@ const DealershipProspectos = () => {
             {p.model_interest && <span className="text-muted-foreground">🚘 {p.model_interest}</span>}
             <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
             <span className="text-muted-foreground ml-auto">{new Date(p.created_at).toLocaleDateString('es-VE')}</span>
+            {p.phone && (() => {
+              const waUrl = buildProspectWaUrl(p, autoSalesperson || p.salesperson || '');
+              return waUrl ? (
+                <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp al prospecto" className="text-green-600 hover:text-green-700">
+                  <MessageCircle className="w-3.5 h-3.5" />
+                </a>
+              ) : null;
+            })()}
+            <button onClick={() => setUpdatesSidebarProspect(p)} title="Ver actualizaciones" className="text-primary hover:text-primary/80">
+              <Activity className="w-3.5 h-3.5" />
+            </button>
           </div>
         </CardContent>
       </Card>
@@ -235,26 +333,43 @@ const DealershipProspectos = () => {
         </TabsList>
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-0 sm:min-w-[180px] sm:max-w-sm">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => setProsSearch(e.target.value)} />
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-wrap">
+            <div className="relative flex-1 min-w-0 sm:min-w-[180px] sm:max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => setProsSearch(e.target.value)} />
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Select value={prosStatusFilter} onValueChange={setProsStatusFilter}>
+                <SelectTrigger className="w-[110px] sm:w-[130px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={prosSourceFilter} onValueChange={setProsSourceFilter}>
+                <SelectTrigger className="w-[110px] sm:w-[140px] h-8 text-xs shrink-0"><SelectValue placeholder="Fuente" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todas</SelectItem>
+                  {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <Select value={prosStatusFilter} onValueChange={setProsStatusFilter}>
-              <SelectTrigger className="w-[110px] sm:w-[130px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos</SelectItem>
-                {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={prosSourceFilter} onValueChange={setProsSourceFilter}>
-              <SelectTrigger className="w-[110px] sm:w-[140px] h-8 text-xs shrink-0"><SelectValue placeholder="Fuente" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todas</SelectItem>
-                {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground shrink-0">Desde</span>
+              <Input type="date" value={prosFechaDesde} onChange={e => setProsFechaDesde(e.target.value)} className="h-8 text-xs w-[140px]" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
+              <Input type="date" value={prosFechaHasta} onChange={e => setProsFechaHasta(e.target.value)} className="h-8 text-xs w-[140px]" />
+            </div>
+            {(prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setProsSearch(''); }}>
+                Limpiar filtros
+              </Button>
+            )}
           </div>
         </div>
 
@@ -287,7 +402,7 @@ const DealershipProspectos = () => {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
                   <TableHead>Modelo</TableHead>
-                  {!isSalesperson && <TableHead>Vendedor</TableHead>}
+                  {!isSalesperson && !isVendedor && <TableHead>Vendedor</TableHead>}
                   <TableHead>Fuente</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Fecha</TableHead>
@@ -305,7 +420,7 @@ const DealershipProspectos = () => {
                         {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                       </TableCell>
                       <TableCell>{p.model_interest || '-'}</TableCell>
-                      {!isSalesperson && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
+                      {!isSalesperson && !isVendedor && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
                       <TableCell>
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
                       </TableCell>
@@ -324,7 +439,20 @@ const DealershipProspectos = () => {
                         </Select>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {new Date(p.created_at).toLocaleDateString('es-VE')}
+                        <div className="flex items-center gap-1.5">
+                          <span>{new Date(p.created_at).toLocaleDateString('es-VE')}</span>
+                          {p.phone && (() => {
+                            const waUrl = buildProspectWaUrl(p, autoSalesperson || p.salesperson || '');
+                            return waUrl ? (
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp al prospecto" className="text-green-600 hover:text-green-700 shrink-0">
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              </a>
+                            ) : null;
+                          })()}
+                          <button onClick={(e) => { e.stopPropagation(); setUpdatesSidebarProspect(p); }} title="Ver actualizaciones" className="text-primary hover:text-primary/80 shrink-0">
+                            <Activity className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -351,14 +479,19 @@ const DealershipProspectos = () => {
                 <Input value={pPhone} onChange={e => setPPhone(e.target.value)} placeholder="+58 412 1234567" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Email *</Label>
+                <Label className="text-xs">Email</Label>
                 <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Modelo de interés *</Label>
+                <Label className="text-xs">Modelo de interés</Label>
                 <Select value={pModel} onValueChange={setPModel}>
-                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Seleccionar modelo">
+                      {pModel && !prospectModels.some(m => `${m.brand} ${m.name}` === pModel) ? pModel : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none">Sin modelo</SelectItem>
                     {prospectBrands.map(brand => (
                       <SelectGroup key={brand}>
                         <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
@@ -371,7 +504,7 @@ const DealershipProspectos = () => {
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Tipo de contacto *</Label>
+                <Label className="text-xs">Tipo de contacto</Label>
                 <Select value={pSource} onValueChange={v => { setPSource(v); if (v !== 'evento') setPEventName(''); }}>
                   <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -385,17 +518,26 @@ const DealershipProspectos = () => {
                   <Input value={pEventName} onChange={e => setPEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" className="h-9 text-xs" />
                 </div>
               )}
-              <div className="space-y-1">
-                <Label className="text-xs">Vendedor *</Label>
-                <Select value={pSalesperson} onValueChange={setPSalesperson}>
-                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
-                  <SelectContent>
-                    {salespersons.map(sp => (
-                      <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {autoSalesperson ? (
+                <div className="space-y-1">
+                  <Label className="text-xs">Vendedor</Label>
+                  <div className="h-9 flex items-center px-3 rounded-md border bg-muted text-xs font-medium text-muted-foreground">
+                    {autoSalesperson}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <Label className="text-xs">Vendedor</Label>
+                  <Select value={pSalesperson} onValueChange={setPSalesperson}>
+                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
+                    <SelectContent>
+                      {salespersons.map(sp => (
+                        <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
@@ -422,6 +564,40 @@ const DealershipProspectos = () => {
             </Button>
           </ResponsiveModalFooter>
       </ResponsiveModal>
+
+      {/* CONFIRM PARTIAL CREATE */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Crear prospecto con información incompleta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Los siguientes campos no fueron completados:
+              <ul className="mt-2 list-disc list-inside space-y-0.5">
+                {missingFields.map(f => <li key={f} className="text-foreground font-medium">{f}</li>)}
+              </ul>
+              <span className="block mt-2">Se guardarán como valores vacíos. ¿Desea continuar de todas formas?</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Volver y completar</AlertDialogCancel>
+            <AlertDialogAction onClick={doSave} className="gac-gradient" disabled={saving}>
+              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Sí, crear de todas formas'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* UPDATES SIDEBAR */}
+      {updatesSidebarProspect && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setUpdatesSidebarProspect(null)} />
+          <ProspectUpdatesSidebar
+            prospectId={updatesSidebarProspect.id}
+            prospectName={updatesSidebarProspect.name}
+            onClose={() => setUpdatesSidebarProspect(null)}
+          />
+        </>
+      )}
     </div>
   );
 };

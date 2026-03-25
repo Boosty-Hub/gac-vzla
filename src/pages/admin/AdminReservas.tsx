@@ -11,7 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle } from 'lucide-react';
+import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2 } from 'lucide-react';
+import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
@@ -28,6 +29,7 @@ interface ServiceType {
   name: string;
   duration_minutes: number;
   is_active: boolean;
+  requires_description: boolean;
 }
 
 interface ClientOption {
@@ -54,6 +56,8 @@ interface Reservation {
   current_mileage: number;
   status: string;
   notes: string | null;
+  service_notes: string | null;
+  technical_report_url: string | null;
   dealerships: { id: string; name: string; city: string | null } | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
@@ -99,6 +103,10 @@ const AdminReservas = () => {
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
   const [filtroConc, setFiltroConc] = useState('todos');
+  const [filtroEstado, setFiltroEstado] = useState('todos');
+  const [filtroServicio, setFiltroServicio] = useState('todos');
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => {
     const d = new Date();
     return d.toISOString().split('T')[0];
@@ -108,6 +116,21 @@ const AdminReservas = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
+
+  // Complete dialog
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
+  const [serviceNotes, setServiceNotes] = useState('');
+  const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
+  const [completing, setCompleting] = useState(false);
+
+  // Service manager dialog
+  const [svcOpen, setSvcOpen] = useState(false);
+  const [svcName, setSvcName] = useState('');
+  const [svcDuration, setSvcDuration] = useState('60');
+  const [svcRequiresDesc, setSvcRequiresDesc] = useState(false);
+  const [svcEditing, setSvcEditing] = useState<ServiceType | null>(null);
+  const [svcSaving, setSvcSaving] = useState(false);
 
   // Form
   const [fDealership, setFDealership] = useState('');
@@ -138,10 +161,9 @@ const AdminReservas = () => {
   const fetchServiceTypes = async () => {
     const { data } = await supabase
       .from('service_types')
-      .select('*')
-      .eq('is_active', true)
+      .select('id, name, duration_minutes, is_active, requires_description')
       .order('name');
-    if (data) setServiceTypes(data);
+    if (data) setServiceTypes(data as unknown as ServiceType[]);
   };
 
   const fetchReservations = async () => {
@@ -356,14 +378,67 @@ const AdminReservas = () => {
     setSaving(false);
   };
 
+  const openSvcCreate = () => { setSvcEditing(null); setSvcName(''); setSvcDuration('60'); setSvcRequiresDesc(false); setSvcOpen(true); };
+  const openSvcEdit = (s: ServiceType) => { setSvcEditing(s); setSvcName(s.name); setSvcDuration(String(s.duration_minutes)); setSvcRequiresDesc(s.requires_description); setSvcOpen(true); };
+  const handleSvcSave = async () => {
+    if (!svcName.trim()) { toast.error('El nombre es requerido'); return; }
+    setSvcSaving(true);
+    const payload = { name: svcName.trim(), duration_minutes: parseInt(svcDuration) || 60, requires_description: svcRequiresDesc };
+    if (svcEditing) {
+      const { error } = await supabase.from('service_types').update(payload).eq('id', svcEditing.id);
+      if (error) toast.error('Error al actualizar'); else { toast.success('Servicio actualizado'); setSvcOpen(false); fetchServiceTypes(); }
+    } else {
+      const { error } = await supabase.from('service_types').insert({ ...payload, is_active: true });
+      if (error) toast.error('Error al crear'); else { toast.success('Servicio creado'); setSvcOpen(false); fetchServiceTypes(); }
+    }
+    setSvcSaving(false);
+  };
+  const handleSvcToggle = async (s: ServiceType) => {
+    await supabase.from('service_types').update({ is_active: !s.is_active }).eq('id', s.id);
+    fetchServiceTypes();
+  };
+  const handleSvcDelete = async (s: ServiceType) => {
+    const { error } = await supabase.from('service_types').delete().eq('id', s.id);
+    if (error) toast.error('No se puede eliminar, puede tener reservas asociadas');
+    else { toast.success('Servicio eliminado'); fetchServiceTypes(); }
+  };
+
+  const openComplete = (r: Reservation) => {
+    setCompletingRes(r);
+    setServiceNotes(r.service_notes || '');
+    setTechnicalReportUrl(r.technical_report_url || null);
+    setCompleteOpen(true);
+  };
+
+  const handleComplete = async () => {
+    if (!completingRes) return;
+    if (!serviceNotes.trim()) { toast.error('Describe lo que se realizó en el servicio'); return; }
+    setCompleting(true);
+    const { error } = await supabase.from('reservations').update({
+      status: 'completada',
+      service_notes: serviceNotes.trim(),
+      technical_report_url: technicalReportUrl || null,
+      completed_at: new Date().toISOString(),
+    }).eq('id', completingRes.id);
+    if (error) { toast.error('Error al completar'); console.error(error); }
+    else { toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations(); }
+    setCompleting(false);
+  };
+
   const filteredReservations = reservations.filter(r => {
-    if (!busqueda.trim()) return true;
-    const q = busqueda.toLowerCase();
-    return (
-      (r.clients?.full_name || '').toLowerCase().includes(q) ||
-      (r.vehicles?.plate || '').toLowerCase().includes(q) ||
-      r.service_type.toLowerCase().includes(q)
-    );
+    if (filtroEstado !== 'todos' && r.status !== filtroEstado) return false;
+    if (filtroServicio !== 'todos' && r.service_type !== filtroServicio) return false;
+    if (fechaDesde && r.reservation_date < fechaDesde) return false;
+    if (fechaHasta && r.reservation_date > fechaHasta) return false;
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase();
+      if (
+        !(r.clients?.full_name || '').toLowerCase().includes(q) &&
+        !(r.vehicles?.plate || '').toLowerCase().includes(q) &&
+        !r.service_type.toLowerCase().includes(q)
+      ) return false;
+    }
+    return true;
   });
 
   const formatDate = (d: string) => {
@@ -402,7 +477,7 @@ const AdminReservas = () => {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-display font-bold">Reservas</h1>
+          <h1 className="text-lg font-display font-bold">Reservas / Servicios</h1>
           <Badge variant="outline" className="gap-1 text-xs">
             <CalendarDays className="w-3 h-3" /> {reservations.length}
           </Badge>
@@ -414,6 +489,9 @@ const AdminReservas = () => {
               <TabsTrigger value="matrix" className="gap-1 text-xs h-7"><LayoutGrid className="w-3.5 h-3.5" /> Matriz</TabsTrigger>
             </TabsList>
           </Tabs>
+          <Button size="sm" variant="outline" onClick={() => { fetchServiceTypes(); setSvcOpen(true); setSvcEditing(null); setSvcName(''); setSvcDuration('60'); setSvcRequiresDesc(false); }} className="gap-1 text-xs">
+            <Settings className="w-3.5 h-3.5" /> Servicios
+          </Button>
           {canCreate && (
             <Button size="sm" onClick={openCreate} className="gac-gradient">
               <Plus className="w-3.5 h-3.5 mr-1" /> Nueva
@@ -422,39 +500,69 @@ const AdminReservas = () => {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {view === 'table' && (
+            <div className="relative flex-1 min-w-[160px] max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input placeholder="Buscar cliente, placa o servicio..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+            </div>
+          )}
+          {view === 'matrix' && (
+            <div className="flex items-center gap-1">
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeDate(-1)}>
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </Button>
+              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="h-8 text-xs w-[140px]" />
+              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeDate(1)}>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Button>
+              <span className="text-xs font-medium ml-1">{formatDate(selectedDate)}</span>
+            </div>
+          )}
+          <Select value={filtroConc} onValueChange={setFiltroConc}>
+            <SelectTrigger className="w-[170px] h-8 text-xs shrink-0"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los concesionarios</SelectItem>
+              {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {view === 'table' && (
+            <>
+              <Select value={filtroEstado} onValueChange={setFiltroEstado}>
+                <SelectTrigger className="w-[120px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos</SelectItem>
+                  {Object.entries(STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={filtroServicio} onValueChange={setFiltroServicio}>
+                <SelectTrigger className="w-[150px] h-8 text-xs shrink-0"><SelectValue placeholder="Servicio" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los servicios</SelectItem>
+                  {serviceTypes.filter(s => s.is_active).map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </>
+          )}
+        </div>
         {view === 'table' && (
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input placeholder="Buscar cliente, placa o servicio..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground shrink-0">Desde</span>
+              <Input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="h-8 text-xs w-[140px]" />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
+              <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs w-[140px]" />
+            </div>
+            {(fechaDesde || fechaHasta || filtroEstado !== 'todos' || filtroServicio !== 'todos') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setFechaDesde(''); setFechaHasta(''); setFiltroEstado('todos'); setFiltroServicio('todos'); }}>
+                Limpiar filtros
+              </Button>
+            )}
           </div>
         )}
-        {view === 'matrix' && (
-          <div className="flex items-center gap-1">
-            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeDate(-1)}>
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </Button>
-            <Input
-              type="date"
-              value={selectedDate}
-              onChange={e => setSelectedDate(e.target.value)}
-              className="h-8 text-xs w-[140px]"
-            />
-            <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeDate(1)}>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </Button>
-            <span className="text-xs font-medium ml-1">{formatDate(selectedDate)}</span>
-          </div>
-        )}
-        <Select value={filtroConc} onValueChange={setFiltroConc}>
-          <SelectTrigger className="w-[180px] h-8 text-xs"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los concesionarios</SelectItem>
-            {dealerships.map(d => (
-              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
       {/* TABLE VIEW */}
@@ -481,7 +589,6 @@ const AdminReservas = () => {
                   <TableHead>Concesionario</TableHead>
                   <TableHead>Km</TableHead>
                   <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acc.</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -501,13 +608,30 @@ const AdminReservas = () => {
                     <TableCell>{r.service_type}</TableCell>
                     <TableCell>{r.dealerships?.name || '-'}</TableCell>
                     <TableCell>{r.current_mileage.toLocaleString()}</TableCell>
-                    <TableCell>
-                      <Badge className={cn("text-[10px] px-1.5 py-0", STATUS_COLORS[r.status] || 'bg-muted')}>
-                        {STATUS_LABELS[r.status] || r.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-0.5">
+                    <TableCell onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-1">
+                        {canEdit ? (
+                          <Select
+                            value={r.status}
+                            onValueChange={val => {
+                              if (val === 'completada') { openComplete(r); }
+                              else { supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => fetchReservations()); }
+                            }}
+                          >
+                            <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[110px]', STATUS_COLORS[r.status] || 'bg-muted')}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(STATUS_LABELS).map(([k, v]) => (
+                                <SelectItem key={k} value={k} className="text-xs">{v}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Badge className={cn('text-[10px] px-1.5 py-0', STATUS_COLORS[r.status] || 'bg-muted')}>
+                            {STATUS_LABELS[r.status] || r.status}
+                          </Badge>
+                        )}
                         {r.status === 'confirmada' && r.clients?.phone && (() => {
                           const waUrl = buildWhatsAppReservationUrl({
                             phone: r.clients.phone,
@@ -524,15 +648,15 @@ const AdminReservas = () => {
                             notes: r.notes || undefined,
                           });
                           return waUrl ? (
-                            <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:text-green-700" asChild>
-                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp de confirmación">
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:text-green-700 shrink-0" asChild>
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp">
                                 <MessageCircle className="w-3.5 h-3.5" />
                               </a>
                             </Button>
                           ) : null;
                         })()}
                         {canEdit && (
-                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(r)}>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => openEdit(r)}>
                             <Pencil className="w-3 h-3" />
                           </Button>
                         )}
@@ -706,16 +830,28 @@ const AdminReservas = () => {
             {/* Servicio */}
             <div className="space-y-2">
               <Label>Tipo de Servicio *</Label>
-              <Select value={fService} onValueChange={v => { setFService(v); setCapacityWarning(''); }}>
+              <Select value={fService} onValueChange={v => { setFService(v); setCapacityWarning(''); setFNotes(''); }}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar servicio" /></SelectTrigger>
                 <SelectContent>
-                  {serviceTypes.map(s => (
+                  {serviceTypes.filter(s => s.is_active).map(s => (
                     <SelectItem key={s.id} value={s.name}>
                       {s.name} ({s.duration_minutes >= 60 ? `${Math.floor(s.duration_minutes / 60)}h${s.duration_minutes % 60 > 0 ? ` ${s.duration_minutes % 60}min` : ''}` : `${s.duration_minutes}min`})
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {fService && serviceTypes.find(s => s.name === fService)?.requires_description && (
+                <div className="mt-2">
+                  <Label className="text-xs text-muted-foreground">Descripción de la incidencia *</Label>
+                  <Textarea
+                    value={fNotes}
+                    onChange={e => setFNotes(e.target.value)}
+                    rows={3}
+                    className="mt-1 text-sm"
+                    placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..."
+                  />
+                </div>
+              )}
             </div>
 
             {/* Capacity warning */}
@@ -756,6 +892,119 @@ const AdminReservas = () => {
             <Button onClick={handleSave} disabled={saving} className="gac-gradient">
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingRes ? 'Guardar' : 'Crear'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* COMPLETE SERVICE DIALOG */}
+      <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <ClipboardCheck className="w-4 h-4" /> Completar Servicio
+            </DialogTitle>
+          </DialogHeader>
+          {completingRes && (
+            <div className="space-y-4 py-2">
+              <div className="rounded-md border p-3 bg-muted/30 text-xs space-y-1">
+                <p><span className="font-semibold">Cliente:</span> {completingRes.clients?.full_name || '-'}</p>
+                <p><span className="font-semibold">Vehículo:</span> {completingRes.vehicles ? `${completingRes.vehicles.vehicle_models?.brand} ${completingRes.vehicles.vehicle_models?.name} ${completingRes.vehicles.year}` : '-'}</p>
+                <p><span className="font-semibold">Placa:</span> {completingRes.vehicles?.plate || '-'}</p>
+                <p><span className="font-semibold">Servicio:</span> {completingRes.service_type}</p>
+                <p><span className="font-semibold">Km:</span> {completingRes.current_mileage.toLocaleString()}</p>
+              </div>
+              <div className="space-y-2">
+                <Label>¿Qué se realizó en el servicio? *</Label>
+                <Textarea
+                  value={serviceNotes}
+                  onChange={e => setServiceNotes(e.target.value)}
+                  rows={4}
+                  placeholder="Describa los trabajos realizados, repuestos cambiados, observaciones..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Informe Técnico (PDF)</Label>
+                <TechnicalReportUploader
+                  reservationId={completingRes.id}
+                  value={technicalReportUrl}
+                  onChange={setTechnicalReportUrl}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCompleteOpen(false)}>Cancelar</Button>
+            <Button onClick={handleComplete} disabled={completing} className="gac-gradient">
+              {completing ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Marcar como Completado'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* SERVICE MANAGER DIALOG */}
+      <Dialog open={svcOpen} onOpenChange={setSvcOpen}>
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Settings className="w-4 h-4" /> Gestionar Tipos de Servicio
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* Form */}
+            <div className="border rounded-md p-3 space-y-3 bg-muted/20">
+              <p className="text-xs font-semibold text-muted-foreground">{svcEditing ? 'Editar servicio' : 'Nuevo servicio'}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1 col-span-2">
+                  <Label className="text-xs">Nombre *</Label>
+                  <Input value={svcName} onChange={e => setSvcName(e.target.value)} className="h-8 text-xs" placeholder="Nombre del servicio" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Duración (min)</Label>
+                  <Input type="number" value={svcDuration} onChange={e => setSvcDuration(e.target.value)} className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1 flex items-end">
+                  <label className="flex items-center gap-2 text-xs cursor-pointer pb-1">
+                    <input type="checkbox" checked={svcRequiresDesc} onChange={e => setSvcRequiresDesc(e.target.checked)} className="w-4 h-4 rounded" />
+                    Requiere descripción
+                  </label>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                {svcEditing && <Button size="sm" variant="ghost" className="text-xs" onClick={() => { setSvcEditing(null); setSvcName(''); setSvcDuration('60'); setSvcRequiresDesc(false); }}>Cancelar edición</Button>}
+                <Button size="sm" onClick={handleSvcSave} disabled={svcSaving} className="gac-gradient text-xs">
+                  {svcSaving ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" /> : <Plus className="w-3.5 h-3.5 mr-1" />}
+                  {svcEditing ? 'Guardar cambios' : 'Agregar'}
+                </Button>
+              </div>
+            </div>
+
+            {/* List */}
+            <div className="space-y-1">
+              <p className="text-xs font-semibold text-muted-foreground mb-2">Servicios ({serviceTypes.length})</p>
+              {serviceTypes.map(s => (
+                <div key={s.id} className={cn("flex items-center justify-between rounded-md border px-3 py-2 text-xs", !s.is_active && "opacity-50")}>
+                  <div className="min-w-0">
+                    <p className="font-medium truncate">{s.name}</p>
+                    <p className="text-muted-foreground">
+                      {s.duration_minutes >= 60 ? `${Math.floor(s.duration_minutes / 60)}h${s.duration_minutes % 60 > 0 ? ` ${s.duration_minutes % 60}min` : ''}` : `${s.duration_minutes}min`}
+                      {s.requires_description && <span className="ml-2 text-blue-600">· Requiere descripción</span>}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <Badge variant={s.is_active ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0 cursor-pointer" onClick={() => handleSvcToggle(s)}>
+                      {s.is_active ? 'Activo' : 'Inactivo'}
+                    </Badge>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openSvcEdit(s)}>
+                      <Pencil className="w-3 h-3" />
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={() => handleSvcDelete(s)}>
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSvcOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

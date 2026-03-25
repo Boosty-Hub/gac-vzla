@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
-  Car, MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight,
+  Car, MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -21,6 +21,7 @@ interface Prospect {
   salesperson: string | null;
   created_at: string;
   dealership_id: string;
+  event_name: string | null;
 }
 
 interface Reservation {
@@ -63,7 +64,7 @@ const AdminDashboard = () => {
       const since = thirtyDaysAgo.toISOString();
 
       const [pRes, rRes, dRes] = await Promise.all([
-        supabase.from('prospects').select('id, status, source, salesperson, created_at, dealership_id').gte('created_at', since),
+        supabase.from('prospects').select('id, status, source, salesperson, created_at, dealership_id, event_name').gte('created_at', since),
         supabase.from('reservations').select('id, status, reservation_date, service_type, dealership_id, created_at').gte('created_at', since),
         supabase.from('dealerships').select('id, name').eq('is_active', true),
       ]);
@@ -168,10 +169,28 @@ const AdminDashboard = () => {
     return { data, sources };
   }, [prospects]);
 
-  // ─── Salesperson performance ───
-  const salespersonPerformance = useMemo(() => {
+  // ─── Events breakdown ───
+  const eventBreakdown = useMemo(() => {
+    const eventProspects = prospects.filter(p => p.source === 'evento' && p.event_name);
+    const map: Record<string, { total: number; ganados: number }> = {};
+    eventProspects.forEach(p => {
+      const name = p.event_name!;
+      if (!map[name]) map[name] = { total: 0, ganados: 0 };
+      map[name].total++;
+      if (p.status === 'ganado') map[name].ganados++;
+    });
+    return Object.entries(map)
+      .map(([name, d]) => ({ name, total: d.total, ganados: d.ganados }))
+      .sort((a, b) => b.total - a.total);
+  }, [prospects]);
+
+  // ─── Salesperson ranking ───
+  const [rankingDealership, setRankingDealership] = useState('todos');
+
+  const salespersonRanking = useMemo(() => {
+    const filtered = rankingDealership === 'todos' ? prospects : prospects.filter(p => p.dealership_id === rankingDealership);
     const map: Record<string, { total: number; ganados: number; perdidos: number }> = {};
-    prospects.forEach(p => {
+    filtered.forEach(p => {
       const sp = p.salesperson || 'Sin asignar';
       if (!map[sp]) map[sp] = { total: 0, ganados: 0, perdidos: 0 };
       map[sp].total++;
@@ -186,8 +205,8 @@ const AdminDashboard = () => {
         perdidos: data.perdidos,
         conversion: data.total > 0 ? Math.round((data.ganados / data.total) * 100) : 0,
       }))
-      .sort((a, b) => b.total - a.total);
-  }, [prospects]);
+      .sort((a, b) => b.ganados - a.ganados || b.total - a.total);
+  }, [prospects, rankingDealership]);
 
   if (loading) {
     return (
@@ -337,41 +356,62 @@ const AdminDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Salesperson Performance */}
+        {/* Salesperson Ranking */}
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-display flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-muted-foreground" /> Rendimiento por Vendedor
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <CardTitle className="text-sm font-display flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-amber-500" /> Ranking de Vendedores
+              </CardTitle>
+              <select
+                value={rankingDealership}
+                onChange={e => setRankingDealership(e.target.value)}
+                className="text-[10px] border rounded-md px-2 py-1 bg-background text-foreground h-7"
+              >
+                <option value="todos">Todos los concesionarios</option>
+                {dealerships.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
-            {salespersonPerformance.length === 0 ? (
+            {salespersonRanking.length === 0 ? (
               <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
             ) : (
               <div className="divide-y divide-border">
-                {salespersonPerformance.slice(0, 8).map((sp, i) => (
+                {salespersonRanking.slice(0, 8).map((sp, i) => (
                   <div key={sp.name} className="flex items-center gap-3 px-4 py-2.5">
                     <span className={cn(
-                      "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
-                      i === 0 ? "bg-amber-100 text-amber-800" :
-                      i === 1 ? "bg-gray-100 text-gray-700" :
-                      i === 2 ? "bg-orange-100 text-orange-800" :
+                      "w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0",
+                      i === 0 ? "bg-amber-100 text-amber-800 ring-2 ring-amber-400" :
+                      i === 1 ? "bg-gray-100 text-gray-700 ring-2 ring-gray-300" :
+                      i === 2 ? "bg-orange-100 text-orange-800 ring-2 ring-orange-300" :
                       "bg-muted text-muted-foreground"
                     )}>
-                      {i + 1}
+                      {i < 3 ? <Medal className="w-3.5 h-3.5" /> : i + 1}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate">{sp.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{sp.total} prospectos</p>
+                      <p className="text-xs font-semibold truncate">{sp.name}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{ width: `${salespersonRanking[0]?.total > 0 ? Math.round((sp.total / salespersonRanking[0].total) * 100) : 0}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground shrink-0">{sp.total}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
-                        <ArrowUpRight className="w-2.5 h-2.5 text-green-600" />{sp.ganados}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700">
+                        <ArrowUpRight className="w-2.5 h-2.5" />{sp.ganados}
                       </Badge>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
-                        <ArrowDownRight className="w-2.5 h-2.5 text-red-500" />{sp.perdidos}
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-red-300 text-red-600">
+                        <ArrowDownRight className="w-2.5 h-2.5" />{sp.perdidos}
                       </Badge>
-                      <span className={cn("text-xs font-semibold", sp.conversion >= 50 ? "text-green-600" : sp.conversion >= 20 ? "text-amber-600" : "text-muted-foreground")}>
+                      <span className={cn("text-xs font-bold w-9 text-right",
+                        sp.conversion >= 50 ? "text-green-600" :
+                        sp.conversion >= 20 ? "text-amber-600" : "text-muted-foreground"
+                      )}>
                         {sp.conversion}%
                       </span>
                     </div>
@@ -409,6 +449,45 @@ const AdminDashboard = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Events Breakdown */}
+      {eventBreakdown.length > 0 && (
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-muted-foreground" /> Captación por Evento
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border">
+              {eventBreakdown.map(ev => (
+                <div key={ev.name} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2 rounded-lg bg-violet-50 text-violet-600 shrink-0">
+                      <CalendarDays className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold truncate">{ev.name}</p>
+                      <p className="text-[10px] text-muted-foreground">Evento</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <p className="text-sm font-bold">{ev.total}</p>
+                      <p className="text-[10px] text-muted-foreground">leads</p>
+                    </div>
+                    {ev.ganados > 0 && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700">
+                        <ArrowUpRight className="w-2.5 h-2.5" />{ev.ganados} ganados
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };

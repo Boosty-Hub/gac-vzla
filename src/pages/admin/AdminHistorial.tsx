@@ -7,7 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
-import { Search, ClipboardList, Car, MapPin, CalendarDays, Clock, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone } from 'lucide-react';
+import { Search, ClipboardList, Car, MapPin, CalendarDays, Clock, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText } from 'lucide-react';
+import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 
 interface ServiceEntry {
@@ -22,6 +23,7 @@ interface ServiceEntry {
   status: string;
   notes: string | null;
   service_notes: string | null;
+  technical_report_url: string | null;
   completed_at: string | null;
   created_at: string;
   dealerships: { name: string; city: string | null; phone: string | null } | null;
@@ -85,7 +87,7 @@ const AdminHistorial = () => {
     let query = supabase
       .from('reservations')
       .select(
-        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand))',
+        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand))',
         { count: 'exact' }
       );
 
@@ -104,7 +106,7 @@ const AdminHistorial = () => {
 
     if (error) console.error(error);
     else {
-      setEntries((data || []) as ServiceEntry[]);
+      setEntries((data || []) as unknown as ServiceEntry[]);
       setTotalCount(count || 0);
     }
     setLoading(false);
@@ -389,6 +391,17 @@ const AdminHistorial = () => {
                       {e.completed_at && (
                         <p className="text-green-600 text-[10px] mt-2">Completado: {new Date(e.completed_at).toLocaleString('es-VE')}</p>
                       )}
+                    </div>
+                  </>
+                )}
+
+                {/* Technical report PDF */}
+                {e.technical_report_url && (
+                  <>
+                    <Separator />
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-semibold flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-blue-600" /> Informe Técnico</p>
+                      <TechnicalReportUploader reservationId={e.id} value={e.technical_report_url} onChange={() => {}} readonly />
                     </div>
                   </>
                 )}

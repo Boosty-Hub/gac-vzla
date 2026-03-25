@@ -49,7 +49,7 @@ const menuItems = [
   {
     group: 'Operaciones',
     items: [
-      { label: 'Reservas', icon: CalendarDays, path: '/admin/reservas', module: 'reservas' },
+      { label: 'Reservas / Servicios', icon: CalendarDays, path: '/admin/reservas', module: 'reservas' },
       { label: 'Garantías', icon: ShieldCheck, path: '/admin/garantias', module: 'garantias' },
       { label: 'Historial de Servicios', icon: ClipboardList, path: '/admin/historial', module: 'historial' },
     ],

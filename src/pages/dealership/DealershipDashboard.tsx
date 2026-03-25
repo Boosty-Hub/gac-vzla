@@ -1,74 +1,480 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Card, CardContent } from '@/components/ui/card';
-import { CalendarDays, ClipboardList, Users } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import {
+  CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
+  MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, LineChart, Line, Legend,
+} from 'recharts';
+import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
+import { useIsMobile } from '@/hooks/use-mobile';
+
+interface Prospect {
+  id: string;
+  status: string;
+  source: string;
+  salesperson: string | null;
+  created_at: string;
+  event_name: string | null;
+}
+
+interface Reservation {
+  id: string;
+  status: string;
+  reservation_date: string;
+  service_type: string;
+  created_at: string;
+}
+
+const COLORS = [
+  'hsl(var(--primary))',
+  'hsl(220, 70%, 55%)',
+  'hsl(160, 60%, 45%)',
+  'hsl(45, 90%, 50%)',
+  'hsl(0, 70%, 55%)',
+  'hsl(280, 60%, 55%)',
+  'hsl(200, 70%, 50%)',
+  'hsl(30, 80%, 55%)',
+];
+
+const SOURCE_LABELS: Record<string, string> = {
+  concesionario: 'Concesionario', visita: 'Visita', evento: 'Evento',
+  referido: 'Referido', pagina_web: 'Página Web', redes_sociales: 'Redes Sociales',
+  presencial: 'Presencial', telefono: 'Teléfono', web: 'Web', otro: 'Otro',
+};
+
+function KpiCard({ icon: Icon, label, value, color, sub }: { icon: any; label: string; value: string | number; color: string; sub?: string }) {
+  return (
+    <Card className="gac-shadow">
+      <CardContent className="p-3 sm:p-4 flex items-center gap-3 sm:gap-4">
+        <div className={cn("p-2.5 sm:p-3 rounded-xl bg-muted shrink-0", color)}>
+          <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-xl sm:text-2xl font-display font-bold">{value}</p>
+          <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{label}</p>
+          {sub && <p className="text-[9px] sm:text-[10px] text-muted-foreground/70 truncate">{sub}</p>}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 const DealershipDashboard = () => {
+  const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { selectedDealership, loading: loadingAccess } = useDealershipAccess();
-  const [stats, setStats] = useState({ total: 0, hoy: 0, pendientes: 0, enProceso: 0, prospectos: 0 });
+  const isMobile = useIsMobile();
+  const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (loadingAccess) return;
     if (!selectedDealership) { setLoading(false); return; }
-    const fetchStats = async () => {
-      setLoading(true);
-      const hoy = new Date().toISOString().split('T')[0];
 
-      const [resResult, prosResult] = await Promise.all([
-        supabase.from('reservations').select('id, status, reservation_date').eq('dealership_id', selectedDealership),
-        supabase.from('prospects').select('id').eq('dealership_id', selectedDealership),
+    const load = async () => {
+      setLoading(true);
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+      const since = thirtyDaysAgo.toISOString();
+
+      const [pRes, rRes] = await Promise.all([
+        supabase.from('prospects')
+          .select('id, status, source, salesperson, created_at, event_name')
+          .eq('dealership_id', selectedDealership)
+          .gte('created_at', since),
+        supabase.from('reservations')
+          .select('id, status, reservation_date, service_type, created_at')
+          .eq('dealership_id', selectedDealership)
+          .gte('created_at', since),
       ]);
 
-      const reservations = resResult.data || [];
-      setStats({
-        total: reservations.length,
-        hoy: reservations.filter(r => r.reservation_date === hoy).length,
-        pendientes: reservations.filter(r => r.status === 'pendiente').length,
-        enProceso: reservations.filter(r => r.status === 'en_proceso').length,
-        prospectos: prosResult.data?.length || 0,
-      });
+      setProspects((pRes.data || []) as Prospect[]);
+      setReservations((rRes.data || []) as Reservation[]);
       setLoading(false);
     };
-    fetchStats();
+    load();
   }, [selectedDealership, loadingAccess]);
 
-  const cards = [
-    { label: 'Total Reservas', value: stats.total, icon: CalendarDays, color: 'text-primary' },
-    { label: 'Reservas Hoy', value: stats.hoy, icon: CalendarDays, color: 'text-blue-600' },
-    { label: 'Pendientes', value: stats.pendientes, icon: ClipboardList, color: 'text-yellow-600' },
-    { label: 'En Proceso', value: stats.enProceso, icon: ClipboardList, color: 'text-purple-600' },
-    { label: 'Prospectos', value: stats.prospectos, icon: Users, color: 'text-green-600' },
-  ];
+  // ─── KPIs ───
+  const totalProspects = prospects.length;
+  const totalReservations = reservations.length;
+
+  const prospectsByStatus = useMemo(() => {
+    const map: Record<string, number> = {};
+    prospects.forEach(p => { map[p.status] = (map[p.status] || 0) + 1; });
+    return map;
+  }, [prospects]);
+
+  const ganados = prospectsByStatus['ganado'] || 0;
+  const conversionRate = totalProspects > 0 ? Math.round((ganados / totalProspects) * 100) : 0;
+  const reservasPendientes = reservations.filter(r => r.status === 'pendiente').length;
+  const reservasCompletadas = reservations.filter(r => r.status === 'completada').length;
+  const reservasCanceladas = reservations.filter(r => r.status === 'cancelada').length;
+
+  // ─── Charts ───
+  const prospectStatusPie = useMemo(() =>
+    PROSPECT_STATUSES.filter(s => prospectsByStatus[s.name]).map(s => ({
+      name: s.label, value: prospectsByStatus[s.name] || 0,
+    })), [PROSPECT_STATUSES, prospectsByStatus]);
+
+  const reservationStatusPie = useMemo(() => [
+    { name: 'Pendientes', value: reservasPendientes, color: 'hsl(45, 90%, 50%)' },
+    { name: 'Completadas', value: reservasCompletadas, color: 'hsl(160, 60%, 45%)' },
+    { name: 'Canceladas', value: reservasCanceladas, color: 'hsl(0, 70%, 55%)' },
+  ].filter(s => s.value > 0), [reservasPendientes, reservasCompletadas, reservasCanceladas]);
+
+  const dailyTrend = useMemo(() => {
+    const days: Record<string, { date: string; prospectos: number; reservas: number }> = {};
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split('T')[0];
+      days[key] = { date: `${d.getDate()}/${d.getMonth() + 1}`, prospectos: 0, reservas: 0 };
+    }
+    prospects.forEach(p => { const k = p.created_at.split('T')[0]; if (days[k]) days[k].prospectos++; });
+    reservations.forEach(r => { const k = r.created_at.split('T')[0]; if (days[k]) days[k].reservas++; });
+    return Object.values(days);
+  }, [prospects, reservations]);
+
+  const prospectsBySource = useMemo(() => {
+    const map: Record<string, number> = {};
+    prospects.forEach(p => { map[p.source] = (map[p.source] || 0) + 1; });
+    return Object.entries(map)
+      .map(([key, value]) => ({ name: SOURCE_LABELS[key] || key, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [prospects]);
+
+  const contactTypeBySalesperson = useMemo(() => {
+    const map: Record<string, Record<string, number>> = {};
+    const sourceSet = new Set<string>();
+    prospects.forEach(p => {
+      const sp = p.salesperson || 'Sin asignar';
+      if (!map[sp]) map[sp] = {};
+      const srcLabel = SOURCE_LABELS[p.source] || p.source;
+      map[sp][srcLabel] = (map[sp][srcLabel] || 0) + 1;
+      sourceSet.add(srcLabel);
+    });
+    const sources = Array.from(sourceSet);
+    const data = Object.entries(map)
+      .map(([name, srcs]) => ({ name, ...srcs }))
+      .sort((a, b) => {
+        const tA = Object.values(a).reduce((s: number, v) => typeof v === 'number' ? s + v : s, 0);
+        const tB = Object.values(b).reduce((s: number, v) => typeof v === 'number' ? s + v : s, 0);
+        return (tB as number) - (tA as number);
+      });
+    return { data, sources };
+  }, [prospects]);
+
+  // ─── Events breakdown ───
+  const eventBreakdown = useMemo(() => {
+    const eventProspects = prospects.filter(p => p.source === 'evento' && p.event_name);
+    const map: Record<string, { total: number; ganados: number }> = {};
+    eventProspects.forEach(p => {
+      const name = p.event_name!;
+      if (!map[name]) map[name] = { total: 0, ganados: 0 };
+      map[name].total++;
+      if (p.status === 'ganado') map[name].ganados++;
+    });
+    return Object.entries(map)
+      .map(([name, d]) => ({ name, total: d.total, ganados: d.ganados }))
+      .sort((a, b) => b.total - a.total);
+  }, [prospects]);
+
+  // ─── Salesperson ranking ───
+  const salespersonRanking = useMemo(() => {
+    const map: Record<string, { total: number; ganados: number; perdidos: number; en_proceso: number }> = {};
+    prospects.forEach(p => {
+      const sp = p.salesperson || 'Sin asignar';
+      if (!map[sp]) map[sp] = { total: 0, ganados: 0, perdidos: 0, en_proceso: 0 };
+      map[sp].total++;
+      if (p.status === 'ganado') map[sp].ganados++;
+      if (p.status === 'perdido') map[sp].perdidos++;
+      if (!['ganado', 'perdido', 'cancelado'].includes(p.status)) map[sp].en_proceso++;
+    });
+    return Object.entries(map)
+      .map(([name, d]) => ({
+        name,
+        total: d.total,
+        ganados: d.ganados,
+        perdidos: d.perdidos,
+        en_proceso: d.en_proceso,
+        conversion: d.total > 0 ? Math.round((d.ganados / d.total) * 100) : 0,
+      }))
+      .sort((a, b) => b.ganados - a.ganados || b.total - a.total);
+  }, [prospects]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-muted-foreground">Cargando analíticas...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-lg font-display font-bold">Inicio</h1>
-        <p className="text-sm text-muted-foreground">Resumen general del concesionario</p>
+        <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground">Últimos 30 días — Datos de este concesionario</p>
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-          {cards.map(c => (
-            <Card key={c.label} className="gac-shadow">
-              <CardContent className="p-4 flex items-center gap-4">
-                <div className={`p-3 rounded-xl bg-muted ${c.color}`}>
-                  <c.icon className="w-5 h-5" />
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard icon={Users} label="Prospectos" value={totalProspects} color="text-blue-600" />
+        <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600"
+          sub={`${ganados} ganados de ${totalProspects}`} />
+        <KpiCard icon={CalendarDays} label="Reservas" value={totalReservations} color="text-primary" />
+        <KpiCard icon={ClipboardList} label="Pendientes" value={reservasPendientes} color="text-amber-600"
+          sub={`${reservasCompletadas} completadas`} />
+      </div>
+
+      {/* Prospect + Reservation pies */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <Users className="w-4 h-4 text-muted-foreground" /> Prospectos por Estado
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {prospectStatusPie.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <ResponsiveContainer width={isMobile ? 180 : 200} height={180}>
+                  <PieChart>
+                    <Pie data={prospectStatusPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
+                      {prospectStatusPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => [v, 'Prospectos']} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap gap-2 justify-center sm:flex-col sm:gap-1">
+                  {prospectStatusPie.map((s, i) => (
+                    <div key={s.name} className="flex items-center gap-2 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                      <span className="text-muted-foreground">{s.name}</span>
+                      <span className="font-semibold">{s.value}</span>
+                    </div>
+                  ))}
                 </div>
-                <div>
-                  <p className="text-2xl font-display font-bold">{c.value}</p>
-                  <p className="text-xs text-muted-foreground">{c.label}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-muted-foreground" /> Reservas por Estado
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {reservationStatusPie.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-center gap-4">
+                <ResponsiveContainer width={isMobile ? 180 : 200} height={180}>
+                  <PieChart>
+                    <Pie data={reservationStatusPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
+                      {reservationStatusPie.map((s, i) => <Cell key={i} fill={s.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(v: number) => [v, 'Reservas']} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap gap-2 justify-center sm:flex-col sm:gap-1">
+                  {reservationStatusPie.map(s => (
+                    <div key={s.name} className="flex items-center gap-2 text-xs">
+                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                      <span className="text-muted-foreground">{s.name}</span>
+                      <span className="font-semibold">{s.value}</span>
+                    </div>
+                  ))}
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Trend */}
+      <Card className="gac-shadow">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-display flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-muted-foreground" /> Tendencia Diaria (30 días)
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={isMobile ? 200 : 280}>
+            <LineChart data={dailyTrend} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={isMobile ? 4 : 2} />
+              <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+              <Tooltip contentStyle={{ fontSize: 12 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="prospectos" name="Prospectos" stroke="hsl(220, 70%, 55%)" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="reservas" name="Reservas" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Source bar + Salesperson ranking */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-muted-foreground" /> Prospectos por Tipo de Contacto
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {prospectsBySource.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+            ) : (
+              <ResponsiveContainer width="100%" height={isMobile ? 180 : 220}>
+                <BarChart data={prospectsBySource} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={90} />
+                  <Tooltip contentStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="value" name="Prospectos" fill="hsl(220, 70%, 55%)" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Salesperson ranking */}
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-amber-500" /> Ranking de Vendedores
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            {salespersonRanking.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">Sin datos de vendedores</p>
+            ) : (
+              <div className="divide-y divide-border">
+                {salespersonRanking.slice(0, 8).map((sp, i) => (
+                  <div key={sp.name} className="flex items-center gap-3 px-4 py-2.5">
+                    <span className={cn(
+                      "w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0",
+                      i === 0 ? "bg-amber-100 text-amber-800 ring-2 ring-amber-400" :
+                      i === 1 ? "bg-gray-100 text-gray-700 ring-2 ring-gray-300" :
+                      i === 2 ? "bg-orange-100 text-orange-800 ring-2 ring-orange-300" :
+                      "bg-muted text-muted-foreground"
+                    )}>
+                      {i < 3 ? <Medal className="w-3.5 h-3.5" /> : i + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold truncate">{sp.name}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-primary transition-all"
+                            style={{ width: `${salespersonRanking[0]?.total > 0 ? Math.round((sp.total / salespersonRanking[0].total) * 100) : 0}%` }}
+                          />
+                        </div>
+                        <span className="text-[10px] text-muted-foreground shrink-0">{sp.total}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700">
+                        <ArrowUpRight className="w-2.5 h-2.5" />{sp.ganados}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-red-300 text-red-600">
+                        <ArrowDownRight className="w-2.5 h-2.5" />{sp.perdidos}
+                      </Badge>
+                      <span className={cn("text-xs font-bold w-9 text-right",
+                        sp.conversion >= 50 ? "text-green-600" :
+                        sp.conversion >= 20 ? "text-amber-600" : "text-muted-foreground"
+                      )}>
+                        {sp.conversion}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Contact Type by Salesperson */}
+      {contactTypeBySalesperson.data.length > 0 && (
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <UserCheck className="w-4 h-4 text-muted-foreground" /> Tipo de Contacto por Vendedor
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={Math.max(200, contactTypeBySalesperson.data.length * 40)}>
+              <BarChart data={contactTypeBySalesperson.data} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100} />
+                <Tooltip contentStyle={{ fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {contactTypeBySalesperson.sources.map((src, i) => (
+                  <Bar key={src} dataKey={src} stackId="a" fill={COLORS[i % COLORS.length]}
+                    radius={i === contactTypeBySalesperson.sources.length - 1 ? [0, 4, 4, 0] : undefined} />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Events Breakdown */}
+      {eventBreakdown.length > 0 && (
+        <Card className="gac-shadow">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-display flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-muted-foreground" /> Captación por Evento
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border">
+              {eventBreakdown.map(ev => (
+                <div key={ev.name} className="flex items-center justify-between px-4 py-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="p-2 rounded-lg bg-violet-50 text-violet-600 shrink-0">
+                      <CalendarDays className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold truncate">{ev.name}</p>
+                      <p className="text-[10px] text-muted-foreground">Evento</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="text-right">
+                      <p className="text-sm font-bold">{ev.total}</p>
+                      <p className="text-[10px] text-muted-foreground">leads</p>
+                    </div>
+                    {ev.ganados > 0 && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700">
+                        <ArrowUpRight className="w-2.5 h-2.5" />{ev.ganados} ganados
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   );

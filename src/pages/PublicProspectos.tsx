@@ -72,6 +72,16 @@ const PublicProspectos = () => {
     if (!modelInterest) { toast.error('El modelo de interés es requerido'); return; }
     if (!dealershipId) { toast.error('El concesionario es requerido'); return; }
 
+    const normalizedPhone = phone.trim().replace(/\D/g, '');
+    if (normalizedPhone) {
+      const { data: existing } = await supabase.from('prospects').select('id, name, phone').not('phone', 'is', null);
+      const duplicate = (existing || []).find((p: any) => p.phone.replace(/\D/g, '') === normalizedPhone);
+      if (duplicate) {
+        toast.error(`Ya existe un registro con ese teléfono: ${duplicate.name}`);
+        return;
+      }
+    }
+
     setSaving(true);
     const { error } = await supabase.from('prospects').insert({
       name: name.trim(),

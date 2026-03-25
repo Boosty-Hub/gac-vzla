@@ -10,8 +10,6 @@ import { Mail, Lock, User, Eye, EyeOff, Car, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
-import gacLogo from '@/assets/gac-logo.png';
-import dfskLogo from '@/assets/dfsk-logo.png';
 
 const Login = () => {
   const { user, role, loading, signIn, signUp } = useAuth();
@@ -159,19 +157,13 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="imb-gradient px-6 py-10 text-center relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_hsl(356_95%_46%/0.15),transparent_50%)]" />
-        <div className="relative max-w-lg mx-auto">
-          <div className="flex items-center justify-center gap-6 mb-3">
-            <img src={gacLogo} alt="GAC Motor" className="h-8 brightness-0 invert" />
-            <div className="w-px h-8 bg-primary-foreground/30" />
-            <img src={dfskLogo} alt="DFSK" className="h-7 brightness-0 invert" />
-          </div>
-          <h1 className="text-2xl font-display font-bold text-primary-foreground tracking-tight">
-            IMB Movilidad
+      <header className="bg-background border-b px-6 py-8 text-center">
+        <div className="max-w-lg mx-auto">
+          <h1 className="text-2xl font-display font-bold text-foreground tracking-tight">
+            Sistema de Gestión
           </h1>
-          <p className="text-primary-foreground/70 text-sm mt-1">
-            Sistema de Gestión de Servicios y Reservas
+          <p className="text-muted-foreground text-sm mt-1">
+            Servicios y Reservas
           </p>
         </div>
       </header>
@@ -296,7 +288,7 @@ const Login = () => {
                     </div>
                   </div>
 
-                  <Button type="submit" className="w-full imb-gradient" disabled={submitting}>
+                  <Button type="submit" className="w-full bg-foreground text-background hover:bg-foreground/90" disabled={submitting}>
                     {submitting ? (
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     ) : isLogin ? (
@@ -344,7 +336,7 @@ const Login = () => {
                     </div>
                   </div>
 
-                  <Button type="submit" className="w-full imb-gradient" disabled={plateLoading}>
+                  <Button type="submit" className="w-full bg-foreground text-background hover:bg-foreground/90" disabled={plateLoading}>
                     {plateLoading ? (
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     ) : (
@@ -359,11 +351,7 @@ const Login = () => {
       </main>
 
       <footer className="bg-muted py-4 text-center text-xs text-muted-foreground">
-        <div className="flex items-center justify-center gap-4 mb-1">
-          <img src={gacLogo} alt="GAC" className="h-4 opacity-40" />
-          <img src={dfskLogo} alt="DFSK" className="h-3.5 opacity-40" />
-        </div>
-        © 2025 IMB Movilidad · GAC Motor & DFSK Venezuela
+        © 2025 IMB Movilidad
       </footer>
     </div>
   );

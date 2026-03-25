@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import NotificationCenter from '@/components/NotificationCenter';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Sidebar,
@@ -42,7 +42,7 @@ const menuItems = [
   {
     group: 'Operaciones',
     items: [
-      { label: 'Reservas', icon: CalendarDays, path: '/concesionario/reservas' },
+      { label: 'Reservas / Servicios', icon: CalendarDays, path: '/concesionario/reservas' },
       { label: 'Prospectos', icon: Users, path: '/concesionario/prospectos' },
     ],
   },
@@ -52,6 +52,18 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { profile, role, signOut } = useAuth();
+
+  const isVendedor = role?.name?.toLowerCase() === 'vendedor';
+
+  // Vendedor only sees Prospectos
+  const filteredMenuItems = isVendedor
+    ? menuItems.map(g => ({ ...g, items: g.items.filter(i => i.path === '/concesionario/prospectos') })).filter(g => g.items.length > 0)
+    : menuItems;
+
+  // Redirect vendedor from dashboard to prospectos
+  if (isVendedor && location.pathname === '/concesionario') {
+    return <Navigate to="/concesionario/prospectos" replace />;
+  }
 
   const handleSignOut = async () => {
     await signOut();
@@ -78,7 +90,7 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
         <Separator className="bg-sidebar-border" />
 
         <SidebarContent>
-          {menuItems.map((group) => (
+          {filteredMenuItems.map((group) => (
             <SidebarGroup key={group.group}>
               <SidebarGroupLabel>{group.group}</SidebarGroupLabel>
               <SidebarGroupContent>
@@ -136,7 +148,7 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-6" />
           <h2 className="text-sm font-medium text-muted-foreground">
-            {menuItems.flatMap(g => g.items).find(i => location.pathname === i.path || (i.path !== '/concesionario' && location.pathname.startsWith(i.path + '/')))?.label || 'Inicio'}
+            {filteredMenuItems.flatMap(g => g.items).find(i => location.pathname === i.path || (i.path !== '/concesionario' && location.pathname.startsWith(i.path + '/')))?.label || 'Inicio'}
           </h2>
           <div className="ml-auto">
             <NotificationCenter />
