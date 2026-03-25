@@ -61,7 +61,7 @@ const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
   const h = Math.floor(i / 2) + 8;
   const m = i % 2 === 0 ? '00' : '30';
   return `${h.toString().padStart(2, '0')}:${m}`;
-});
+}).filter(t => t !== '12:00' && t !== '12:30');
 
 const DealershipReservas = () => {
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
