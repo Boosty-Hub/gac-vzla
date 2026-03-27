@@ -82,7 +82,7 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
             <img src={imbLogo} alt="IMB" className="w-8 h-8 rounded-lg object-contain brightness-0 invert" />
             <div className="flex flex-col group-data-[collapsible=icon]:hidden">
               <span className="text-sm font-display font-bold text-sidebar-foreground">IMB Movilidad</span>
-              <span className="text-xs text-sidebar-foreground/60">Concesionario</span>
+              <span className="text-xs text-sidebar-foreground/60">{isVendedor ? 'Sesión Ventas' : 'Concesionario'}</span>
             </div>
           </div>
         </SidebarHeader>

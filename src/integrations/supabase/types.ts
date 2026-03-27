@@ -143,7 +143,7 @@ export type Database = {
         Row: {
           address: string | null
           bays: number | null
-          brand: string
+          brand: string[]
           city: string | null
           created_at: string | null
           email: string | null
@@ -162,7 +162,7 @@ export type Database = {
         Insert: {
           address?: string | null
           bays?: number | null
-          brand?: string
+          brand?: string[]
           city?: string | null
           created_at?: string | null
           email?: string | null
@@ -181,7 +181,7 @@ export type Database = {
         Update: {
           address?: string | null
           bays?: number | null
-          brand?: string
+          brand?: string[]
           city?: string | null
           created_at?: string | null
           email?: string | null
@@ -514,6 +514,7 @@ export type Database = {
           service_notes: string | null
           service_type: string
           status: string
+          technical_report_url: string | null
           updated_at: string | null
           vehicle_id: string | null
           walkin_client_name: string | null
@@ -533,6 +534,7 @@ export type Database = {
           service_notes?: string | null
           service_type: string
           status?: string
+          technical_report_url?: string | null
           updated_at?: string | null
           vehicle_id?: string | null
           walkin_client_name?: string | null
@@ -552,6 +554,7 @@ export type Database = {
           service_notes?: string | null
           service_type?: string
           status?: string
+          technical_report_url?: string | null
           updated_at?: string | null
           vehicle_id?: string | null
           walkin_client_name?: string | null

@@ -485,9 +485,9 @@ const UserPortal = () => {
               if (!hasGac && !hasDfsk) return null;
               return (
                 <div className="flex items-center gap-2">
-                  {hasGac && <img src={gacLogo} alt="GAC" className="h-5 brightness-0 invert" />}
-                  {hasGac && hasDfsk && <div className="w-px h-4 bg-white/30" />}
-                  {hasDfsk && <img src={dfskLogo} alt="DFSK" className="h-4 brightness-0 invert" />}
+                  {hasGac && <img src={gacLogo} alt="GAC" className="h-9 brightness-0 invert" />}
+                  {hasGac && hasDfsk && <div className="w-px h-7 bg-white/30" />}
+                  {hasDfsk && <img src={dfskLogo} alt="DFSK" className="h-8 brightness-0 invert" />}
                 </div>
               );
             })()}

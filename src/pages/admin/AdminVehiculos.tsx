@@ -35,7 +35,7 @@ interface Vehicle {
   model_id: string;
   client_id: string;
   vehicle_models: { name: string; brand: string } | null;
-  clients: { full_name: string; cedula: string | null } | null;
+  clients: { full_name: string; cedula: string | null; address: string | null; city: string | null; state: string | null } | null;
 }
 
 interface ServiceRecord {
@@ -97,7 +97,7 @@ const AdminVehiculos = () => {
 
     let query = supabase
       .from('vehicles')
-      .select('*, vehicle_models(name, brand), clients(full_name, cedula)', { count: 'exact' });
+      .select('*, vehicle_models(name, brand), clients(full_name, cedula, address, city, state)', { count: 'exact' });
 
     if (warrantyFilter !== 'todos') {
       query = query.eq('warranty_active', warrantyFilter === 'activa');
@@ -276,6 +276,7 @@ const AdminVehiculos = () => {
                 <TableHead>Placa</TableHead>
                 <TableHead>Color</TableHead>
                 <TableHead>Cliente</TableHead>
+                <TableHead>Dirección</TableHead>
                 <TableHead>VIN</TableHead>
                 <TableHead>Km</TableHead>
                 <TableHead>F. Compra</TableHead>
@@ -297,6 +298,9 @@ const AdminVehiculos = () => {
                   <TableCell>{v.color || '-'}</TableCell>
                   <TableCell className="max-w-[160px] truncate" title={v.clients?.full_name || ''}>
                     {v.clients?.full_name || '-'}
+                  </TableCell>
+                  <TableCell className="max-w-[180px] truncate text-muted-foreground" title={[v.clients?.address, v.clients?.city, v.clients?.state].filter(Boolean).join(', ') || ''}>
+                    {[v.clients?.address, v.clients?.city, v.clients?.state].filter(Boolean).join(', ') || '-'}
                   </TableCell>
                   <TableCell className="text-muted-foreground font-mono">{v.vin || '-'}</TableCell>
                   <TableCell>{v.mileage.toLocaleString()}</TableCell>
@@ -443,6 +447,7 @@ const AdminVehiculos = () => {
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><User className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Cliente</p><p className="font-medium">{v.clients?.full_name || '-'}</p></div></div>
                   <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Hash className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Kilometraje</p><p className="font-medium">{v.mileage.toLocaleString()} km</p></div></div>
+                  {(v.clients?.address || v.clients?.city || v.clients?.state) && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2 col-span-2"><MapPin className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Dirección Cliente</p><p className="font-medium">{[v.clients?.address, v.clients?.city, v.clients?.state].filter(Boolean).join(', ')}</p></div></div>}
                   {v.color && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Car className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Color</p><p className="font-medium">{v.color}</p></div></div>}
                   {v.purchase_date && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Compra</p><p className="font-medium">{formatDate(v.purchase_date)}</p></div></div>}
                 </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { CalendarDays, Plus, LogOut, ClipboardList, Search, CheckCircle, Car, User, AlertCircle, Users, Phone, Mail, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, UserCog, Trophy, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { CalendarDays, Plus, LogOut, ClipboardList, Search, CheckCircle, Car, User, AlertCircle, Users, Phone, Mail, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, UserCog, Trophy, ArrowUpRight, ArrowDownRight, Upload, Trash2, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -24,7 +24,7 @@ interface Dealership {
   id: string;
   name: string;
   city: string | null;
-  brand: string | null;
+  brand: string[] | null;
 }
 
 interface Reservation {
@@ -42,6 +42,7 @@ interface Reservation {
   walkin_client_phone: string | null;
   walkin_plate: string | null;
   service_notes: string | null;
+  technical_report_url: string | null;
   completed_at: string | null;
   created_at: string;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
@@ -158,6 +159,12 @@ const DealershipPanel = () => {
   const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
   const [serviceNotes, setServiceNotes] = useState('');
   const [completing, setCompleting] = useState(false);
+  const [reportFile, setReportFile] = useState<File | null>(null);
+  const reportInputRef = useRef<HTMLInputElement>(null);
+
+  // Standalone report upload (for already completed reservations)
+  const [uploadingReportId, setUploadingReportId] = useState<string | null>(null);
+  const standaloneReportRef = useRef<HTMLInputElement>(null);
 
   // Create reservation dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -230,7 +237,7 @@ const DealershipPanel = () => {
       .order('reservation_date', { ascending: false })
       .order('reservation_time', { ascending: false })
       .limit(200);
-    setReservations((data || []) as Reservation[]);
+    setReservations((data || []) as unknown as Reservation[]);
     setLoading(false);
   };
 
@@ -461,21 +468,51 @@ const DealershipPanel = () => {
   const openCompleteDialog = (r: Reservation) => {
     setCompletingRes(r);
     setServiceNotes(r.service_notes || '');
+    setReportFile(null);
     setCompleteOpen(true);
+  };
+
+  const uploadReport = async (file: File, reservationId: string): Promise<string | null> => {
+    const ext = file.name.split('.').pop() || 'pdf';
+    const path = `${reservationId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('technical-reports').upload(path, file, { upsert: true });
+    if (error) { console.error('Upload error:', error); return null; }
+    const { data: urlData } = supabase.storage.from('technical-reports').getPublicUrl(path);
+    return urlData?.publicUrl || null;
   };
 
   const handleCompleteService = async () => {
     if (!completingRes) return;
     if (!serviceNotes.trim()) { toast.error('Describe lo que se realizó en el servicio'); return; }
     setCompleting(true);
+
+    let reportUrl: string | null = completingRes.technical_report_url || null;
+    if (reportFile) {
+      const url = await uploadReport(reportFile, completingRes.id);
+      if (!url) { toast.error('Error al subir el informe técnico'); setCompleting(false); return; }
+      reportUrl = url;
+    }
+
     const { error } = await supabase.from('reservations').update({
       status: 'completada',
       service_notes: serviceNotes.trim(),
       completed_at: new Date().toISOString(),
+      technical_report_url: reportUrl,
     }).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
     else { toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations(); }
     setCompleting(false);
+  };
+
+  const handleStandaloneReportUpload = async (file: File, reservationId: string) => {
+    if (file.size > 10 * 1024 * 1024) { toast.error('El archivo no debe superar 10 MB'); return; }
+    setUploadingReportId(reservationId);
+    const url = await uploadReport(file, reservationId);
+    if (!url) { toast.error('Error al subir el informe técnico'); setUploadingReportId(null); return; }
+    const { error } = await supabase.from('reservations').update({ technical_report_url: url }).eq('id', reservationId);
+    if (error) { toast.error('Error al guardar'); console.error(error); }
+    else { toast.success('Informe técnico cargado'); fetchReservations(); }
+    setUploadingReportId(null);
   };
 
   const checkDuplicateProspectPhone = async (phone: string): Promise<boolean> => {
@@ -535,9 +572,9 @@ const DealershipPanel = () => {
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
             {(() => {
-              const brand = (currentDealership?.brand || '').toUpperCase();
-              const hasGac = brand === 'GAC' || brand === 'AMBAS';
-              const hasDfsk = brand === 'DFSK' || brand === 'AMBAS';
+              const brands = (currentDealership?.brand || []).map((b: string) => b.toUpperCase());
+              const hasGac = brands.includes('GAC');
+              const hasDfsk = brands.includes('DFSK');
               if (!hasGac && !hasDfsk) return null;
               return (
                 <div className="flex items-center gap-2.5">
@@ -722,6 +759,18 @@ const DealershipPanel = () => {
                               {(r.status === 'pendiente' || r.status === 'confirmada') && (
                                 <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2 text-destructive" onClick={(e) => { e.stopPropagation(); updateStatus(r.id, 'cancelada'); }}>
                                   Cancelar
+                                </Button>
+                              )}
+                              {r.status === 'completada' && !r.technical_report_url && (
+                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); standaloneReportRef.current?.setAttribute('data-res-id', r.id); standaloneReportRef.current?.click(); }}
+                                  disabled={uploadingReportId === r.id}
+                                >
+                                  {uploadingReportId === r.id ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <><Upload className="w-3 h-3" /> Informe</>}
+                                </Button>
+                              )}
+                              {r.technical_report_url && (
+                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); window.open(r.technical_report_url!, '_blank'); }}>
+                                  <FileText className="w-3 h-3" /> PDF
                                 </Button>
                               )}
                             </div>
@@ -1041,6 +1090,22 @@ const DealershipPanel = () => {
                       {detailRes.completed_at && <p className="text-green-600 mt-1.5 text-[10px]">Completado: {new Date(detailRes.completed_at).toLocaleString('es-VE')}</p>}
                     </div>
                   )}
+                  {detailRes.status === 'completada' && (
+                    <div className="flex items-center gap-2">
+                      {detailRes.technical_report_url ? (
+                        <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => window.open(detailRes.technical_report_url!, '_blank')}>
+                          <FileText className="w-3.5 h-3.5" /> Ver Informe Técnico
+                          <ExternalLink className="w-3 h-3" />
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => { standaloneReportRef.current?.setAttribute('data-res-id', detailRes.id); standaloneReportRef.current?.click(); }}
+                          disabled={uploadingReportId === detailRes.id}
+                        >
+                          {uploadingReportId === detailRes.id ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <><Upload className="w-3.5 h-3.5" /> Cargar Informe Técnico</>}
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2 pt-2">
                     {detailRes.status === 'pendiente' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'confirmada'); }}>Confirmar</Button>}
                     {detailRes.status === 'confirmada' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'en_proceso'); }}>Iniciar</Button>}
@@ -1168,6 +1233,40 @@ const DealershipPanel = () => {
                   rows={4}
                   placeholder="Describa los trabajos realizados, repuestos cambiados, observaciones..."
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Informe Técnico (PDF)</Label>
+                <input
+                  ref={reportInputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={e => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      if (f.size > 10 * 1024 * 1024) { toast.error('El archivo no debe superar 10 MB'); return; }
+                      setReportFile(f);
+                    }
+                  }}
+                />
+                {reportFile ? (
+                  <div className="flex items-center gap-2 rounded-md border p-3 bg-muted/30">
+                    <FileText className="w-4 h-4 text-primary shrink-0" />
+                    <span className="text-xs truncate flex-1">{reportFile.name}</span>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setReportFile(null); if (reportInputRef.current) reportInputRef.current.value = ''; }}>
+                      <Trash2 className="w-3 h-3 text-destructive" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div
+                    className="border-2 border-dashed rounded-md p-4 text-center cursor-pointer hover:bg-muted/30 transition-colors"
+                    onClick={() => reportInputRef.current?.click()}
+                  >
+                    <Upload className="w-5 h-5 mx-auto mb-1 text-muted-foreground" />
+                    <p className="text-xs font-medium">Cargar Informe Técnico (PDF)</p>
+                    <p className="text-[10px] text-muted-foreground">Arrastra y suelta o haz clic · Máx. 10 MB</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1303,6 +1402,20 @@ const DealershipPanel = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Hidden file input for standalone report upload */}
+      <input
+        ref={standaloneReportRef}
+        type="file"
+        accept=".pdf"
+        className="hidden"
+        onChange={e => {
+          const f = e.target.files?.[0];
+          const resId = standaloneReportRef.current?.getAttribute('data-res-id');
+          if (f && resId) handleStandaloneReportUpload(f, resId);
+          if (standaloneReportRef.current) standaloneReportRef.current.value = '';
+        }}
+      />
     </div>
   );
 };

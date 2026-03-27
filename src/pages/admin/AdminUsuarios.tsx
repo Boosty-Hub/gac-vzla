@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound } from 'lucide-react';
+import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -72,6 +72,8 @@ const AdminUsuarios = () => {
   const [dealerships, setDealerships] = useState<{ id: string; name: string }[]>([]);
   // Edit dealership
   const [editDealershipId, setEditDealershipId] = useState('');
+  // Linked dealership profile IDs
+  const [linkedProfileIds, setLinkedProfileIds] = useState<Set<string>>(new Set());
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -99,10 +101,16 @@ const AdminUsuarios = () => {
     if (data) setDealerships(data);
   };
 
+  const fetchLinkedProfiles = async () => {
+    const { data } = await supabase.from('dealership_users').select('profile_id');
+    if (data) setLinkedProfileIds(new Set(data.map((d: any) => d.profile_id)));
+  };
+
   useEffect(() => {
     fetchUsers();
     fetchRoles();
     fetchDealerships();
+    fetchLinkedProfiles();
   }, []);
 
   const openCreateDialog = () => {
@@ -188,6 +196,7 @@ const AdminUsuarios = () => {
         toast.success('Usuario creado exitosamente');
         setCreateDialogOpen(false);
         fetchUsers();
+        fetchLinkedProfiles();
       }
     } catch (err) {
       toast.error('Error de conexión');
@@ -246,6 +255,7 @@ const AdminUsuarios = () => {
       toast.success('Usuario actualizado correctamente');
       setEditDialogOpen(false);
       fetchUsers();
+      fetchLinkedProfiles();
     }
     setSaving(false);
   };
@@ -290,6 +300,27 @@ const AdminUsuarios = () => {
           </Button>
         )}
       </div>
+
+      {(() => {
+        const unlinkedVendedores = users.filter(u => {
+          const roleName = u.roles?.name?.toLowerCase();
+          return (roleName === 'vendedor' || roleName === 'concesionario') && !linkedProfileIds.has(u.id);
+        });
+        return unlinkedVendedores.length > 0 ? (
+          <Card className="border-amber-300 bg-amber-50">
+            <CardContent className="p-3 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+              <div className="text-xs text-amber-800">
+                <p className="font-semibold">Vendedores sin concesionario vinculado ({unlinkedVendedores.length})</p>
+                <p className="mt-0.5">
+                  {unlinkedVendedores.map(u => u.full_name || u.email).join(', ')}
+                </p>
+                <p className="mt-1 text-amber-600">Estos usuarios no podrán acceder correctamente al portal. Edítalos para asignarles un concesionario.</p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null;
+      })()}
 
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-sm">

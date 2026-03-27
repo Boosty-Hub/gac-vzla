@@ -25,7 +25,7 @@ interface Dealership {
   schedule: string | null;
   bays: number;
   is_active: boolean;
-  brand: string;
+  brand: string[];
   type: string;
   is_service_center: boolean;
   email: string | null;
@@ -59,7 +59,7 @@ const AdminConcesionarios = () => {
   const [formSchedule, setFormSchedule] = useState('8:00 AM - 5:00 PM');
   const [formBays, setFormBays] = useState('3');
   const [formIsActive, setFormIsActive] = useState(true);
-  const [formBrand, setFormBrand] = useState('GAC');
+  const [formBrand, setFormBrand] = useState<string[]>(['GAC']);
   const [formIsServiceCenter, setFormIsServiceCenter] = useState(false);
   const [formEmail, setFormEmail] = useState('');
   const [formInstagram, setFormInstagram] = useState('');
@@ -84,7 +84,7 @@ const AdminConcesionarios = () => {
   useEffect(() => { fetchDealerships(); }, []);
 
   const filteredDealerships = dealerships.filter(d => {
-    if (filterBrand !== 'todos' && d.brand !== filterBrand) return false;
+    if (filterBrand !== 'todos' && !d.brand?.includes(filterBrand)) return false;
     return true;
   });
 
@@ -92,7 +92,7 @@ const AdminConcesionarios = () => {
     setEditing(null);
     setFormName(''); setFormCity(''); setFormState(''); setFormAddress('');
     setFormPhone(''); setFormSchedule('8:00 AM - 5:00 PM'); setFormBays('3'); setFormIsActive(true);
-    setFormBrand('GAC'); setFormIsServiceCenter(false); setFormEmail(''); setFormInstagram(''); setFormWebsite('');
+    setFormBrand(['GAC']); setFormIsServiceCenter(false); setFormEmail(''); setFormInstagram(''); setFormWebsite('');
     setDialogOpen(true);
   };
 
@@ -106,7 +106,7 @@ const AdminConcesionarios = () => {
     setFormSchedule(d.schedule || '8:00 AM - 5:00 PM');
     setFormBays(String(d.bays));
     setFormIsActive(d.is_active);
-    setFormBrand(d.brand);
+    setFormBrand(d.brand || ['GAC']);
     setFormIsServiceCenter(d.is_service_center ?? false);
     setFormEmail(d.email || '');
     setFormInstagram(d.instagram || '');
@@ -116,6 +116,7 @@ const AdminConcesionarios = () => {
 
   const handleSave = async () => {
     if (!formName.trim()) { toast.error('El nombre es requerido'); return; }
+    if (formBrand.length === 0) { toast.error('Selecciona al menos una marca'); return; }
     setSaving(true);
 
     const payload = {
@@ -212,9 +213,13 @@ const AdminConcesionarios = () => {
                 <TableRow key={d.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => { setDetailDealer(d); setDetailOpen(true); }}>
                   <TableCell className="font-medium max-w-[200px] truncate">{d.name}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${d.brand === 'GAC' ? 'border-primary text-primary' : 'border-orange-500 text-orange-600'}`}>
-                      {d.brand}
-                    </Badge>
+                    <div className="flex items-center gap-1">
+                      {(d.brand || []).map(b => (
+                        <Badge key={b} variant="outline" className={`text-[10px] px-1.5 py-0 ${b === 'GAC' ? 'border-primary text-primary' : 'border-orange-500 text-orange-600'}`}>
+                          {b}
+                        </Badge>
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {d.is_service_center ? (
@@ -274,9 +279,11 @@ const AdminConcesionarios = () => {
           {detailDealer && (
             <div className="space-y-4 py-2">
               <div className="flex items-center gap-2 flex-wrap">
-                <Badge variant="outline" className={`text-xs px-2 py-0.5 ${detailDealer.brand === 'GAC' ? 'border-primary text-primary' : 'border-orange-500 text-orange-600'}`}>
-                  {detailDealer.brand}
-                </Badge>
+                {(detailDealer.brand || []).map(b => (
+                  <Badge key={b} variant="outline" className={`text-xs px-2 py-0.5 ${b === 'GAC' ? 'border-primary text-primary' : 'border-orange-500 text-orange-600'}`}>
+                    {b}
+                  </Badge>
+                ))}
                 {detailDealer.is_service_center && (
                   <Badge variant="outline" className="text-xs px-2 py-0.5 gap-1 border-emerald-500 text-emerald-600">
                     <Wrench className="w-3 h-3" /> Centro de Servicio
@@ -361,14 +368,24 @@ const AdminConcesionarios = () => {
           </DialogHeader>
           <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
             <div className="space-y-2">
-              <Label>Marca *</Label>
-              <Select value={formBrand} onValueChange={setFormBrand}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="GAC">GAC</SelectItem>
-                  <SelectItem value="DFSK">DFSK</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>Marcas *</Label>
+              <div className="flex items-center gap-4">
+                {['GAC', 'DFSK'].map(b => (
+                  <label key={b} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formBrand.includes(b)}
+                      onChange={e => {
+                        if (e.target.checked) setFormBrand(prev => [...prev, b]);
+                        else setFormBrand(prev => prev.filter(x => x !== b));
+                      }}
+                      className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                    />
+                    <span className="text-sm font-medium">{b}</span>
+                  </label>
+                ))}
+              </div>
+              {formBrand.length === 0 && <p className="text-xs text-destructive">Selecciona al menos una marca</p>}
             </div>
             <div className="space-y-2">
               <Label>Nombre *</Label>
