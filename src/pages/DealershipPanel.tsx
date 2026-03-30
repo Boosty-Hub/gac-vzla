@@ -158,6 +158,7 @@ const DealershipPanel = () => {
   const [completeOpen, setCompleteOpen] = useState(false);
   const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
   const [serviceNotes, setServiceNotes] = useState('');
+  const [satisfactionRating, setSatisfactionRating] = useState<number | null>(null);
   const [completing, setCompleting] = useState(false);
   const [reportFile, setReportFile] = useState<File | null>(null);
   const reportInputRef = useRef<HTMLInputElement>(null);
@@ -468,15 +469,32 @@ const DealershipPanel = () => {
   const openCompleteDialog = (r: Reservation) => {
     setCompletingRes(r);
     setServiceNotes(r.service_notes || '');
+    setSatisfactionRating((r as any).satisfaction_rating || null);
     setReportFile(null);
     setCompleteOpen(true);
   };
 
   const uploadReport = async (file: File, reservationId: string): Promise<string | null> => {
-    const ext = file.name.split('.').pop() || 'pdf';
+    if (file.size > 40 * 1024 * 1024) {
+      toast.error('El archivo supera el límite de 40 MB');
+      return null;
+    }
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      toast.error('Solo se permiten archivos PDF');
+      return null;
+    }
+    const ext = 'pdf';
     const path = `${reservationId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('technical-reports').upload(path, file, { upsert: true });
-    if (error) { console.error('Upload error:', error); return null; }
+    const { error } = await supabase.storage.from('technical-reports').upload(path, file, { upsert: true, contentType: 'application/pdf' });
+    if (error) {
+      console.error('Upload error:', error);
+      const msg = error.message || '';
+      if (msg.includes('exceeded') || msg.includes('size')) toast.error('El archivo supera el límite permitido (40 MB)');
+      else if (msg.includes('mime') || msg.includes('type')) toast.error('Tipo de archivo no permitido. Solo PDF');
+      else if (msg.includes('security') || msg.includes('policy')) toast.error('Sin permiso para subir archivos. Contacte al administrador');
+      else toast.error(`Error al subir: ${msg || 'Error desconocido'}`);
+      return null;
+    }
     const { data: urlData } = supabase.storage.from('technical-reports').getPublicUrl(path);
     return urlData?.publicUrl || null;
   };
@@ -498,6 +516,7 @@ const DealershipPanel = () => {
       service_notes: serviceNotes.trim(),
       completed_at: new Date().toISOString(),
       technical_report_url: reportUrl,
+      satisfaction_rating: satisfactionRating,
     }).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
     else { toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations(); }
@@ -505,10 +524,10 @@ const DealershipPanel = () => {
   };
 
   const handleStandaloneReportUpload = async (file: File, reservationId: string) => {
-    if (file.size > 10 * 1024 * 1024) { toast.error('El archivo no debe superar 10 MB'); return; }
+    if (file.size > 40 * 1024 * 1024) { toast.error('El archivo no debe superar 40 MB'); return; }
     setUploadingReportId(reservationId);
     const url = await uploadReport(file, reservationId);
-    if (!url) { toast.error('Error al subir el informe técnico'); setUploadingReportId(null); return; }
+    if (!url) { setUploadingReportId(null); return; }
     const { error } = await supabase.from('reservations').update({ technical_report_url: url }).eq('id', reservationId);
     if (error) { toast.error('Error al guardar'); console.error(error); }
     else { toast.success('Informe técnico cargado'); fetchReservations(); }
@@ -1239,20 +1258,22 @@ const DealershipPanel = () => {
                 <input
                   ref={reportInputRef}
                   type="file"
-                  accept=".pdf"
+                  accept=".pdf,application/pdf"
                   className="hidden"
                   onChange={e => {
                     const f = e.target.files?.[0];
                     if (f) {
-                      if (f.size > 10 * 1024 * 1024) { toast.error('El archivo no debe superar 10 MB'); return; }
+                      if (f.size > 40 * 1024 * 1024) { toast.error('El archivo no debe superar 40 MB'); return; }
                       setReportFile(f);
                     }
+                    if (reportInputRef.current) reportInputRef.current.value = '';
                   }}
                 />
                 {reportFile ? (
                   <div className="flex items-center gap-2 rounded-md border p-3 bg-muted/30">
                     <FileText className="w-4 h-4 text-primary shrink-0" />
                     <span className="text-xs truncate flex-1">{reportFile.name}</span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{(reportFile.size / (1024 * 1024)).toFixed(1)} MB</span>
                     <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { setReportFile(null); if (reportInputRef.current) reportInputRef.current.value = ''; }}>
                       <Trash2 className="w-3 h-3 text-destructive" />
                     </Button>
@@ -1261,12 +1282,40 @@ const DealershipPanel = () => {
                   <div
                     className="border-2 border-dashed rounded-md p-4 text-center cursor-pointer hover:bg-muted/30 transition-colors"
                     onClick={() => reportInputRef.current?.click()}
+                    onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+                    onDragEnter={e => { e.preventDefault(); e.stopPropagation(); }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const f = e.dataTransfer.files?.[0];
+                      if (!f) return;
+                      if (!f.name.toLowerCase().endsWith('.pdf') && f.type !== 'application/pdf') { toast.error('Solo se permiten archivos PDF'); return; }
+                      if (f.size > 40 * 1024 * 1024) { toast.error('El archivo no debe superar 40 MB'); return; }
+                      setReportFile(f);
+                    }}
                   >
                     <Upload className="w-5 h-5 mx-auto mb-1 text-muted-foreground" />
                     <p className="text-xs font-medium">Cargar Informe Técnico (PDF)</p>
-                    <p className="text-[10px] text-muted-foreground">Arrastra y suelta o haz clic · Máx. 10 MB</p>
+                    <p className="text-[10px] text-muted-foreground">Arrastra y suelta o haz clic · Máx. 40 MB</p>
                   </div>
                 )}
+              </div>
+              <div className="space-y-2">
+                <Label>Satisfacción del Cliente (1–5)</Label>
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setSatisfactionRating(satisfactionRating === star ? null : star)}
+                      className={cn(
+                        'text-2xl transition-transform hover:scale-110',
+                        satisfactionRating !== null && star <= satisfactionRating ? 'text-amber-400' : 'text-muted-foreground/30'
+                      )}
+                    >★</button>
+                  ))}
+                  {satisfactionRating && <span className="text-xs text-muted-foreground ml-1">{satisfactionRating}/5</span>}
+                </div>
               </div>
             </div>
           )}

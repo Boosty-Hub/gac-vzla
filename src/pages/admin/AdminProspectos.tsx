@@ -636,54 +636,55 @@ const AdminProspectos = () => {
 
         {/* Filters */}
         <div className="flex flex-col gap-2">
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-wrap">
-            <div className="relative flex-1 min-w-0 sm:min-w-[180px] sm:max-w-sm">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
-            </div>
-            <div className="flex items-center gap-2 overflow-x-auto flex-wrap">
-              <Select value={dealershipFilter} onValueChange={setDealershipFilter}>
-                <SelectTrigger className="w-[140px] sm:w-[170px] h-8 text-xs shrink-0"><SelectValue placeholder="Concesionario" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos</SelectItem>
-                  {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-[110px] sm:w-[130px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos</SelectItem>
-                  {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={sourceFilter} onValueChange={setSourceFilter}>
-                <SelectTrigger className="w-[110px] sm:w-[140px] h-8 text-xs shrink-0"><SelectValue placeholder="Fuente" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todas</SelectItem>
-                  {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={salespersonFilter} onValueChange={setSalespersonFilter}>
-                <SelectTrigger className="w-[120px] sm:w-[150px] h-8 text-xs shrink-0"><SelectValue placeholder="Vendedor" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todos</SelectItem>
-                  {salespersons.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5">
+          {/* Filters grid */}
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
+            <Select value={dealershipFilter} onValueChange={setDealershipFilter}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Concesionario" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los concesionarios</SelectItem>
+                {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los estados</SelectItem>
+                {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={sourceFilter} onValueChange={setSourceFilter}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Fuente" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todas las fuentes</SelectItem>
+                {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <Select value={salespersonFilter} onValueChange={setSalespersonFilter}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Vendedor" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los vendedores</SelectItem>
+                {salespersons.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          {/* Date range */}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
               <span className="text-[11px] text-muted-foreground shrink-0">Desde</span>
-              <Input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="h-8 text-xs w-[140px]" />
+              <Input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
               <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
-              <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs w-[140px]" />
+              <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
             </div>
             {(fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos') && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setSearch(''); }}>
-                Limpiar filtros
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setSearch(''); }}>
+                Limpiar
               </Button>
             )}
           </div>

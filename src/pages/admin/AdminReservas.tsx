@@ -9,13 +9,15 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2 } from 'lucide-react';
+import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, Star } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface Dealership {
   id: string;
@@ -58,6 +60,7 @@ interface Reservation {
   notes: string | null;
   service_notes: string | null;
   technical_report_url: string | null;
+  satisfaction_rating: number | null;
   dealerships: { id: string; name: string; city: string | null } | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
@@ -92,9 +95,18 @@ const STATUS_LABELS: Record<string, string> = {
 
 
 const AdminReservas = () => {
-  const { hasPermission } = useAuth();
+  const isMobile = useIsMobile();
+  const { hasPermission, role } = useAuth();
   const canCreate = hasPermission('reservas.create');
   const canEdit = hasPermission('reservas.edit');
+  const canDelete = role?.name === 'superadmin' || role?.name === 'admin';
+
+  // Delete
+  const [deleteTarget, setDeleteTarget] = useState<Reservation | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Detail dialog
+  const [detailRes, setDetailRes] = useState<Reservation | null>(null);
   const [view, setView] = useState<'table' | 'matrix'>('table');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
@@ -122,6 +134,7 @@ const AdminReservas = () => {
   const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
   const [serviceNotes, setServiceNotes] = useState('');
   const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
+  const [satisfactionRating, setSatisfactionRating] = useState<number | null>(null);
   const [completing, setCompleting] = useState(false);
 
   // Service manager dialog
@@ -311,6 +324,15 @@ const AdminReservas = () => {
     setDialogOpen(true);
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const { error } = await supabase.from('reservations').delete().eq('id', deleteTarget.id);
+    if (error) { toast.error('Error al eliminar la reserva'); console.error(error); }
+    else { toast.success('Reserva eliminada'); setDeleteTarget(null); fetchReservations(); }
+    setDeleting(false);
+  };
+
   const openEdit = (r: Reservation) => {
     setEditingRes(r);
     setFDealership(r.dealership_id);
@@ -407,6 +429,7 @@ const AdminReservas = () => {
     setCompletingRes(r);
     setServiceNotes(r.service_notes || '');
     setTechnicalReportUrl(r.technical_report_url || null);
+    setSatisfactionRating(r.satisfaction_rating || null);
     setCompleteOpen(true);
   };
 
@@ -418,6 +441,7 @@ const AdminReservas = () => {
       status: 'completada',
       service_notes: serviceNotes.trim(),
       technical_report_url: technicalReportUrl || null,
+      satisfaction_rating: satisfactionRating,
       completed_at: new Date().toISOString(),
     }).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
@@ -475,53 +499,57 @@ const AdminReservas = () => {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-display font-bold">Reservas / Servicios</h1>
-          <Badge variant="outline" className="gap-1 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="text-lg font-display font-bold whitespace-nowrap">Reservas / Servicios</h1>
+          <Badge variant="outline" className="gap-1 text-xs shrink-0">
             <CalendarDays className="w-3 h-3" /> {reservations.length}
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 shrink-0">
           <Tabs value={view} onValueChange={v => setView(v as 'table' | 'matrix')}>
             <TabsList className="h-8">
-              <TabsTrigger value="table" className="gap-1 text-xs h-7"><List className="w-3.5 h-3.5" /> Tabla</TabsTrigger>
-              <TabsTrigger value="matrix" className="gap-1 text-xs h-7"><LayoutGrid className="w-3.5 h-3.5" /> Matriz</TabsTrigger>
+              <TabsTrigger value="table" className="gap-1 text-xs h-7 px-2"><List className="w-3.5 h-3.5" /><span className="hidden sm:inline"> Tabla</span></TabsTrigger>
+              <TabsTrigger value="matrix" className="gap-1 text-xs h-7 px-2"><LayoutGrid className="w-3.5 h-3.5" /><span className="hidden sm:inline"> Matriz</span></TabsTrigger>
             </TabsList>
           </Tabs>
           <Button size="sm" variant="outline" onClick={() => { fetchServiceTypes(); setSvcOpen(true); setSvcEditing(null); setSvcName(''); setSvcDuration('60'); setSvcRequiresDesc(false); }} className="gap-1 text-xs">
-            <Settings className="w-3.5 h-3.5" /> Servicios
+            <Settings className="w-3.5 h-3.5" /><span className="hidden sm:inline"> Servicios</span>
           </Button>
           {canCreate && (
             <Button size="sm" onClick={openCreate} className="gac-gradient">
-              <Plus className="w-3.5 h-3.5 mr-1" /> Nueva
+              <Plus className="w-3.5 h-3.5 sm:mr-1" /><span className="hidden sm:inline"> Nueva</span>
             </Button>
           )}
         </div>
       </div>
 
       <div className="flex flex-col gap-2">
+        {/* Row 1: search / date picker */}
         <div className="flex items-center gap-2 flex-wrap">
           {view === 'table' && (
-            <div className="relative flex-1 min-w-[160px] max-w-sm">
+            <div className="relative flex-1 min-w-0">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input placeholder="Buscar cliente, placa o servicio..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+              <Input placeholder="Buscar cliente, placa..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
             </div>
           )}
           {view === 'matrix' && (
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeDate(-1)}>
+            <div className="flex items-center gap-1 flex-1">
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => changeDate(-1)}>
                 <ChevronLeft className="w-3.5 h-3.5" />
               </Button>
-              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="h-8 text-xs w-[140px]" />
-              <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => changeDate(1)}>
+              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => changeDate(1)}>
                 <ChevronRight className="w-3.5 h-3.5" />
               </Button>
-              <span className="text-xs font-medium ml-1">{formatDate(selectedDate)}</span>
+              <span className="text-xs font-medium ml-1 hidden sm:inline shrink-0">{formatDate(selectedDate)}</span>
             </div>
           )}
+        </div>
+        {/* Row 2: filters */}
+        <div className="flex items-center gap-2 flex-wrap">
           <Select value={filtroConc} onValueChange={setFiltroConc}>
-            <SelectTrigger className="w-[170px] h-8 text-xs shrink-0"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="w-full sm:w-[170px] h-8 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="todos">Todos los concesionarios</SelectItem>
               {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
@@ -530,14 +558,14 @@ const AdminReservas = () => {
           {view === 'table' && (
             <>
               <Select value={filtroEstado} onValueChange={setFiltroEstado}>
-                <SelectTrigger className="w-[120px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
+                <SelectTrigger className="flex-1 sm:w-[120px] sm:flex-none h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos</SelectItem>
                   {Object.entries(STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Select value={filtroServicio} onValueChange={setFiltroServicio}>
-                <SelectTrigger className="w-[150px] h-8 text-xs shrink-0"><SelectValue placeholder="Servicio" /></SelectTrigger>
+                <SelectTrigger className="flex-1 sm:w-[150px] sm:flex-none h-8 text-xs"><SelectValue placeholder="Servicio" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los servicios</SelectItem>
                   {serviceTypes.filter(s => s.is_active).map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
@@ -548,37 +576,120 @@ const AdminReservas = () => {
         </div>
         {view === 'table' && (
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
               <span className="text-[11px] text-muted-foreground shrink-0">Desde</span>
-              <Input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="h-8 text-xs w-[140px]" />
+              <Input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-1 min-w-0">
               <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
-              <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs w-[140px]" />
+              <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
             </div>
             {(fechaDesde || fechaHasta || filtroEstado !== 'todos' || filtroServicio !== 'todos') && (
               <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setFechaDesde(''); setFechaHasta(''); setFiltroEstado('todos'); setFiltroServicio('todos'); }}>
-                Limpiar filtros
+                Limpiar
               </Button>
             )}
           </div>
         )}
       </div>
 
-      {/* TABLE VIEW */}
+      {/* TABLE / CARD VIEW */}
       {view === 'table' && (
-        <Card className="gac-shadow">
-          {loading ? (
+        loading ? (
+          <Card className="gac-shadow">
             <CardContent className="p-8 text-center">
               <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">Cargando reservas...</p>
             </CardContent>
-          ) : filteredReservations.length === 0 ? (
+          </Card>
+        ) : filteredReservations.length === 0 ? (
+          <Card className="gac-shadow">
             <CardContent className="p-8 text-center">
               <CalendarDays className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">No hay reservas registradas</p>
             </CardContent>
-          ) : (
+          </Card>
+        ) : isMobile ? (
+          /* ── MOBILE CARDS ── */
+          <div className="space-y-2">
+            {filteredReservations.map(r => (
+              <Card key={r.id} className="gac-shadow cursor-pointer" onClick={() => setDetailRes(r)}>
+                <CardContent className="p-3 space-y-2">
+                  {/* Row 1: date + status */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold">{formatDate(r.reservation_date)} · {formatTime(r.reservation_time)}</p>
+                      <p className="text-[11px] text-muted-foreground">{r.dealerships?.name || '-'}</p>
+                    </div>
+                    {canEdit ? (
+                      <Select value={r.status} onValueChange={val => {
+                        if (val === 'completada') { openComplete(r); }
+                        else { supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => fetchReservations()); }
+                      }}>
+                        <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[108px] shrink-0', STATUS_COLORS[r.status] || 'bg-muted')}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(STATUS_LABELS).map(([k, v]) => (
+                            <SelectItem key={k} value={k} className="text-xs">{v}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Badge className={cn('text-[10px] px-1.5 py-0 shrink-0', STATUS_COLORS[r.status] || 'bg-muted')}>
+                        {STATUS_LABELS[r.status] || r.status}
+                      </Badge>
+                    )}
+                  </div>
+                  {/* Row 2: client + vehicle */}
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">
+                    <div className="flex items-center gap-1 text-muted-foreground min-w-0">
+                      <User className="w-3 h-3 shrink-0" />
+                      <span className="truncate font-medium text-foreground">{r.clients?.full_name || '-'}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-muted-foreground min-w-0">
+                      <Car className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{r.vehicles?.vehicle_models?.brand} {r.vehicles?.vehicle_models?.name} {r.vehicles?.year}</span>
+                    </div>
+                    <div className="text-muted-foreground pl-4">{r.vehicles?.plate || '-'}</div>
+                    <div className="text-muted-foreground pl-4">{r.current_mileage.toLocaleString()} km</div>
+                  </div>
+                  {/* Row 3: service + actions */}
+                  <div className="flex items-center justify-between gap-2">
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 truncate max-w-[60%]">{r.service_type}</Badge>
+                    <div className="flex items-center gap-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+                      {r.status === 'confirmada' && r.clients?.phone && (() => {
+                        const waUrl = buildWhatsAppReservationUrl({
+                          phone: r.clients.phone,
+                          clientName: r.clients.full_name,
+                          date: r.reservation_date,
+                          time: r.reservation_time,
+                          serviceType: r.service_type,
+                          vehicleBrand: r.vehicles?.vehicle_models?.brand,
+                          vehicleModel: r.vehicles?.vehicle_models?.name,
+                          vehicleYear: r.vehicles?.year,
+                          vehiclePlate: r.vehicles?.plate || undefined,
+                          dealershipName: r.dealerships?.name || undefined,
+                          mileage: r.current_mileage,
+                          notes: r.notes || undefined,
+                        });
+                        return waUrl ? (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600" asChild>
+                            <a href={waUrl} target="_blank" rel="noopener noreferrer"><MessageCircle className="w-4 h-4" /></a>
+                          </Button>
+                        ) : null;
+                      })()}
+                      {canEdit && <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(r)}><Pencil className="w-3.5 h-3.5" /></Button>}
+                      {canDelete && <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setDeleteTarget(r)}><Trash2 className="w-3.5 h-3.5" /></Button>}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          /* ── DESKTOP TABLE ── */
+          <Card className="gac-shadow">
             <Table className="text-xs">
               <TableHeader>
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
@@ -593,7 +704,7 @@ const AdminReservas = () => {
               </TableHeader>
               <TableBody>
                 {filteredReservations.map(r => (
-                  <TableRow key={r.id} className="[&>td]:py-1.5">
+                  <TableRow key={r.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => setDetailRes(r)}>
                     <TableCell className="font-medium">
                       {formatDate(r.reservation_date)}
                       <br />
@@ -608,7 +719,7 @@ const AdminReservas = () => {
                     <TableCell>{r.service_type}</TableCell>
                     <TableCell>{r.dealerships?.name || '-'}</TableCell>
                     <TableCell>{r.current_mileage.toLocaleString()}</TableCell>
-                    <TableCell onClick={e => e.stopPropagation()}>
+                    <TableCell onClick={e => e.stopPropagation()} className="text-right">
                       <div className="flex items-center gap-1">
                         {canEdit ? (
                           <Select
@@ -660,14 +771,19 @@ const AdminReservas = () => {
                             <Pencil className="w-3 h-3" />
                           </Button>
                         )}
+                        {canDelete && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-destructive hover:text-destructive" onClick={() => setDeleteTarget(r)}>
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          )}
-        </Card>
+          </Card>
+        )
       )}
 
       {/* MATRIX VIEW */}
@@ -929,6 +1045,23 @@ const AdminReservas = () => {
                   onChange={setTechnicalReportUrl}
                 />
               </div>
+              <div className="space-y-2">
+                <Label>Satisfacción del Cliente (1–5)</Label>
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setSatisfactionRating(satisfactionRating === star ? null : star)}
+                      className={cn(
+                        'text-2xl transition-transform hover:scale-110',
+                        satisfactionRating !== null && star <= satisfactionRating ? 'text-amber-400' : 'text-muted-foreground/30'
+                      )}
+                    >★</button>
+                  ))}
+                  {satisfactionRating && <span className="text-xs text-muted-foreground ml-1">{satisfactionRating}/5</span>}
+                </div>
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -1008,6 +1141,168 @@ const AdminReservas = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* DETAIL DIALOG */}
+      <Dialog open={!!detailRes} onOpenChange={open => { if (!open) setDetailRes(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <FileText className="w-4 h-4" /> Detalle de Reserva
+            </DialogTitle>
+          </DialogHeader>
+          {detailRes && (
+            <div className="space-y-4 py-1">
+              {/* Status badge */}
+              <div className="flex items-center justify-between">
+                <Badge className={cn('text-xs px-2 py-0.5', STATUS_COLORS[detailRes.status] || 'bg-muted')}>
+                  {STATUS_LABELS[detailRes.status] || detailRes.status}
+                </Badge>
+                <span className="text-xs text-muted-foreground">{formatDate(detailRes.reservation_date)} · {formatTime(detailRes.reservation_time)}</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                {/* Client */}
+                <div className="space-y-0.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Cliente</p>
+                  <div className="flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="font-medium">{detailRes.clients?.full_name || '-'}</span>
+                  </div>
+                  {detailRes.clients?.cedula && <p className="text-xs text-muted-foreground pl-5">CI: {detailRes.clients.cedula}</p>}
+                  {detailRes.clients?.phone && <p className="text-xs text-muted-foreground pl-5">{detailRes.clients.phone}</p>}
+                </div>
+
+                {/* Dealership */}
+                <div className="space-y-0.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Concesionario</p>
+                  <div className="flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span>{detailRes.dealerships?.name || '-'}</span>
+                  </div>
+                  {detailRes.dealerships?.city && <p className="text-xs text-muted-foreground pl-5">{detailRes.dealerships.city}</p>}
+                </div>
+
+                {/* Vehicle */}
+                <div className="space-y-0.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Vehículo</p>
+                  <div className="flex items-center gap-1.5">
+                    <Car className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span>{detailRes.vehicles?.vehicle_models?.brand} {detailRes.vehicles?.vehicle_models?.name} {detailRes.vehicles?.year}</span>
+                  </div>
+                  {detailRes.vehicles?.plate && <p className="text-xs text-muted-foreground pl-5">Placa: {detailRes.vehicles.plate}</p>}
+                </div>
+
+                {/* Service */}
+                <div className="space-y-0.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Servicio</p>
+                  <div className="flex items-center gap-1.5">
+                    <ClipboardCheck className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span>{detailRes.service_type}</span>
+                  </div>
+                </div>
+
+                {/* Mileage */}
+                <div className="space-y-0.5">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Kilometraje</p>
+                  <div className="flex items-center gap-1.5">
+                    <Gauge className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span>{detailRes.current_mileage.toLocaleString()} km</span>
+                  </div>
+                </div>
+
+                {/* Satisfaction */}
+                {detailRes.satisfaction_rating && (
+                  <div className="space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Satisfacción</p>
+                    <div className="flex items-center gap-0.5">
+                      {[1,2,3,4,5].map(i => (
+                        <Star key={i} className={cn('w-3.5 h-3.5', i <= (detailRes.satisfaction_rating ?? 0) ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground')} />
+                      ))}
+                      <span className="text-xs text-muted-foreground ml-1">{detailRes.satisfaction_rating}/5</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Notes */}
+              {detailRes.notes && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Notas de reserva</p>
+                  <div className="flex gap-1.5">
+                    <StickyNote className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                    <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.notes}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Service notes */}
+              {detailRes.service_notes && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Notas de servicio</p>
+                  <div className="flex gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                    <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.service_notes}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Technical report */}
+              {detailRes.technical_report_url && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Informe Técnico</p>
+                  <a
+                    href={detailRes.technical_report_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> Ver informe PDF
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter className="gap-2 sm:gap-0">
+            {detailRes && canEdit && (
+              <Button variant="outline" size="sm" onClick={() => { openEdit(detailRes); setDetailRes(null); }}>
+                <Pencil className="w-3.5 h-3.5 mr-1" /> Editar
+              </Button>
+            )}
+            {detailRes && canDelete && (
+              <Button variant="outline" size="sm" className="text-destructive border-destructive/40 hover:bg-destructive/10" onClick={() => { setDeleteTarget(detailRes); setDetailRes(null); }}>
+                <Trash2 className="w-3.5 h-3.5 mr-1" /> Eliminar
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setDetailRes(null)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DELETE CONFIRMATION */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar esta reserva?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget && (
+                <>
+                  <span className="font-semibold">{deleteTarget.clients?.full_name || '-'}</span>
+                  {' — '}{deleteTarget.service_type}
+                  {' — '}{deleteTarget.reservation_date} {deleteTarget.reservation_time.substring(0, 5)}
+                  <br />
+                  <span className="text-destructive">Esta acción no se puede deshacer.</span>
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {deleting ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

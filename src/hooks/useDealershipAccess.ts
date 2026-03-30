@@ -62,6 +62,6 @@ export function useDealershipAccess() {
     setSelectedDealership,
     loading,
     isAdmin,
-    showSelector: isAdmin && dealerships.length > 1,
+    showSelector: dealerships.length > 1,
   };
 }

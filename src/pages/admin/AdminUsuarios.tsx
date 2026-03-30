@@ -11,7 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle } from 'lucide-react';
+import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle, Mail } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -39,6 +40,7 @@ interface Role {
 }
 
 const AdminUsuarios = () => {
+  const isMobile = useIsMobile();
   const { hasPermission, profile: currentProfile } = useAuth();
   const [users, setUsers] = useState<ProfileWithRole[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -70,8 +72,11 @@ const AdminUsuarios = () => {
 
   // Dealerships for concesionario role
   const [dealerships, setDealerships] = useState<{ id: string; name: string }[]>([]);
-  // Edit dealership
+  // Edit dealership — single for concesionario, multi for vendedor
   const [editDealershipId, setEditDealershipId] = useState('');
+  const [editDealershipIds, setEditDealershipIds] = useState<string[]>([]);
+  // Create multi-dealership for vendedor
+  const [createDealershipIds, setCreateDealershipIds] = useState<string[]>([]);
   // Linked dealership profile IDs
   const [linkedProfileIds, setLinkedProfileIds] = useState<Set<string>>(new Set());
 
@@ -119,6 +124,7 @@ const AdminUsuarios = () => {
     setCreateFullName('');
     setCreateRoleId('');
     setCreateDealershipId('');
+    setCreateDealershipIds([]);
     setCreatePinCode('');
     setShowPassword(false);
     setCreateDialogOpen(true);
@@ -126,6 +132,7 @@ const AdminUsuarios = () => {
 
   const getSelectedRoleName = (roleId: string) => roles.find(r => r.id === roleId)?.name || '';
   const needsDealership = (roleId: string) => ['concesionario', 'vendedor'].includes(getSelectedRoleName(roleId).toLowerCase());
+  const isVendedorRole = (roleId: string) => getSelectedRoleName(roleId).toLowerCase() === 'vendedor';
 
   const handleGenerateMagicLink = async (userId: string) => {
     setGeneratingLink(userId);
@@ -158,8 +165,13 @@ const AdminUsuarios = () => {
       toast.error('La contraseña debe tener al menos 6 caracteres');
       return;
     }
-    if (needsDealership(createRoleId) && !createDealershipId) {
+    const createRoleName = getSelectedRoleName(createRoleId).toLowerCase();
+    if (createRoleName === 'concesionario' && !createDealershipId) {
       toast.error('Debe seleccionar un concesionario para este rol');
+      return;
+    }
+    if (createRoleName === 'vendedor' && createDealershipIds.length === 0) {
+      toast.error('Debe seleccionar al menos un concesionario para el vendedor');
       return;
     }
     const pinValue = createPinCode.trim();
@@ -170,13 +182,18 @@ const AdminUsuarios = () => {
     setCreating(true);
 
     try {
+      const createRoleName2 = getSelectedRoleName(createRoleId).toLowerCase();
+      const primaryDealershipId = createRoleName2 === 'vendedor'
+        ? (createDealershipIds[0] || null)
+        : (needsDealership(createRoleId) ? createDealershipId || null : null);
+
       const { data, error } = await supabase.functions.invoke('create-user', {
         body: {
           email: createEmail.trim(),
           password: createPassword,
           full_name: createFullName.trim() || null,
           role_id: createRoleId || null,
-          dealership_id: needsDealership(createRoleId) ? createDealershipId || null : null,
+          dealership_id: primaryDealershipId,
           pin_code: pinValue || null,
         },
       });
@@ -193,8 +210,14 @@ const AdminUsuarios = () => {
             .update({ pin_code: pinValue } as any)
             .eq('id', data.user_id);
         }
+        // Insert additional dealership links for vendedor
+        if (createRoleName2 === 'vendedor' && data?.user_id && createDealershipIds.length > 1) {
+          const extras = createDealershipIds.slice(1).map(did => ({ dealership_id: did, profile_id: data.user_id }));
+          await supabase.from('dealership_users').insert(extras);
+        }
         toast.success('Usuario creado exitosamente');
         setCreateDialogOpen(false);
+        setCreateDealershipIds([]);
         fetchUsers();
         fetchLinkedProfiles();
       }
@@ -212,16 +235,34 @@ const AdminUsuarios = () => {
     setEditIsActive(user.is_active);
     setEditPinCode(user.pin_code || '');
     setEditDealershipId('');
-    // Load current dealership link
-    const { data } = await supabase.from('dealership_users').select('dealership_id').eq('profile_id', user.id).limit(1);
-    if (data && data.length > 0) setEditDealershipId(data[0].dealership_id);
+    setEditDealershipIds([]);
+    // Load all current dealership links
+    const { data } = await supabase.from('dealership_users').select('dealership_id').eq('profile_id', user.id);
+    if (data && data.length > 0) {
+      const ids = data.map((d: any) => d.dealership_id);
+      setEditDealershipId(ids[0]); // for concesionario single-select
+      setEditDealershipIds(ids);   // for vendedor multi-select
+    }
     setEditDialogOpen(true);
+  };
+
+  const toggleEditDealership = (id: string) => {
+    setEditDealershipIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
+
+  const toggleCreateDealership = (id: string) => {
+    setCreateDealershipIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
   const handleSaveUser = async () => {
     if (!editingUser) return;
-    if (needsDealership(editRoleId) && !editDealershipId) {
+    const roleName = getSelectedRoleName(editRoleId).toLowerCase();
+    if (roleName === 'concesionario' && !editDealershipId) {
       toast.error('Debe seleccionar un concesionario para este rol');
+      return;
+    }
+    if (roleName === 'vendedor' && editDealershipIds.length === 0) {
+      toast.error('Debe seleccionar al menos un concesionario para el vendedor');
       return;
     }
     setSaving(true);
@@ -247,10 +288,15 @@ const AdminUsuarios = () => {
       toast.error('Error al actualizar usuario');
       console.error(error);
     } else {
-      // Update dealership link
+      // Delete all existing links then re-insert
       await supabase.from('dealership_users').delete().eq('profile_id', editingUser.id);
-      if (needsDealership(editRoleId) && editDealershipId) {
-        await supabase.from('dealership_users').insert({ dealership_id: editDealershipId, profile_id: editingUser.id });
+      if (needsDealership(editRoleId)) {
+        const idsToInsert = isVendedorRole(editRoleId) ? editDealershipIds : (editDealershipId ? [editDealershipId] : []);
+        if (idsToInsert.length > 0) {
+          await supabase.from('dealership_users').insert(
+            idsToInsert.map(did => ({ dealership_id: did, profile_id: editingUser.id }))
+          );
+        }
       }
       toast.success('Usuario actualizado correctamente');
       setEditDialogOpen(false);
@@ -323,7 +369,7 @@ const AdminUsuarios = () => {
       })()}
 
       <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative flex-1 min-w-0">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
             placeholder="Buscar nombre o correo..."
@@ -333,7 +379,7 @@ const AdminUsuarios = () => {
           />
         </div>
         <Select value={filtroRol} onValueChange={setFiltroRol}>
-          <SelectTrigger className="w-[140px] h-8 text-xs">
+          <SelectTrigger className="w-[130px] sm:w-[140px] h-8 text-xs shrink-0">
             <SelectValue placeholder="Filtrar por rol" />
           </SelectTrigger>
           <SelectContent>
@@ -345,18 +391,75 @@ const AdminUsuarios = () => {
         </Select>
       </div>
 
-      <Card className="gac-shadow">
-        {loading ? (
+      {loading ? (
+        <Card className="gac-shadow">
           <CardContent className="p-8 text-center">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">Cargando usuarios...</p>
           </CardContent>
-        ) : filteredUsers.length === 0 ? (
+        </Card>
+      ) : filteredUsers.length === 0 ? (
+        <Card className="gac-shadow">
           <CardContent className="p-8 text-center">
             <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No se encontraron usuarios</p>
           </CardContent>
-        ) : (
+        </Card>
+      ) : isMobile ? (
+        /* ── MOBILE CARDS ── */
+        <div className="space-y-2">
+          {filteredUsers.map(u => (
+            <Card key={u.id} className="gac-shadow">
+              <CardContent className="p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Avatar className="h-8 w-8 shrink-0">
+                      <AvatarFallback className="text-[11px] bg-muted">{getInitials(u)}</AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1">
+                        <p className="text-xs font-semibold truncate">{u.full_name || 'Sin nombre'}</p>
+                        {u.pin_code && <KeyRound className="w-3 h-3 text-primary shrink-0" />}
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <Mail className="w-2.5 h-2.5 shrink-0" />
+                        <span className="truncate">{u.email}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <Badge className={cn('text-[10px] px-1.5 py-0 capitalize', getRoleBadgeColor(u.roles?.name))}>
+                      {u.roles?.name || 'Sin rol'}
+                    </Badge>
+                    <Badge variant={u.is_active ? 'default' : 'secondary'} className="text-[10px] px-1.5 py-0">
+                      {u.is_active ? 'Activo' : 'Inactivo'}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="text-[10px] text-muted-foreground">{new Date(u.created_at).toLocaleDateString('es-VE')}</span>
+                  <div className="flex items-center gap-0.5">
+                    {hasPermission('usuarios.edit') && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Generar Magic Link"
+                        onClick={() => handleGenerateMagicLink(u.id)} disabled={generatingLink === u.id}>
+                        {copiedLink === u.id ? <CheckIcon className="w-3 h-3 text-green-600" /> : generatingLink === u.id ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Link2 className="w-3 h-3" />}
+                      </Button>
+                    )}
+                    {hasPermission('usuarios.edit') && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7"
+                        onClick={() => openEditDialog(u)} disabled={u.id === currentProfile?.id}>
+                        <Pencil className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        /* ── DESKTOP TABLE ── */
+        <Card className="gac-shadow">
           <Table className="text-xs">
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
@@ -427,8 +530,8 @@ const AdminUsuarios = () => {
               ))}
             </TableBody>
           </Table>
-        )}
-      </Card>
+        </Card>
+      )}
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent>
@@ -471,18 +574,40 @@ const AdminUsuarios = () => {
 
               {needsDealership(editRoleId) && (
                 <div className="space-y-2">
-                  <Label>Concesionario</Label>
-                  <Select value={editDealershipId} onValueChange={setEditDealershipId}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar concesionario" />
-                    </SelectTrigger>
-                    <SelectContent>
+                  <Label>
+                    {isVendedorRole(editRoleId) ? 'Concesionarios (puede seleccionar varios)' : 'Concesionario'}
+                  </Label>
+                  {isVendedorRole(editRoleId) ? (
+                    <div className="border rounded-md p-2 space-y-1 max-h-40 overflow-y-auto">
                       {dealerships.map(d => (
-                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        <label key={d.id} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-muted/50 cursor-pointer text-sm">
+                          <input
+                            type="checkbox"
+                            checked={editDealershipIds.includes(d.id)}
+                            onChange={() => toggleEditDealership(d.id)}
+                            className="w-3.5 h-3.5 accent-primary"
+                          />
+                          {d.name}
+                        </label>
                       ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">El usuario solo verá reservas y prospectos de este concesionario</p>
+                    </div>
+                  ) : (
+                    <Select value={editDealershipId} onValueChange={setEditDealershipId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccionar concesionario" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {dealerships.map(d => (
+                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    {isVendedorRole(editRoleId)
+                      ? `${editDealershipIds.length} concesionario(s) seleccionado(s) — el vendedor verá sus prospectos en cada uno`
+                      : 'El usuario solo verá reservas y prospectos de este concesionario'}
+                  </p>
                 </div>
               )}
 
@@ -589,22 +714,39 @@ const AdminUsuarios = () => {
             </div>
             {needsDealership(createRoleId) && (
               <div className="space-y-2">
-                <Label>Concesionario {getSelectedRoleName(createRoleId).toLowerCase() === 'concesionario' ? '*' : ''}</Label>
-                <Select value={createDealershipId} onValueChange={setCreateDealershipId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar concesionario" />
-                  </SelectTrigger>
-                  <SelectContent>
+                <Label>
+                  {isVendedorRole(createRoleId) ? 'Concesionarios (puede seleccionar varios)' : 'Concesionario *'}
+                </Label>
+                {isVendedorRole(createRoleId) ? (
+                  <div className="border rounded-md p-2 space-y-1 max-h-40 overflow-y-auto">
                     {dealerships.map(d => (
-                      <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      <label key={d.id} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-muted/50 cursor-pointer text-sm">
+                        <input
+                          type="checkbox"
+                          checked={createDealershipIds.includes(d.id)}
+                          onChange={() => toggleCreateDealership(d.id)}
+                          className="w-3.5 h-3.5 accent-primary"
+                        />
+                        {d.name}
+                      </label>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </div>
+                ) : (
+                  <Select value={createDealershipId} onValueChange={setCreateDealershipId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Seleccionar concesionario" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dealerships.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <p className="text-xs text-muted-foreground">
-                  {getSelectedRoleName(createRoleId).toLowerCase() === 'concesionario'
-                    ? 'El usuario solo verá reservas y prospectos de este concesionario'
-                    : 'El vendedor estará asociado a este concesionario'
-                  }
+                  {isVendedorRole(createRoleId)
+                    ? `${createDealershipIds.length} concesionario(s) seleccionado(s) — el vendedor verá sus prospectos en cada uno`
+                    : 'El usuario solo verá reservas y prospectos de este concesionario'}
                 </p>
               </div>
             )}

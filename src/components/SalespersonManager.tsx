@@ -128,7 +128,7 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl w-full">
           <DialogHeader>
             <DialogTitle className="font-display">Gestionar Vendedores</DialogTitle>
           </DialogHeader>
@@ -145,56 +145,63 @@ const SalespersonManager = ({ open, onOpenChange, onSalespersonsChanged }: Sales
             ) : salespersons.length === 0 ? (
               <div className="p-6 text-center text-sm text-muted-foreground">No hay vendedores registrados</div>
             ) : (
-              <Table className="text-xs">
-                <TableHeader>
-                  <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Teléfono</TableHead>
-                    <TableHead>Usuario</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {salespersons.map(s => (
-                    <TableRow key={s.id} className="[&>td]:py-1.5">
-                      <TableCell className="font-medium">{s.name}</TableCell>
-                      <TableCell>
-                        {s.phone ? (
-                          <div className="flex items-center gap-1 text-muted-foreground">
-                            <Phone className="w-2.5 h-2.5" />{s.phone}
-                          </div>
-                        ) : '-'}
-                      </TableCell>
-                      <TableCell>
-                        {s.profile_id ? (
-                          <div className="flex items-center gap-1 text-muted-foreground">
-                            <UserCheck className="w-2.5 h-2.5 text-primary" />
-                            <span className="truncate max-w-[100px]">{getProfileLabel(s.profile_id) || 'Vinculado'}</span>
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground/50">Sin vincular</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={s.is_active ? 'text-green-700 border-green-300' : 'text-muted-foreground'}>
-                          {s.is_active ? 'Activo' : 'Inactivo'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => openEdit(s)}>
-                            <Pencil className="w-3 h-3" />
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive" onClick={() => confirmDelete(s)}>
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+              <div className="rounded-md border overflow-hidden">
+                <div className="overflow-y-auto max-h-[60vh]">
+                  <Table className="text-xs">
+                    <TableHeader className="sticky top-0 bg-background z-10">
+                      <TableRow className="[&>th]:py-2 [&>th]:text-[11px] [&>th]:font-semibold">
+                        <TableHead className="w-[25%]">Nombre</TableHead>
+                        <TableHead className="w-[22%]">Teléfono</TableHead>
+                        <TableHead className="w-[28%]">Usuario</TableHead>
+                        <TableHead className="w-[13%]">Estado</TableHead>
+                        <TableHead className="w-[12%] text-right">Acc.</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {salespersons.map(s => (
+                        <TableRow key={s.id} className="[&>td]:py-2">
+                          <TableCell className="font-medium truncate max-w-0">
+                            <span className="block truncate">{s.name}</span>
+                          </TableCell>
+                          <TableCell>
+                            {s.phone ? (
+                              <div className="flex items-center gap-1 text-muted-foreground">
+                                <Phone className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate">{s.phone}</span>
+                              </div>
+                            ) : <span className="text-muted-foreground/40">—</span>}
+                          </TableCell>
+                          <TableCell>
+                            {s.profile_id ? (
+                              <div className="flex items-center gap-1 text-muted-foreground">
+                                <UserCheck className="w-2.5 h-2.5 text-primary shrink-0" />
+                                <span className="truncate">{getProfileLabel(s.profile_id) || 'Vinculado'}</span>
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground/40">Sin vincular</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={s.is_active ? 'text-green-700 border-green-300 text-[10px] px-1.5 py-0' : 'text-muted-foreground text-[10px] px-1.5 py-0'}>
+                              {s.is_active ? 'Activo' : 'Inactivo'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-0.5">
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => openEdit(s)}>
+                                <Pencil className="w-3 h-3" />
+                              </Button>
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive" onClick={() => confirmDelete(s)}>
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
             )}
           </div>
         </DialogContent>

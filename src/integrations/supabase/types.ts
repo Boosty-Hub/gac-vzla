@@ -511,6 +511,7 @@ export type Database = {
           notes: string | null
           reservation_date: string
           reservation_time: string
+          satisfaction_rating: number | null
           service_notes: string | null
           service_type: string
           status: string
@@ -531,6 +532,7 @@ export type Database = {
           notes?: string | null
           reservation_date: string
           reservation_time: string
+          satisfaction_rating?: number | null
           service_notes?: string | null
           service_type: string
           status?: string
@@ -551,6 +553,7 @@ export type Database = {
           notes?: string | null
           reservation_date?: string
           reservation_time?: string
+          satisfaction_rating?: number | null
           service_notes?: string | null
           service_type?: string
           status?: string

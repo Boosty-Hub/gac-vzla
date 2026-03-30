@@ -215,7 +215,7 @@ const DealershipProspectos = () => {
       source: pSource || 'concesionario',
       status: pStatus || 'nuevo',
       notes: pNotes.trim() || null,
-      salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : null,
+      salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
       event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     });
     if (error) { toast.error('Error al crear prospecto'); console.error(error); }
@@ -229,7 +229,7 @@ const DealershipProspectos = () => {
     const missing: string[] = [];
     if (!pEmail.trim()) missing.push('Correo electrónico');
     if (!pModel.trim() || pModel === '__none') missing.push('Modelo de interés');
-    if (!isSalesperson && (!pSalesperson || pSalesperson === '__none')) missing.push('Vendedor');
+    if (!isSalesperson && !isVendedor && (!pSalesperson || pSalesperson === '__none')) missing.push('Vendedor');
     if (missing.length > 0) {
       setMissingFields(missing);
       setConfirmOpen(true);
