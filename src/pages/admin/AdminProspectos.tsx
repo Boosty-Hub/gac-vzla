@@ -49,6 +49,7 @@ interface Prospect {
   notes: string | null;
   salesperson: string | null;
   event_name: string | null;
+  'Estado de Vnzla': string | null;
   created_at: string;
   updated_at: string;
   dealerships: { name: string } | null;
@@ -527,6 +528,7 @@ const AdminProspectos = () => {
             {p.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{p.phone}</span>}
             {p.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{p.email}</span>}
             {p.model_interest && <span className="flex items-center gap-1">🚘 {p.model_interest}</span>}
+            {p['Estado de Vnzla'] && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{p['Estado de Vnzla']}</span>}
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -723,6 +725,7 @@ const AdminProspectos = () => {
                   <TableHead>Concesionario</TableHead>
                   <TableHead>Fuente</TableHead>
                   <TableHead>Estado</TableHead>
+                  <TableHead>Estado Vzla</TableHead>
                   <TableHead>Fecha</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
@@ -764,6 +767,9 @@ const AdminProspectos = () => {
                             ))}
                           </SelectContent>
                         </Select>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {p['Estado de Vnzla'] || '-'}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {new Date(p.created_at).toLocaleDateString('es-VE')}
