@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { Car, Search, MapPin, Phone, Clock, CalendarDays, Check, ArrowLeft, Wrench, Hash, ShieldCheck, ShieldX, AlertCircle } from 'lucide-react';
+import { Car, Search, MapPin, Clock, CalendarDays, Check, ArrowLeft, Wrench, Hash, ShieldCheck, ShieldX, AlertCircle, Building, ExternalLink } from 'lucide-react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -34,6 +34,8 @@ interface Dealership {
   state: string | null;
   phone: string | null;
   address: string | null;
+  google_maps_url: string | null;
+  is_service_center: boolean;
 }
 
 interface ServiceType {
@@ -68,6 +70,55 @@ const PublicReserva = () => {
   const [mileage, setMileage] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [occupiedTimes, setOccupiedTimes] = useState<string[]>([]);
+  const [loadingTimes, setLoadingTimes] = useState(false);
+
+  const sortDealerships = (deals: Dealership[]) => {
+    return [...deals].sort((a, b) => {
+      const aIsCentro = a.name.toLowerCase().includes('centro de servicio');
+      const bIsCentro = b.name.toLowerCase().includes('centro de servicio');
+      if (aIsCentro && !bIsCentro) return 1;
+      if (!aIsCentro && bIsCentro) return -1;
+      return a.name.localeCompare(b.name);
+    });
+  };
+
+  const fetchOccupiedTimes = async (dealershipId: string, date: Date) => {
+    if (!dealershipId || !date) return;
+    setLoadingTimes(true);
+    setOccupiedTimes([]);
+    setSelectedTime('');
+    
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const { data } = await supabase
+      .from('reservations')
+      .select('reservation_time')
+      .eq('dealership_id', dealershipId)
+      .eq('reservation_date', dateStr)
+      .neq('status', 'cancelada');
+    
+    if (data) {
+      const times = data.map(r => r.reservation_time.substring(0, 5));
+      setOccupiedTimes(times);
+    }
+    setLoadingTimes(false);
+  };
+
+  const handleDateSelect = (date: Date | undefined) => {
+    setSelectedDate(date);
+    setSelectedTime('');
+    if (date && selectedDealership) {
+      fetchOccupiedTimes(selectedDealership, date);
+    }
+  };
+
+  const handleDealershipSelect = (dealershipId: string) => {
+    setSelectedDealership(dealershipId);
+    setSelectedTime('');
+    if (selectedDate) {
+      fetchOccupiedTimes(dealershipId, selectedDate);
+    }
+  };
 
   const searchPlate = async () => {
     const cleanPlate = plate.trim().toUpperCase();
@@ -91,10 +142,10 @@ const PublicReserva = () => {
       setVehicle(data[0] as VehicleResult);
       // Load dealerships and service types
       const [{ data: deals }, { data: stData }] = await Promise.all([
-        supabase.from('dealerships').select('id, name, city, state, phone, address').eq('is_active', true).order('name'),
+        supabase.from('dealerships').select('id, name, city, state, phone, address, google_maps_url, is_service_center').eq('is_active', true).eq('is_service_center', true),
         supabase.from('service_types').select('id, name, duration_minutes').eq('is_active', true).order('name'),
       ]);
-      setDealerships((deals || []) as Dealership[]);
+      setDealerships(sortDealerships((deals || []) as Dealership[]));
       setServiceTypes((stData || []) as ServiceType[]);
       setMileage(String(data[0].mileage || ''));
       setStep('form');
@@ -238,25 +289,51 @@ const PublicReserva = () => {
 
             {/* Dealership selection */}
             <Card className="gac-shadow">
-              <CardContent className="p-4 space-y-4">
-                <h3 className="font-semibold text-sm flex items-center gap-2"><MapPin className="w-4 h-4 text-primary" /> Concesionario</h3>
-                <div className="grid gap-2">
-                  {dealerships.map(d => (
-                    <button
-                      key={d.id}
-                      onClick={() => setSelectedDealership(d.id)}
-                      className={cn(
-                        "text-left p-3 rounded-lg border transition-all",
-                        selectedDealership === d.id ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/50"
+              <CardContent className="p-4 space-y-3">
+                <h3 className="font-semibold text-sm flex items-center gap-2"><Building className="w-4 h-4 text-primary" /> Concesionario</h3>
+                <Select value={selectedDealership} onValueChange={handleDealershipSelect}>
+                  <SelectTrigger className="h-10 text-sm">
+                    <SelectValue placeholder="Seleccionar concesionario" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {dealerships.map(d => (
+                      <SelectItem key={d.id} value={d.id}>
+                        <div className="flex flex-col items-start">
+                          <span className="font-medium">{d.name}</span>
+                          <span className="text-xs text-muted-foreground">{[d.city, d.state].filter(Boolean).join(', ')}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {selectedDealership && selectedDealershipData && (
+                  <div className="bg-primary/5 rounded-lg p-3 border border-primary/20">
+                    <p className="font-medium text-sm text-primary">{selectedDealershipData.name}</p>
+                    <div className="flex items-center gap-1 mt-1">
+                      {selectedDealershipData.google_maps_url ? (
+                        <a 
+                          href={selectedDealershipData.google_maps_url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-xs text-primary hover:underline flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <MapPin className="w-3 h-3" />
+                          {[selectedDealershipData.city, selectedDealershipData.state].filter(Boolean).join(', ')}
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      ) : (
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {[selectedDealershipData.city, selectedDealershipData.state].filter(Boolean).join(', ')}
+                        </p>
                       )}
-                    >
-                      <p className="font-medium text-sm">{d.name}</p>
-                      <p className="text-xs text-muted-foreground">{[d.city, d.state].filter(Boolean).join(', ')}</p>
-                      {d.address && <p className="text-xs text-muted-foreground">{d.address}</p>}
-                      {d.phone && <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><Phone className="w-3 h-3" />{d.phone}</p>}
-                    </button>
-                  ))}
-                </div>
+                    </div>
+                    {selectedDealershipData.address && (
+                      <p className="text-xs text-muted-foreground mt-0.5">{selectedDealershipData.address}</p>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -284,7 +361,7 @@ const PublicReserva = () => {
                 <Calendar
                   mode="single"
                   selected={selectedDate}
-                  onSelect={setSelectedDate}
+                  onSelect={handleDateSelect}
                   locale={es}
                   disabled={(date) => date < new Date() || date.getDay() === 0}
                   className="rounded-md border mx-auto"
@@ -292,20 +369,43 @@ const PublicReserva = () => {
                 {selectedDate && (
                   <div className="space-y-2">
                     <Label className="text-xs text-muted-foreground">Hora disponible</Label>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {TIME_SLOTS.map(t => (
-                        <button
-                          key={t}
-                          onClick={() => setSelectedTime(t)}
-                          className={cn(
-                            "py-1.5 rounded-md text-xs font-medium border transition-all",
-                            selectedTime === t ? "border-primary bg-primary text-primary-foreground" : "border-border hover:border-primary/50"
-                          )}
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
+                    {loadingTimes ? (
+                      <div className="flex items-center justify-center py-4">
+                        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        <span className="ml-2 text-xs text-muted-foreground">Verificando disponibilidad...</span>
+                      </div>
+                    ) : (
+                      <>
+                        {occupiedTimes.length > 0 && (
+                          <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            Las horas en rojo ya están ocupadas
+                          </p>
+                        )}
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {TIME_SLOTS.map(t => {
+                            const isOccupied = occupiedTimes.includes(t);
+                            return (
+                              <button
+                                key={t}
+                                onClick={() => !isOccupied && setSelectedTime(t)}
+                                disabled={isOccupied}
+                                className={cn(
+                                  "py-1.5 rounded-md text-xs font-medium border transition-all",
+                                  isOccupied 
+                                    ? "border-red-200 bg-red-50 text-red-400 cursor-not-allowed line-through" 
+                                    : selectedTime === t 
+                                      ? "border-primary bg-primary text-primary-foreground" 
+                                      : "border-border hover:border-primary/50"
+                                )}
+                              >
+                                {t}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </CardContent>

@@ -97,6 +97,7 @@ const AdminProspectos = () => {
   const [pName, setPName] = useState<string>(() => getSS().pName || '');
   const [pPhone, setPPhone] = useState<string>(() => getSS().pPhone || '');
   const [pEmail, setPEmail] = useState<string>(() => getSS().pEmail || '');
+  const [pBrand, setPBrand] = useState<string>(() => getSS().pBrand || '');
   const [pModel, setPModel] = useState<string>(() => getSS().pModel || '');
   const [pSource, setPSource] = useState<string>(() => getSS().pSource || 'concesionario');
   const [pStatus, setPStatus] = useState<string>(() => getSS().pStatus || 'nuevo');
@@ -112,9 +113,9 @@ const AdminProspectos = () => {
   useEffect(() => {
     if (!dialogOpen) return;
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName }));
     } catch {}
-  }, [dialogOpen, pDealership, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName]);
+  }, [dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName]);
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -123,7 +124,7 @@ const AdminProspectos = () => {
   // Import XLSX
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; model: string; source: string; status: string; dealership: string; notes: string; salesperson: string; event_name: string; errors: string[] }>>([]);
+  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; dealership: string; notes: string; salesperson: string; event_name: string; fecha: string; errors: string[] }>>([]);
   const [importing, setImporting] = useState(false);
   const [importDealership, setImportDealership] = useState('');
 
@@ -184,7 +185,7 @@ const AdminProspectos = () => {
   const resetForm = () => {
     setEditing(null);
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
-    setPName(''); setPPhone(''); setPEmail(''); setPModel('');
+    setPName(''); setPPhone(''); setPEmail(''); setPBrand(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setPEventName('');
   };
@@ -200,7 +201,15 @@ const AdminProspectos = () => {
     setPName(p.name);
     setPPhone(p.phone || '');
     setPEmail(p.email || '');
-    setPModel(p.model_interest || '');
+    // Extraer marca del model_interest si tiene formato "MARCA MODELO"
+    const modelParts = (p.model_interest || '').split(' ');
+    if (modelParts.length > 1 && ['GAC', 'DFSK'].includes(modelParts[0])) {
+      setPBrand(modelParts[0]);
+      setPModel(modelParts.slice(1).join(' '));
+    } else {
+      setPBrand('');
+      setPModel(p.model_interest || '');
+    }
     setPSource(p.source);
     setPStatus(p.status);
     setPNotes(p.notes || '');
@@ -214,7 +223,9 @@ const AdminProspectos = () => {
     name: pName.trim(),
     phone: pPhone.trim() || null,
     email: pEmail.trim() || null,
-    model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+    model_interest: (pModel.trim() && pModel !== '__none') 
+      ? (pBrand ? `${pBrand} ${pModel.trim()}` : pModel.trim()) 
+      : null,
     source: pSource || 'concesionario',
     status: pStatus || 'nuevo',
     notes: pNotes.trim() || null,
@@ -368,14 +379,14 @@ const AdminProspectos = () => {
   // XLSX Template download
   const downloadTemplate = () => {
     const headers = [
-      'nombre', 'telefono', 'email', 'modelo_interes',
-      'fuente', 'estado', 'notas', 'vendedor', 'nombre_evento',
+      'nombre', 'telefono', 'email', 'marca', 'modelo',
+      'fuente', 'estado', 'notas', 'vendedor', 'nombre_evento', 'fecha',
     ];
     const example = [
-      'Juan Pérez', '+58 412 1234567', 'juan@email.com', 'GAC GS4',
+      'Juan Pérez', '+58 412 1234567', 'juan@email.com', 'GAC', 'GS4',
       PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
       PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
-      'Interesado en SUV', 'Carlos Gómez', '',
+      'Interesado en SUV', 'Carlos Gómez', '', '2026-04-07',
     ];
     const validSources = PROSPECT_SOURCES.map(s => `${s.value} = ${s.label}`).join('\n');
     const validStatuses = PROSPECT_STATUSES.map(s => `${s.name} = ${s.label}`).join('\n');
@@ -388,6 +399,8 @@ const AdminProspectos = () => {
       [''],
       ['INSTRUCCIONES:'],
       ['- nombre y telefono son obligatorios'],
+      ['- marca debe ser GAC o DFSK'],
+      ['- fecha debe estar en formato YYYY-MM-DD o DD/MM/YYYY'],
       ['- fuente y estado deben coincidir exactamente con las claves listadas arriba'],
       ['- nombre_evento solo se usa cuando fuente = evento'],
       ['- No modificar los encabezados de la primera hoja'],
@@ -428,14 +441,38 @@ const AdminProspectos = () => {
           const name = String(row['nombre'] ?? '').trim();
           const phone = String(row['telefono'] ?? '').trim();
           const email = String(row['email'] ?? '').trim();
-          const model = String(row['modelo_interes'] ?? '').trim();
+          const brand = String(row['marca'] ?? '').trim().toUpperCase();
+          const model = String(row['modelo'] ?? row['modelo_interes'] ?? '').trim();
+          let fecha = String(row['fecha'] ?? '').trim();
           let source = String(row['fuente'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
           let status = String(row['estado'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
           const notes = String(row['notas'] ?? '').trim();
           const salesperson = String(row['vendedor'] ?? '').trim();
           const event_name = String(row['nombre_evento'] ?? '').trim();
 
+          // Validar y formatear fecha
+          if (fecha) {
+            // Intentar parsear diferentes formatos de fecha
+            if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+              // Ya está en formato correcto YYYY-MM-DD
+            } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(fecha)) {
+              // Formato DD/MM/YYYY -> convertir a YYYY-MM-DD
+              const [d, m, y] = fecha.split('/');
+              fecha = `${y}-${m}-${d}`;
+            } else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fecha)) {
+              // Formato D/M/YYYY -> convertir a YYYY-MM-DD
+              const parts = fecha.split('/');
+              fecha = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+            } else {
+              errors.push(`Formato de fecha inválido: "${fecha}"`);
+              fecha = '';
+            }
+          }
+
           if (!name) errors.push('Nombre vacío');
+          if (brand && !['GAC', 'DFSK'].includes(brand)) {
+            errors.push(`Marca inválida: "${brand}" (debe ser GAC o DFSK)`);
+          }
           if (!phone) errors.push('Teléfono vacío');
           if (source && !VALID_SOURCES.includes(source)) {
             errors.push(`Fuente inválida: "${source}"`);
@@ -449,7 +486,7 @@ const AdminProspectos = () => {
           if (!status) status = VALID_STATUSES[0] || 'nuevo';
           if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email inválido');
 
-          rows.push({ row: i + 2, name, phone, email, model, source, status, dealership: '', notes, salesperson, event_name, errors });
+          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, dealership: '', notes, salesperson, event_name, fecha, errors });
         });
         setImportRows(rows);
         setImportOpen(true);
@@ -474,18 +511,24 @@ const AdminProspectos = () => {
     if (validRows.length === 0) { toast.error('No hay filas válidas para importar'); return; }
 
     setImporting(true);
-    const payload = validRows.map(r => ({
-      dealership_id: importDealership,
-      name: r.name,
-      phone: r.phone || null,
-      email: r.email || null,
-      model_interest: r.model || null,
-      source: r.source,
-      status: r.status,
-      notes: r.notes || null,
-      salesperson: r.salesperson || null,
-      event_name: r.event_name || null,
-    }));
+    const payload = validRows.map(r => {
+      const modelInterest = r.brand && r.model 
+        ? `${r.brand} ${r.model}` 
+        : (r.brand || r.model || null);
+      return {
+        dealership_id: importDealership,
+        name: r.name,
+        phone: r.phone || null,
+        email: r.email || null,
+        model_interest: modelInterest,
+        source: r.source,
+        status: r.status,
+        notes: r.notes || null,
+        salesperson: r.salesperson || null,
+        event_name: r.event_name || null,
+        created_at: r.fecha || undefined, // Usar fecha del Excel si existe
+      };
+    });
 
     const { error } = await supabase.from('prospects').insert(payload);
     if (error) { toast.error('Error al importar prospectos'); console.error(error); }
@@ -939,7 +982,9 @@ const AdminProspectos = () => {
                       <TableHead>Nombre</TableHead>
                       <TableHead>Teléfono</TableHead>
                       <TableHead>Email</TableHead>
+                      <TableHead>Marca</TableHead>
                       <TableHead>Modelo</TableHead>
+                      <TableHead>Fecha</TableHead>
                       <TableHead>Fuente</TableHead>
                       <TableHead>Estado</TableHead>
                       <TableHead>Vendedor</TableHead>
@@ -958,7 +1003,9 @@ const AdminProspectos = () => {
                           <TableCell className={cn("font-medium", !r.name.trim() && "text-red-600")}>{r.name || <span className="italic text-red-500">vacío</span>}</TableCell>
                           <TableCell>{r.phone || '-'}</TableCell>
                           <TableCell>{r.email || '-'}</TableCell>
+                          <TableCell>{r.brand || '-'}</TableCell>
                           <TableCell>{r.model || '-'}</TableCell>
+                          <TableCell className="text-muted-foreground">{r.fecha || '-'}</TableCell>
                           <TableCell><Badge variant="outline" className="text-[10px] px-1 py-0">{PROSPECT_SOURCES.find(s => s.value === r.source)?.label || r.source}</Badge></TableCell>
                           <TableCell><Badge className={cn("text-[10px] px-1 py-0", PROSPECT_STATUSES.find(s => s.name === r.status)?.color || FALLBACK_STATUS.color)}>{PROSPECT_STATUSES.find(s => s.name === r.status)?.label || r.status}</Badge></TableCell>
                           <TableCell className="text-muted-foreground">{r.salesperson || '-'}</TableCell>
@@ -1024,22 +1071,31 @@ const AdminProspectos = () => {
                 <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Modelo de interés</Label>
-                <Select value={pModel} onValueChange={setPModel}>
+                <Label className="text-xs">Marca</Label>
+                <Select value={pBrand} onValueChange={(v) => { setPBrand(v === '__none' ? '' : v); setPModel(''); }}>
                   <SelectTrigger className="h-9 text-xs">
-                    <SelectValue placeholder="Seleccionar modelo">
-                      {pModel && !prospectModels.some(m => `${m.brand} ${m.name}` === pModel) ? pModel : undefined}
+                    <SelectValue placeholder="Seleccionar marca" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin marca</SelectItem>
+                    {prospectBrands.map(brand => (
+                      <SelectItem key={brand} value={brand}>{brand}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Modelo de interés</Label>
+                <Select value={pModel} onValueChange={setPModel} disabled={!pBrand}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder={pBrand ? "Seleccionar modelo" : "Primero seleccione marca"}>
+                      {pModel && !prospectModels.some(m => m.name === pModel) ? pModel : undefined}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none">Sin modelo</SelectItem>
-                    {prospectBrands.map(brand => (
-                      <SelectGroup key={brand}>
-                        <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
-                        {prospectModels.filter(m => m.brand === brand).map(m => (
-                          <SelectItem key={m.id} value={`${m.brand} ${m.name}`}>{m.brand} {m.name}</SelectItem>
-                        ))}
-                      </SelectGroup>
+                    {prospectModels.filter(m => m.brand === pBrand).map(m => (
+                      <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

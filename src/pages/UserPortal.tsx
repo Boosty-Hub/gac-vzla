@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
-import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText } from 'lucide-react';
+import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink } from 'lucide-react';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
@@ -72,6 +72,8 @@ interface Dealership {
   state: string | null;
   phone: string | null;
   address: string | null;
+  google_maps_url: string | null;
+  is_service_center: boolean;
 }
 
 interface ServiceType {
@@ -164,10 +166,51 @@ const UserPortal = () => {
   const [selectedTime, setSelectedTime] = useState('');
   const [mileage, setMileage] = useState('');
   const [notes, setNotes] = useState('');
+  const [occupiedTimes, setOccupiedTimes] = useState<string[]>([]);
+  const [loadingTimes, setLoadingTimes] = useState(false);
 
   const handleSignOut = async () => {
     try { await signOut(); } catch (e) { console.error(e); }
     finally { navigate('/login'); }
+  };
+
+  const sortDealerships = (deals: Dealership[]) => {
+    return [...deals].sort((a, b) => {
+      const aIsCentro = a.name.toLowerCase().includes('centro de servicio');
+      const bIsCentro = b.name.toLowerCase().includes('centro de servicio');
+      if (aIsCentro && !bIsCentro) return 1;
+      if (!aIsCentro && bIsCentro) return -1;
+      return a.name.localeCompare(b.name);
+    });
+  };
+
+  const fetchOccupiedTimes = async (dealershipId: string, date: Date) => {
+    if (!dealershipId || !date) return;
+    setLoadingTimes(true);
+    setOccupiedTimes([]);
+    setSelectedTime('');
+    
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const { data } = await supabase
+      .from('reservations')
+      .select('reservation_time')
+      .eq('dealership_id', dealershipId)
+      .eq('reservation_date', dateStr)
+      .neq('status', 'cancelada');
+    
+    if (data) {
+      const times = data.map(r => r.reservation_time.substring(0, 5));
+      setOccupiedTimes(times);
+    }
+    setLoadingTimes(false);
+  };
+
+  const handleDateSelectReserva = (date: Date | undefined) => {
+    setSelectedDate(date);
+    setSelectedTime('');
+    if (date && selectedDealership) {
+      fetchOccupiedTimes(selectedDealership, date);
+    }
   };
 
   // Resolve client from profile
@@ -223,10 +266,10 @@ const UserPortal = () => {
       // Fetch dealerships
       const { data: deals } = await supabase
         .from('dealerships')
-        .select('id, name, city, state, phone, address')
+        .select('id, name, city, state, phone, address, google_maps_url, is_service_center')
         .eq('is_active', true)
-        .order('name');
-      setDealerships((deals || []) as Dealership[]);
+        .eq('is_service_center', true);
+      setDealerships(sortDealerships((deals || []) as Dealership[]));
 
       // Fetch service types
       const { data: stData } = await supabase
@@ -307,6 +350,7 @@ const UserPortal = () => {
     setSelectedTime('');
     setMileage('');
     setNotes('');
+    setOccupiedTimes([]);
     setReservaConfirmada(false);
     setPaso(1);
     setVista('reservar');
@@ -596,8 +640,23 @@ const UserPortal = () => {
                     <CardContent className="p-4">
                       <h3 className="font-display font-semibold text-base">{d.name}</h3>
                       <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                        {d.city && <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-primary shrink-0" />{d.city}{d.state ? `, ${d.state}` : ''}</div>}
-                        {d.phone && <div className="flex items-center gap-2"><Phone className="w-3.5 h-3.5 text-primary shrink-0" />{d.phone}</div>}
+                        {d.city && (
+                        d.google_maps_url ? (
+                          <a 
+                            href={d.google_maps_url} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2 text-primary hover:underline"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MapPin className="w-3.5 h-3.5 shrink-0" />
+                            {d.city}{d.state ? `, ${d.state}` : ''}
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        ) : (
+                          <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-primary shrink-0" />{d.city}{d.state ? `, ${d.state}` : ''}</div>
+                        )
+                      )}
                       </div>
                       <Button className="w-full mt-3 gac-gradient text-primary-foreground" size="sm" disabled={vehicles.length === 0}>
                         Agendar Servicio
@@ -680,7 +739,7 @@ const UserPortal = () => {
                     <Calendar
                       mode="single"
                       selected={selectedDate}
-                      onSelect={setSelectedDate}
+                      onSelect={handleDateSelectReserva}
                       locale={es}
                       disabled={(date) => date < new Date() || date.getDay() === 0}
                       className="rounded-lg border p-3 pointer-events-auto"
@@ -693,20 +752,43 @@ const UserPortal = () => {
                     <p className="text-xs text-muted-foreground mb-2">
                       {format(selectedDate, "EEEE d 'de' MMMM", { locale: es })}
                     </p>
-                    <div className="grid grid-cols-4 gap-2">
-                      {TIME_SLOTS.map(h => (
-                        <button
-                          key={h}
-                          onClick={() => setSelectedTime(h)}
-                          className={cn(
-                            "py-2 px-1 text-sm rounded-lg border transition-all font-medium",
-                            selectedTime === h ? "gac-gradient text-primary-foreground border-transparent" : "hover:border-primary"
-                          )}
-                        >
-                          {h}
-                        </button>
-                      ))}
-                    </div>
+                    {loadingTimes ? (
+                      <div className="flex items-center justify-center py-4">
+                        <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        <span className="ml-2 text-xs text-muted-foreground">Verificando disponibilidad...</span>
+                      </div>
+                    ) : (
+                      <>
+                        {occupiedTimes.length > 0 && (
+                          <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            Las horas en rojo ya están ocupadas
+                          </p>
+                        )}
+                        <div className="grid grid-cols-4 gap-2">
+                          {TIME_SLOTS.map(h => {
+                            const isOccupied = occupiedTimes.includes(h);
+                            return (
+                              <button
+                                key={h}
+                                onClick={() => !isOccupied && setSelectedTime(h)}
+                                disabled={isOccupied}
+                                className={cn(
+                                  "py-2 px-1 text-sm rounded-lg border transition-all font-medium",
+                                  isOccupied 
+                                    ? "border-red-200 bg-red-50 text-red-400 cursor-not-allowed line-through" 
+                                    : selectedTime === h 
+                                      ? "gac-gradient text-primary-foreground border-transparent" 
+                                      : "hover:border-primary"
+                                )}
+                              >
+                                {h}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
                 <div className="flex gap-2">

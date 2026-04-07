@@ -12,7 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2, Trash2 } from 'lucide-react';
+import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2, Trash2, Navigation } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Dealership {
@@ -31,6 +31,7 @@ interface Dealership {
   email: string | null;
   instagram: string | null;
   website: string | null;
+  google_maps_url: string | null;
   created_at: string;
 }
 
@@ -64,6 +65,7 @@ const AdminConcesionarios = () => {
   const [formEmail, setFormEmail] = useState('');
   const [formInstagram, setFormInstagram] = useState('');
   const [formWebsite, setFormWebsite] = useState('');
+  const [formGoogleMapsUrl, setFormGoogleMapsUrl] = useState('');
 
   const fetchDealerships = async () => {
     setLoading(true);
@@ -92,7 +94,7 @@ const AdminConcesionarios = () => {
     setEditing(null);
     setFormName(''); setFormCity(''); setFormState(''); setFormAddress('');
     setFormPhone(''); setFormSchedule('8:00 AM - 5:00 PM'); setFormBays('3'); setFormIsActive(true);
-    setFormBrand(['GAC']); setFormIsServiceCenter(false); setFormEmail(''); setFormInstagram(''); setFormWebsite('');
+    setFormBrand(['GAC']); setFormIsServiceCenter(false); setFormEmail(''); setFormInstagram(''); setFormWebsite(''); setFormGoogleMapsUrl('');
     setDialogOpen(true);
   };
 
@@ -111,6 +113,7 @@ const AdminConcesionarios = () => {
     setFormEmail(d.email || '');
     setFormInstagram(d.instagram || '');
     setFormWebsite(d.website || '');
+    setFormGoogleMapsUrl(d.google_maps_url || '');
     setDialogOpen(true);
   };
 
@@ -134,6 +137,7 @@ const AdminConcesionarios = () => {
       email: formEmail.trim() || null,
       instagram: formInstagram.trim() || null,
       website: formWebsite.trim() || null,
+      google_maps_url: formGoogleMapsUrl.trim() || null,
     };
 
     if (editing) {
@@ -331,6 +335,14 @@ const AdminConcesionarios = () => {
                     <span>{detailDealer.website}</span>
                   </div>
                 )}
+                {detailDealer.google_maps_url && (
+                  <div className="flex items-center gap-2">
+                    <Navigation className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <a href={detailDealer.google_maps_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline truncate max-w-[300px]">
+                      Ver en Google Maps
+                    </a>
+                  </div>
+                )}
                 {detailDealer.schedule && (
                   <div className="flex items-center gap-2">
                     <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
@@ -424,6 +436,13 @@ const AdminConcesionarios = () => {
                 <Label>Sitio Web</Label>
                 <Input value={formWebsite} onChange={e => setFormWebsite(e.target.value)} placeholder="www.ejemplo.com" />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Navigation className="w-3.5 h-3.5" /> Ubicación Google Maps
+              </Label>
+              <Input value={formGoogleMapsUrl} onChange={e => setFormGoogleMapsUrl(e.target.value)} placeholder="https://maps.google.com/..." />
+              <p className="text-xs text-muted-foreground">Pega el enlace de Google Maps para que los clientes puedan ver la ubicación</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
