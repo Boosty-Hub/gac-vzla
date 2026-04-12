@@ -97,6 +97,9 @@ const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
   return `${h.toString().padStart(2, '0')}:${m}`;
 }).filter(t => t !== '12:00' && t !== '12:30');
 
+const DR_LS_KEY = 'dealership_reservas_create_form';
+const getDrLS = () => { try { return JSON.parse(localStorage.getItem(DR_LS_KEY) || '{}'); } catch { return {}; } };
+
 const DealershipReservas = () => {
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -124,20 +127,20 @@ const DealershipReservas = () => {
   const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
 
-  // Create dialog
-  const [createOpen, setCreateOpen] = useState(false);
+  // Create dialog (initialized from localStorage to survive page refresh)
+  const [createOpen, setCreateOpenRaw] = useState<boolean>(() => getDrLS().createOpen === true);
   const [saving, setSaving] = useState(false);
-  const [plateSearch, setPlateSearch] = useState('');
-  const [plateResult, setPlateResult] = useState<PlateResult | null>(null);
-  const [plateSearched, setPlateSearched] = useState(false);
+  const [plateSearch, setPlateSearch] = useState<string>(() => getDrLS().plateSearch || '');
+  const [plateResult, setPlateResult] = useState<PlateResult | null>(() => getDrLS().plateResult || null);
+  const [plateSearched, setPlateSearched] = useState<boolean>(() => getDrLS().plateSearched === true);
   const [searchingPlate, setSearchingPlate] = useState(false);
-  const [fDate, setFDate] = useState('');
-  const [fTime, setFTime] = useState('');
-  const [fService, setFService] = useState('');
-  const [fMileage, setFMileage] = useState('0');
-  const [fNotes, setFNotes] = useState('');
-  const [fWalkinName, setFWalkinName] = useState('');
-  const [fWalkinPhone, setFWalkinPhone] = useState('');
+  const [fDate, setFDate] = useState<string>(() => getDrLS().fDate || '');
+  const [fTime, setFTime] = useState<string>(() => getDrLS().fTime || '');
+  const [fService, setFService] = useState<string>(() => getDrLS().fService || '');
+  const [fMileage, setFMileage] = useState<string>(() => getDrLS().fMileage || '0');
+  const [fNotes, setFNotes] = useState<string>(() => getDrLS().fNotes || '');
+  const [fWalkinName, setFWalkinName] = useState<string>(() => getDrLS().fWalkinName || '');
+  const [fWalkinPhone, setFWalkinPhone] = useState<string>(() => getDrLS().fWalkinPhone || '');
 
   const fetchReservations = async () => {
     if (!selectedDealership) return;
@@ -171,6 +174,20 @@ const DealershipReservas = () => {
   }, []);
 
   const hoy = new Date().toISOString().split('T')[0];
+
+  // Wrapper clears LS when dialog closes
+  const setCreateOpen = (open: boolean) => {
+    setCreateOpenRaw(open);
+    if (!open) { try { localStorage.removeItem(DR_LS_KEY); } catch {} }
+  };
+
+  // Persist create-form to localStorage so a page refresh restores the dialog
+  useEffect(() => {
+    if (!createOpen) return;
+    try {
+      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, plateSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone }));
+    } catch {}
+  }, [createOpen, plateSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone]);
 
   const filteredReservations = reservations.filter(r => {
     if (resStatusFilter !== 'todos' && r.status !== resStatusFilter) return false;

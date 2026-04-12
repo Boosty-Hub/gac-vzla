@@ -142,12 +142,34 @@ const AdminConcesionarios = () => {
 
     if (editing) {
       const { error } = await supabase.from('dealerships').update(payload).eq('id', editing.id);
-      if (error) { toast.error('Error al actualizar'); console.error(error); }
-      else { toast.success('Concesionario actualizado'); setDialogOpen(false); fetchDealerships(); }
+      if (error) {
+        const msg = error.message || error.details || 'Error desconocido';
+        if (error.code === '42501' || msg.toLowerCase().includes('policy') || msg.toLowerCase().includes('permission')) {
+          toast.error('Sin permisos para actualizar este concesionario');
+        } else {
+          toast.error(`Error al actualizar: ${msg}`);
+        }
+        console.error('[AdminConcesionarios] update error:', error);
+      } else {
+        toast.success('Concesionario actualizado');
+        setDialogOpen(false);
+        fetchDealerships();
+      }
     } else {
       const { error } = await supabase.from('dealerships').insert(payload);
-      if (error) { toast.error('Error al crear'); console.error(error); }
-      else { toast.success('Concesionario creado'); setDialogOpen(false); fetchDealerships(); }
+      if (error) {
+        const msg = error.message || error.details || 'Error desconocido';
+        if (error.code === '42501' || msg.toLowerCase().includes('policy') || msg.toLowerCase().includes('permission')) {
+          toast.error('Sin permisos para crear concesionarios');
+        } else {
+          toast.error(`Error al crear: ${msg}`);
+        }
+        console.error('[AdminConcesionarios] insert error:', error);
+      } else {
+        toast.success('Concesionario creado');
+        setDialogOpen(false);
+        fetchDealerships();
+      }
     }
     setSaving(false);
   };

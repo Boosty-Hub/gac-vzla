@@ -58,6 +58,8 @@ interface Prospect {
 
 const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 'bg-gray-100 text-gray-800', sort_order: 0, is_active: true };
 
+const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
+
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
   const { sources: PROSPECT_SOURCES, fetchSources: refetchSources } = useProspectSources();
@@ -82,6 +84,7 @@ const AdminProspectos = () => {
   const [statusFilter, setStatusFilter] = useState('todos');
   const [sourceFilter, setSourceFilter] = useState('todos');
   const [salespersonFilter, setSalespersonFilter] = useState('todos');
+  const [estadoVzlaFilter, setEstadoVzlaFilter] = useState('todos');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
 
@@ -104,6 +107,7 @@ const AdminProspectos = () => {
   const [pNotes, setPNotes] = useState<string>(() => getSS().pNotes || '');
   const [pSalesperson, setPSalesperson] = useState<string>(() => getSS().pSalesperson || '');
   const [pEventName, setPEventName] = useState<string>(() => getSS().pEventName || '');
+  const [pEstadoVzla, setPEstadoVzla] = useState<string>(() => getSS().pEstadoVzla || '');
 
   const setDialogOpen = (open: boolean) => {
     setDialogOpenRaw(open);
@@ -113,7 +117,7 @@ const AdminProspectos = () => {
   useEffect(() => {
     if (!dialogOpen) return;
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla }));
     } catch {}
   }, [dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName]);
 
@@ -167,6 +171,7 @@ const AdminProspectos = () => {
     if (statusFilter !== 'todos' && p.status !== statusFilter) return false;
     if (sourceFilter !== 'todos' && p.source !== sourceFilter) return false;
     if (salespersonFilter !== 'todos' && (p.salesperson || '') !== salespersonFilter) return false;
+    if (estadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== estadoVzlaFilter) return false;
     if (fechaDesde && p.created_at.slice(0, 10) < fechaDesde) return false;
     if (fechaHasta && p.created_at.slice(0, 10) > fechaHasta) return false;
     if (search.trim()) {
@@ -187,7 +192,7 @@ const AdminProspectos = () => {
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
     setPName(''); setPPhone(''); setPEmail(''); setPBrand(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
-    setPEventName('');
+    setPEventName(''); setPEstadoVzla('');
   };
 
   const openCreate = () => {
@@ -215,6 +220,7 @@ const AdminProspectos = () => {
     setPNotes(p.notes || '');
     setPSalesperson(p.salesperson || '');
     setPEventName(p.event_name || '');
+    setPEstadoVzla(p['Estado de Vnzla'] || '');
     setDialogOpen(true);
   };
 
@@ -231,6 +237,7 @@ const AdminProspectos = () => {
     notes: pNotes.trim() || null,
     salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson : null,
     event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
+    'Estado de Vnzla': pEstadoVzla.trim() || null,
   });
 
   const checkDuplicatePhone = async (phone: string, excludeId?: string): Promise<boolean> => {
@@ -376,6 +383,37 @@ const AdminProspectos = () => {
     setSendingWa(null);
   };
 
+  // XLSX Export
+  const exportToXLSX = () => {
+    if (filteredProspects.length === 0) { toast.error('No hay prospectos para exportar'); return; }
+    const BRANDS_LIST = ['GAC', 'DFSK', 'SHINERAY'];
+    const rows = filteredProspects.map(p => {
+      const parts = (p.model_interest || '').split(' ');
+      const brand = (parts.length > 1 && BRANDS_LIST.includes(parts[0])) ? parts[0] : '';
+      const model = brand ? parts.slice(1).join(' ') : (p.model_interest || '');
+      return {
+        nombre: p.name,
+        telefono: p.phone || '',
+        email: p.email || '',
+        marca: brand,
+        modelo: model,
+        fuente: PROSPECT_SOURCES.find(s => s.value === p.source)?.label || p.source,
+        estado: PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
+        vendedor: p.salesperson || '',
+        concesionario: p.dealerships?.name || '',
+        estado_vzla: p['Estado de Vnzla'] || '',
+        notas: p.notes || '',
+        fecha: new Date(p.created_at).toLocaleDateString('es-VE'),
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:18},{wch:20},{wch:28},{wch:18},{wch:35},{wch:15}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
+    XLSX.writeFile(wb, `prospectos_${new Date().toISOString().slice(0,10)}.xlsx`);
+    toast.success(`${rows.length} prospecto(s) exportados`);
+  };
+
   // XLSX Template download
   const downloadTemplate = () => {
     const headers = [
@@ -400,7 +438,10 @@ const AdminProspectos = () => {
       ['INSTRUCCIONES:'],
       ['- nombre y telefono son obligatorios'],
       ['- marca debe ser GAC o DFSK'],
-      ['- fecha debe estar en formato YYYY-MM-DD o DD/MM/YYYY'],
+      ['- FECHA: usa la fecha real del prospecto en formato YYYY-MM-DD o DD/MM/YYYY'],
+      ['  Ejemplo: 2026-01-15 o 15/01/2026'],
+      ['  Si se deja vacía, se usará la fecha de importación (hoy)'],
+      ['  IMPORTANTE: la fecha del Excel es la que quedará registrada en el sistema'],
       ['- fuente y estado deben coincidir exactamente con las claves listadas arriba'],
       ['- nombre_evento solo se usa cuando fuente = evento'],
       ['- No modificar los encabezados de la primera hoja'],
@@ -410,7 +451,19 @@ const AdminProspectos = () => {
 
     // Main data sheet
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = headers.map((h, i) => ({ wch: [25, 20, 28, 20, 35, 35, 30, 20, 20][i] }));
+    ws['!cols'] = [
+      { wch: 25 }, // nombre
+      { wch: 20 }, // telefono
+      { wch: 28 }, // email
+      { wch: 12 }, // marca
+      { wch: 25 }, // modelo
+      { wch: 25 }, // fuente
+      { wch: 20 }, // estado
+      { wch: 30 }, // notas
+      { wch: 20 }, // vendedor
+      { wch: 20 }, // nombre_evento
+      { wch: 18 }, // fecha
+    ];
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
 
     // Instructions sheet
@@ -629,8 +682,11 @@ const AdminProspectos = () => {
           </Button>
           {canCreate && (
             <>
+              <Button size="sm" variant="outline" onClick={exportToXLSX} className="gap-1 hidden sm:flex">
+                <Download className="w-3.5 h-3.5" /> Exportar
+              </Button>
               <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1 hidden sm:flex">
-                <Download className="w-3.5 h-3.5" /> Plantilla
+                <FileText className="w-3.5 h-3.5" /> Plantilla
               </Button>
               <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1 hidden sm:flex">
                 <Upload className="w-3.5 h-3.5" /> Importar XLSX
@@ -716,6 +772,13 @@ const AdminProspectos = () => {
                 {salespersons.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
               </SelectContent>
             </Select>
+            <Select value={estadoVzlaFilter} onValueChange={setEstadoVzlaFilter}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Estado (Vzla)" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los estados</SelectItem>
+                {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           {/* Date range */}
           <div className="flex items-center gap-2">
@@ -727,8 +790,8 @@ const AdminProspectos = () => {
               <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
               <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
             </div>
-            {(fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos') && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setSearch(''); }}>
+            {(fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setSearch(''); }}>
                 Limpiar
               </Button>
             )}
@@ -763,6 +826,7 @@ const AdminProspectos = () => {
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
+                  <TableHead>Marca</TableHead>
                   <TableHead>Modelo</TableHead>
                   <TableHead>Vendedor</TableHead>
                   <TableHead>Concesionario</TableHead>
@@ -784,7 +848,8 @@ const AdminProspectos = () => {
                         {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
                         {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                       </TableCell>
-                      <TableCell>{p.model_interest || '-'}</TableCell>
+                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); return (parts.length > 1 && ['GAC','DFSK','SHINERAY'].includes(parts[0])) ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{parts[0]}</Badge> : '-'; })()}</TableCell>
+                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); return (parts.length > 1 && ['GAC','DFSK','SHINERAY'].includes(parts[0])) ? parts.slice(1).join(' ') : (p.model_interest || '-'); })()}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {salespersons.find(sp => sp.name === (p as any).salesperson)?.name || (p as any).salesperson || '-'}
                       </TableCell>
@@ -1128,6 +1193,16 @@ const AdminProspectos = () => {
                     {salespersons.map(sp => (
                       <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Estado de Venezuela</Label>
+                <Select value={pEstadoVzla} onValueChange={v => setPEstadoVzla(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin estado</SelectItem>
+                    {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

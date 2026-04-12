@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,10 +10,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ResponsiveModal, ResponsiveModalHeader, ResponsiveModalTitle, ResponsiveModalFooter } from '@/components/ui/responsive-modal';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Search, Users, Phone, Mail, ExternalLink, MessageCircle, Activity } from 'lucide-react';
+import { Plus, Search, Users, Phone, Mail, ExternalLink, MessageCircle, Activity, Pencil, Download, Upload, FileText, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
@@ -26,6 +28,8 @@ import { useProspectSources } from '@/hooks/useProspectSources';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 
 
+const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
+
 interface Prospect {
   id: string;
   dealership_id: string;
@@ -37,6 +41,7 @@ interface Prospect {
   status: string;
   notes: string | null;
   salesperson: string | null;
+  'Estado de Vnzla': string | null;
   created_at: string;
 }
 
@@ -57,6 +62,7 @@ const DealershipProspectos = () => {
   const [prosSearch, setProsSearch] = useState('');
   const [prosStatusFilter, setProsStatusFilter] = useState('todos');
   const [prosSourceFilter, setProsSourceFilter] = useState('todos');
+  const [prosEstadoVzlaFilter, setProsEstadoVzlaFilter] = useState('todos');
   const [prosFechaDesde, setProsFechaDesde] = useState('');
   const [prosFechaHasta, setProsFechaHasta] = useState('');
 
@@ -64,6 +70,7 @@ const DealershipProspectos = () => {
   const SS_KEY = 'dealership_prospectos_dialog';
   const getSS = () => { try { return JSON.parse(sessionStorage.getItem(SS_KEY) || '{}'); } catch { return {}; } };
   const [dialogOpen, setDialogOpenRaw] = useState<boolean>(() => !!getSS().dialogOpen);
+  const [editingProspect, setEditingProspect] = useState<Prospect | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -76,18 +83,25 @@ const DealershipProspectos = () => {
   const [pNotes, setPNotes] = useState<string>(() => getSS().pNotes || '');
   const [pSalesperson, setPSalesperson] = useState<string>(() => getSS().pSalesperson || '');
   const [pEventName, setPEventName] = useState<string>(() => getSS().pEventName || '');
+  const [pEstadoVzla, setPEstadoVzla] = useState<string>(() => getSS().pEstadoVzla || '');
 
   const setDialogOpen = (open: boolean) => {
     setDialogOpenRaw(open);
-    if (!open) { try { sessionStorage.removeItem(SS_KEY); } catch {} }
+    if (!open) { setEditingProspect(null); try { sessionStorage.removeItem(SS_KEY); } catch {} }
   };
 
   useEffect(() => {
     if (!dialogOpen) return;
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla }));
     } catch {}
   }, [dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName]);
+  // Import/Export
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; notes: string; salesperson: string; event_name: string; estado_vzla: string; fecha: string; errors: string[] }>>([]);
+  const [importing, setImporting] = useState(false);
+
   const [greetingTemplate, setGreetingTemplate] = useState<string>('Hola {{prospecto}}, ¡es un gusto saludarte! Mi nombre es {{vendedor}}, seré el asesor de ventas encargado de brindarte información de nuestros vehículos. ¿En qué puedo ayudarte hoy? 🚗');
   const [updatesSidebarProspect, setUpdatesSidebarProspect] = useState<Prospect | null>(null);
 
@@ -154,6 +168,7 @@ const DealershipProspectos = () => {
   const filteredProspects = prospects.filter(p => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
     if (prosSourceFilter !== 'todos' && p.source !== prosSourceFilter) return false;
+    if (prosEstadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== prosEstadoVzlaFilter) return false;
     if (prosFechaDesde && p.created_at.slice(0, 10) < prosFechaDesde) return false;
     if (prosFechaHasta && p.created_at.slice(0, 10) > prosFechaHasta) return false;
     if (prosSearch.trim()) {
@@ -175,16 +190,161 @@ const DealershipProspectos = () => {
       ? profile.full_name
       : '';
 
+  const BRANDS_LIST = ['GAC', 'DFSK', 'SHINERAY'];
+
+  const exportToXLSX = () => {
+    if (prospects.length === 0) { toast.error('No hay prospectos para exportar'); return; }
+    const rows = prospects.map(p => {
+      const parts = (p.model_interest || '').split(' ');
+      const brand = (parts.length > 1 && BRANDS_LIST.includes(parts[0])) ? parts[0] : '';
+      const model = brand ? parts.slice(1).join(' ') : (p.model_interest || '');
+      return {
+        nombre: p.name,
+        telefono: p.phone || '',
+        email: p.email || '',
+        marca: brand,
+        modelo: model,
+        fuente: PROSPECT_SOURCES.find(s => s.value === p.source)?.label || p.source,
+        estado: PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
+        vendedor: p.salesperson || '',
+        estado_vzla: p['Estado de Vnzla'] || '',
+        notas: p.notes || '',
+        fecha: new Date(p.created_at).toLocaleDateString('es-VE'),
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:18},{wch:20},{wch:18},{wch:35},{wch:15}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
+    XLSX.writeFile(wb, `prospectos_${new Date().toISOString().slice(0,10)}.xlsx`);
+    toast.success(`${rows.length} prospecto(s) exportados`);
+  };
+
+  const downloadTemplate = () => {
+    const headers = ['nombre','telefono','email','marca','modelo','fuente','estado','notas','vendedor','nombre_evento','estado_vzla','fecha'];
+    const example = ['Juan Pérez','+58 412 1234567','juan@email.com','GAC','GS4',
+      PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
+      PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
+      'Interesado en SUV', autoSalesperson || 'Carlos Gómez', '', '', '2026-04-07'];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, example]);
+    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:25},{wch:20},{wch:30},{wch:20},{wch:20},{wch:18},{wch:18}];
+    const wsNotes = XLSX.utils.aoa_to_sheet([
+      ['INSTRUCCIONES:'],
+      ['- nombre y telefono son obligatorios'],
+      ['- marca debe ser GAC o DFSK'],
+      ['- FECHA: usa la fecha real del prospecto (YYYY-MM-DD o DD/MM/YYYY)'],
+      ['  Si se deja vacía se usa la fecha de hoy'],
+      ['- estado_vzla: nombre del estado venezolano (ej: Distrito Capital, Miranda)'],
+    ]);
+    wsNotes['!cols'] = [{wch:65}];
+    XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
+    XLSX.utils.book_append_sheet(wb, wsNotes, 'Instrucciones');
+    XLSX.writeFile(wb, 'plantilla_prospectos.xlsx');
+  };
+
+  const parseXLSX = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = new Uint8Array(ev.target?.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const raw = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: '' });
+        if (raw.length === 0) { toast.error('El archivo no contiene filas de datos'); return; }
+        const VALID_SOURCES = PROSPECT_SOURCES.map(s => s.value);
+        const VALID_STATUSES = PROSPECT_STATUSES.map(s => s.name);
+        const rows: typeof importRows = [];
+        raw.forEach((row, i) => {
+          const errors: string[] = [];
+          const name = String(row['nombre'] ?? '').trim();
+          const phone = String(row['telefono'] ?? '').trim();
+          const email = String(row['email'] ?? '').trim();
+          const brand = String(row['marca'] ?? '').trim().toUpperCase();
+          const model = String(row['modelo'] ?? '').trim();
+          const notes = String(row['notas'] ?? '').trim();
+          const salesperson = String(row['vendedor'] ?? '').trim();
+          const event_name = String(row['nombre_evento'] ?? '').trim();
+          const estado_vzla = String(row['estado_vzla'] ?? '').trim();
+          let source = String(row['fuente'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+          let status = String(row['estado'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
+          let fecha = String(row['fecha'] ?? '').trim();
+          if (fecha) {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) { /* ok */ }
+            else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(fecha)) {
+              const parts = fecha.split('/');
+              fecha = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
+            } else { errors.push(`Fecha inválida: "${fecha}"`); fecha = ''; }
+          }
+          if (!name) errors.push('Nombre vacío');
+          if (!phone) errors.push('Teléfono vacío');
+          if (brand && !BRANDS_LIST.includes(brand)) errors.push(`Marca inválida: "${brand}"`);
+          if (source && !VALID_SOURCES.includes(source)) { errors.push(`Fuente inválida: "${source}"`); source = VALID_SOURCES[0] || 'concesionario'; }
+          if (!source) source = VALID_SOURCES[0] || 'concesionario';
+          if (status && !VALID_STATUSES.includes(status)) { errors.push(`Estado inválido: "${status}"`); status = VALID_STATUSES[0] || 'nuevo'; }
+          if (!status) status = VALID_STATUSES[0] || 'nuevo';
+          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, notes, salesperson, event_name, estado_vzla, fecha, errors });
+        });
+        setImportRows(rows);
+        setImportOpen(true);
+      } catch (err) {
+        toast.error('Error al leer el archivo. Use la plantilla correcta.');
+        console.error(err);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleBulkImport = async () => {
+    if (!selectedDealership) { toast.error('No hay concesionario seleccionado'); return; }
+    const validRows = importRows.filter(r => r.name.trim() && r.phone.trim());
+    if (validRows.length === 0) { toast.error('No hay filas válidas para importar'); return; }
+    setImporting(true);
+    const payload = validRows.map(r => ({
+      dealership_id: selectedDealership,
+      name: r.name,
+      phone: r.phone || null,
+      email: r.email || null,
+      model_interest: r.brand && r.model ? `${r.brand} ${r.model}` : (r.brand || r.model || null),
+      source: r.source,
+      status: r.status,
+      notes: r.notes || null,
+      salesperson: r.salesperson || autoSalesperson || null,
+      event_name: r.event_name || null,
+      'Estado de Vnzla': r.estado_vzla || null,
+      created_at: r.fecha || undefined,
+    }));
+    const { error } = await supabase.from('prospects').insert(payload);
+    if (error) { toast.error('Error al importar: ' + error.message); console.error(error); }
+    else { toast.success(`${validRows.length} prospecto(s) importados`); setImportOpen(false); setImportRows([]); fetchProspects(); }
+    setImporting(false);
+  };
+
   const resetForm = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
     setPSalesperson(autoSalesperson);
-    setPEventName('');
+    setPEventName(''); setPEstadoVzla('');
   };
 
   const openDialog = () => {
     resetForm();
     setDialogOpen(true);
+  };
+
+  const openEditDialog = (p: Prospect) => {
+    setEditingProspect(p);
+    setPName(p.name);
+    setPPhone(p.phone || '');
+    setPEmail(p.email || '');
+    setPModel(p.model_interest || '');
+    setPSource(p.source || 'concesionario');
+    setPStatus(p.status || 'nuevo');
+    setPNotes(p.notes || '');
+    setPSalesperson(p.salesperson || autoSalesperson);
+    setPEventName('');
+    setPEstadoVzla(p['Estado de Vnzla'] || '');
+    setDialogOpenRaw(true);
   };
 
   const checkDuplicatePhone = async (phone: string): Promise<boolean> => {
@@ -202,24 +362,42 @@ const DealershipProspectos = () => {
   const doSave = async () => {
     setSaving(true);
     const phone = pPhone.trim();
-    if (phone) {
-      const isDuplicate = await checkDuplicatePhone(phone);
-      if (isDuplicate) { setSaving(false); return; }
+    if (editingProspect) {
+      const { error } = await supabase.from('prospects').update({
+        name: pName.trim(),
+        phone: phone || null,
+        email: pEmail.trim() || null,
+        model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+        source: pSource || 'concesionario',
+        status: pStatus || 'nuevo',
+        notes: pNotes.trim() || null,
+        salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
+        event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
+        'Estado de Vnzla': pEstadoVzla.trim() || null,
+      }).eq('id', editingProspect.id);
+      if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
+      else { toast.success('Prospecto actualizado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
+    } else {
+      if (phone) {
+        const isDuplicate = await checkDuplicatePhone(phone);
+        if (isDuplicate) { setSaving(false); return; }
+      }
+      const { error } = await supabase.from('prospects').insert({
+        dealership_id: selectedDealership,
+        name: pName.trim(),
+        phone: phone || null,
+        email: pEmail.trim() || null,
+        model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+        source: pSource || 'concesionario',
+        status: pStatus || 'nuevo',
+        notes: pNotes.trim() || null,
+        salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
+        event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
+        'Estado de Vnzla': pEstadoVzla.trim() || null,
+      });
+      if (error) { toast.error('Error al crear prospecto'); console.error(error); }
+      else { toast.success('Prospecto creado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
     }
-    const { error } = await supabase.from('prospects').insert({
-      dealership_id: selectedDealership,
-      name: pName.trim(),
-      phone: phone || null,
-      email: pEmail.trim() || null,
-      model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
-      source: pSource || 'concesionario',
-      status: pStatus || 'nuevo',
-      notes: pNotes.trim() || null,
-      salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
-      event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
-    });
-    if (error) { toast.error('Error al crear prospecto'); console.error(error); }
-    else { toast.success('Prospecto creado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
     setSaving(false);
   };
 
@@ -288,6 +466,9 @@ const DealershipProspectos = () => {
             <button onClick={() => setUpdatesSidebarProspect(p)} title="Ver actualizaciones" className="text-primary hover:text-primary/80">
               <Activity className="w-3.5 h-3.5" />
             </button>
+            <button onClick={() => openEditDialog(p)} title="Editar prospecto" className="text-muted-foreground hover:text-foreground">
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
           </div>
         </CardContent>
       </Card>
@@ -316,6 +497,16 @@ const DealershipProspectos = () => {
           <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/prospectos`); toast.success('Enlace copiado al portapapeles'); }} className="gap-1">
             <ExternalLink className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Landing</span>
           </Button>
+          <Button size="sm" variant="outline" onClick={exportToXLSX} className="gap-1" title="Exportar prospectos">
+            <Download className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Exportar</span>
+          </Button>
+          <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1" title="Descargar plantilla de importación">
+            <FileText className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Plantilla</span>
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1" title="Importar prospectos desde XLSX">
+            <Upload className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Importar</span>
+          </Button>
+          <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) parseXLSX(f); e.target.value = ''; }} />
           <Button size="sm" onClick={openDialog} className="gac-gradient">
             <Plus className="w-3.5 h-3.5 sm:mr-1" /> <span className="hidden sm:inline">Nuevo Prospecto</span>
           </Button>
@@ -354,6 +545,13 @@ const DealershipProspectos = () => {
                   {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                 </SelectContent>
               </Select>
+              <Select value={prosEstadoVzlaFilter} onValueChange={setProsEstadoVzlaFilter}>
+                <SelectTrigger className="w-[130px] sm:w-[150px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado (Vzla)" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los estados</SelectItem>
+                  {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -365,8 +563,8 @@ const DealershipProspectos = () => {
               <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
               <Input type="date" value={prosFechaHasta} onChange={e => setProsFechaHasta(e.target.value)} className="h-8 text-xs w-[140px]" />
             </div>
-            {(prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos') && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setProsSearch(''); }}>
+            {(prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos' || prosEstadoVzlaFilter !== 'todos') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setProsEstadoVzlaFilter('todos'); setProsSearch(''); }}>
                 Limpiar filtros
               </Button>
             )}
@@ -401,6 +599,7 @@ const DealershipProspectos = () => {
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
+                  <TableHead>Marca</TableHead>
                   <TableHead>Modelo</TableHead>
                   {!isSalesperson && !isVendedor && <TableHead>Vendedor</TableHead>}
                   <TableHead>Fuente</TableHead>
@@ -419,7 +618,8 @@ const DealershipProspectos = () => {
                         {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
                         {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                       </TableCell>
-                      <TableCell>{p.model_interest || '-'}</TableCell>
+                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); return (parts.length > 1 && ['GAC','DFSK','SHINERAY'].includes(parts[0])) ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{parts[0]}</Badge> : '-'; })()}</TableCell>
+                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); return (parts.length > 1 && ['GAC','DFSK','SHINERAY'].includes(parts[0])) ? parts.slice(1).join(' ') : (p.model_interest || '-'); })()}</TableCell>
                       {!isSalesperson && !isVendedor && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
                       <TableCell>
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
@@ -452,6 +652,9 @@ const DealershipProspectos = () => {
                           <button onClick={(e) => { e.stopPropagation(); setUpdatesSidebarProspect(p); }} title="Ver actualizaciones" className="text-primary hover:text-primary/80 shrink-0">
                             <Activity className="w-3.5 h-3.5" />
                           </button>
+                          <button onClick={(e) => { e.stopPropagation(); openEditDialog(p); }} title="Editar prospecto" className="text-muted-foreground hover:text-foreground shrink-0">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -466,7 +669,7 @@ const DealershipProspectos = () => {
       {/* CREATE PROSPECT DIALOG */}
       <ResponsiveModal open={dialogOpen} onOpenChange={setDialogOpen}>
           <ResponsiveModalHeader>
-            <ResponsiveModalTitle className="font-display">Nuevo Prospecto</ResponsiveModalTitle>
+            <ResponsiveModalTitle className="font-display">{editingProspect ? 'Editar Prospecto' : 'Nuevo Prospecto'}</ResponsiveModalTitle>
           </ResponsiveModalHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -538,6 +741,16 @@ const DealershipProspectos = () => {
                   </Select>
                 </div>
               )}
+              <div className="space-y-1">
+                <Label className="text-xs">Estado de Venezuela</Label>
+                <Select value={pEstadoVzla} onValueChange={v => setPEstadoVzla(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin estado</SelectItem>
+                    {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Estado</Label>
                 <Select value={pStatus} onValueChange={setPStatus}>
@@ -560,7 +773,7 @@ const DealershipProspectos = () => {
           <ResponsiveModalFooter className="flex-col sm:flex-row gap-2">
             <Button variant="outline" onClick={() => setDialogOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
             <Button onClick={handleSave} disabled={saving} className="gac-gradient w-full sm:w-auto">
-              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Crear Prospecto'}
+              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingProspect ? 'Guardar Cambios' : 'Crear Prospecto'}
             </Button>
           </ResponsiveModalFooter>
       </ResponsiveModal>
@@ -586,6 +799,75 @@ const DealershipProspectos = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* IMPORT PREVIEW DIALOG */}
+      <Dialog open={importOpen} onOpenChange={open => { if (!importing) { setImportOpen(open); if (!open) setImportRows([]); } }}>
+        <DialogContent className="max-w-4xl w-full">
+          <DialogHeader>
+            <DialogTitle className="font-display text-sm">Vista previa de importación — {importRows.length} fila(s)</DialogTitle>
+          </DialogHeader>
+          <ScrollArea className="h-[380px] border rounded-md">
+            <Table className="text-[11px]">
+              <TableHeader>
+                <TableRow className="[&>th]:py-1.5 [&>th]:text-[10px] [&>th]:font-semibold">
+                  <TableHead className="w-6">#</TableHead>
+                  <TableHead>Nombre</TableHead>
+                  <TableHead>Teléfono</TableHead>
+                  <TableHead>Marca</TableHead>
+                  <TableHead>Modelo</TableHead>
+                  <TableHead>Fuente</TableHead>
+                  <TableHead>Vendedor</TableHead>
+                  <TableHead>Estado Vzla</TableHead>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Errores</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {importRows.map(r => (
+                  <TableRow key={r.row} className={cn('[&>td]:py-1', r.errors.length > 0 ? 'bg-red-50 dark:bg-red-950/20' : '')}>
+                    <TableCell className="text-muted-foreground">{r.row}</TableCell>
+                    <TableCell className="font-medium max-w-[120px] truncate">{r.name || <span className="text-red-500 italic">vacío</span>}</TableCell>
+                    <TableCell>{r.phone || <span className="text-red-500 italic">vacío</span>}</TableCell>
+                    <TableCell>{r.brand || '-'}</TableCell>
+                    <TableCell>{r.model || '-'}</TableCell>
+                    <TableCell>{r.source}</TableCell>
+                    <TableCell>{r.salesperson || autoSalesperson || '-'}</TableCell>
+                    <TableCell>{r.estado_vzla || '-'}</TableCell>
+                    <TableCell>{r.fecha || <span className="text-muted-foreground italic">hoy</span>}</TableCell>
+                    <TableCell>
+                      {r.errors.length > 0 ? (
+                        <div className="flex items-start gap-1 text-red-600">
+                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                          <span>{r.errors.join('; ')}</span>
+                        </div>
+                      ) : (
+                        <CheckCircle2 className="w-3 h-3 text-green-600" />
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+          {importRows.some(r => r.errors.length > 0) && (
+            <p className="text-[11px] text-amber-600 flex items-center gap-1">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              Las filas con errores serán omitidas. Solo se importarán las filas con nombre y teléfono válidos.
+            </p>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setImportOpen(false); setImportRows([]); }} disabled={importing}>
+              <X className="w-3.5 h-3.5 mr-1" /> Cancelar
+            </Button>
+            <Button size="sm" onClick={handleBulkImport} disabled={importing || importRows.filter(r => r.name && r.phone).length === 0} className="gac-gradient">
+              {importing
+                ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin mr-1" />
+                : <Upload className="w-3.5 h-3.5 mr-1" />}
+              Importar {importRows.filter(r => r.name && r.phone).length} prospecto(s)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* UPDATES SIDEBAR */}
       {updatesSidebarProspect && (

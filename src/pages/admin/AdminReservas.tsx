@@ -62,7 +62,7 @@ interface Reservation {
   technical_report_url: string | null;
   satisfaction_rating: number | null;
   dealerships: { id: string; name: string; city: string | null } | null;
-  clients: { full_name: string; cedula: string | null; phone: string | null } | null;
+  clients: { full_name: string; cedula: string | null; phone: string | null; state: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
 
@@ -93,6 +93,9 @@ const STATUS_LABELS: Record<string, string> = {
   cancelada: 'Cancelada',
 };
 
+
+const AR_LS_KEY = 'admin_reservas_create_form';
+const getArLS = () => { try { return JSON.parse(localStorage.getItem(AR_LS_KEY) || '{}'); } catch { return {}; } };
 
 const AdminReservas = () => {
   const isMobile = useIsMobile();
@@ -125,7 +128,7 @@ const AdminReservas = () => {
   });
 
   // CRUD dialog
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState<boolean>(() => getArLS().dialogOpen === true);
   const [saving, setSaving] = useState(false);
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
 
@@ -145,17 +148,17 @@ const AdminReservas = () => {
   const [svcEditing, setSvcEditing] = useState<ServiceType | null>(null);
   const [svcSaving, setSvcSaving] = useState(false);
 
-  // Form
-  const [fDealership, setFDealership] = useState('');
-  const [fClientSearch, setFClientSearch] = useState('');
-  const [fClientId, setFClientId] = useState('');
-  const [fVehicleId, setFVehicleId] = useState('');
-  const [fDate, setFDate] = useState('');
-  const [fTime, setFTime] = useState('08:00');
-  const [fService, setFService] = useState('');
-  const [fMileage, setFMileage] = useState('0');
-  const [fStatus, setFStatus] = useState('pendiente');
-  const [fNotes, setFNotes] = useState('');
+  // Form (initialized from localStorage to survive page refresh)
+  const [fDealership, setFDealership] = useState<string>(() => getArLS().fDealership || '');
+  const [fClientSearch, setFClientSearch] = useState<string>(() => getArLS().fClientSearch || '');
+  const [fClientId, setFClientId] = useState<string>(() => getArLS().fClientId || '');
+  const [fVehicleId, setFVehicleId] = useState<string>(() => getArLS().fVehicleId || '');
+  const [fDate, setFDate] = useState<string>(() => getArLS().fDate || new Date().toISOString().split('T')[0]);
+  const [fTime, setFTime] = useState<string>(() => getArLS().fTime || '08:00');
+  const [fService, setFService] = useState<string>(() => getArLS().fService || '');
+  const [fMileage, setFMileage] = useState<string>(() => getArLS().fMileage || '0');
+  const [fStatus, setFStatus] = useState<string>(() => getArLS().fStatus || 'pendiente');
+  const [fNotes, setFNotes] = useState<string>(() => getArLS().fNotes || '');
 
   // Client/vehicle lookup
   const [clientResults, setClientResults] = useState<ClientOption[]>([]);
@@ -183,7 +186,7 @@ const AdminReservas = () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, dealerships(id, name, city), clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand))');
+      .select('*, dealerships(id, name, city), clients(full_name, cedula, phone, state), vehicles(plate, year, vehicle_models(name, brand))');
 
     if (view === 'matrix') {
       query = query.eq('reservation_date', selectedDate);
@@ -211,6 +214,17 @@ const AdminReservas = () => {
   useEffect(() => {
     fetchReservations();
   }, [view, selectedDate, filtroConc]);
+
+  // Persist create-form to localStorage so a page refresh restores the dialog
+  useEffect(() => {
+    if (!dialogOpen || editingRes) {
+      if (!dialogOpen) { try { localStorage.removeItem(AR_LS_KEY); } catch {} }
+      return;
+    }
+    try {
+      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes }));
+    } catch {}
+  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes]);
 
   // Client search with debounce (by name, cedula, or vehicle plate)
   useEffect(() => {
@@ -334,6 +348,7 @@ const AdminReservas = () => {
   };
 
   const openEdit = (r: Reservation) => {
+    try { localStorage.removeItem(AR_LS_KEY); } catch {}
     setEditingRes(r);
     setFDealership(r.dealership_id);
     setFClientId(r.client_id);
@@ -695,6 +710,7 @@ const AdminReservas = () => {
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                   <TableHead>Fecha / Hora</TableHead>
                   <TableHead>Cliente</TableHead>
+                  <TableHead>Estado (Vzla)</TableHead>
                   <TableHead>Vehículo</TableHead>
                   <TableHead>Servicio</TableHead>
                   <TableHead>Concesionario</TableHead>
@@ -711,6 +727,7 @@ const AdminReservas = () => {
                       <span className="text-muted-foreground">{formatTime(r.reservation_time)}</span>
                     </TableCell>
                     <TableCell>{r.clients?.full_name || '-'}</TableCell>
+                    <TableCell>{r.clients?.state || '-'}</TableCell>
                     <TableCell>
                       {r.vehicles?.vehicle_models?.brand} {r.vehicles?.vehicle_models?.name} {r.vehicles?.year}
                       <br />

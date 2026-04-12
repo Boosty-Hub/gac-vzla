@@ -42,7 +42,7 @@ interface Vehicle {
   vin: string | null;
   warranty_active: boolean;
   purchase_date: string | null;
-  vehicle_models: { name: string; brand: string } | null;
+  vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null } | null;
 }
 
 interface WarrantyCondition {
@@ -113,6 +113,9 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
 };
 
+const UP_LS_KEY = 'userportal_reserva_flow';
+const getUpLS = () => { try { return JSON.parse(localStorage.getItem(UP_LS_KEY) || '{}'); } catch { return {}; } };
+
 const UserPortal = () => {
   const navigate = useNavigate();
   const { user, profile, signOut } = useAuth();
@@ -153,19 +156,19 @@ const UserPortal = () => {
   const [vista, setVistaState] = useState<Vista>(storedVista && validVistas.includes(storedVista) ? storedVista : 'inicio');
   const setVista = (v: Vista) => { setVistaState(v); localStorage.setItem('userportal_vista', v); };
 
-  // Reservation flow
-  const [paso, setPaso] = useState(1);
+  // Reservation flow (initialized from localStorage to survive page refresh)
+  const [paso, setPaso] = useState<number>(() => { const ls = getUpLS(); return (ls.paso && ls.paso < 4) ? ls.paso : 1; });
   const [reservaConfirmada, setReservaConfirmada] = useState(false);
   const [saving, setSaving] = useState(false);
   const [filterState, setFilterState] = useState('');
   const [filterCity, setFilterCity] = useState('');
-  const [selectedDealership, setSelectedDealership] = useState('');
-  const [selectedVehicle, setSelectedVehicle] = useState('');
-  const [selectedService, setSelectedService] = useState('');
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-  const [selectedTime, setSelectedTime] = useState('');
-  const [mileage, setMileage] = useState('');
-  const [notes, setNotes] = useState('');
+  const [selectedDealership, setSelectedDealership] = useState<string>(() => getUpLS().selectedDealership || '');
+  const [selectedVehicle, setSelectedVehicle] = useState<string>(() => getUpLS().selectedVehicle || '');
+  const [selectedService, setSelectedService] = useState<string>(() => getUpLS().selectedService || '');
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(() => { const d = getUpLS().selectedDate; return d ? new Date(d) : undefined; });
+  const [selectedTime, setSelectedTime] = useState<string>(() => getUpLS().selectedTime || '');
+  const [mileage, setMileage] = useState<string>(() => getUpLS().mileage || '');
+  const [notes, setNotes] = useState<string>(() => getUpLS().notes || '');
   const [occupiedTimes, setOccupiedTimes] = useState<string[]>([]);
   const [loadingTimes, setLoadingTimes] = useState(false);
 
@@ -173,6 +176,18 @@ const UserPortal = () => {
     try { await signOut(); } catch (e) { console.error(e); }
     finally { navigate('/login'); }
   };
+
+  // Persist reservation flow to localStorage so a page refresh restores progress
+  useEffect(() => {
+    if (vista !== 'reservar' || reservaConfirmada) return;
+    try {
+      localStorage.setItem(UP_LS_KEY, JSON.stringify({
+        paso, selectedDealership, selectedVehicle, selectedService,
+        selectedDate: selectedDate ? selectedDate.toISOString() : null,
+        selectedTime, mileage, notes,
+      }));
+    } catch {}
+  }, [vista, reservaConfirmada, paso, selectedDealership, selectedVehicle, selectedService, selectedDate, selectedTime, mileage, notes]);
 
   const sortDealerships = (deals: Dealership[]) => {
     return [...deals].sort((a, b) => {
@@ -213,6 +228,13 @@ const UserPortal = () => {
     }
   };
 
+  // On mount: re-fetch occupied times if a date+dealership were restored from LS
+  useEffect(() => {
+    if (selectedDate && selectedDealership) {
+      fetchOccupiedTimes(selectedDealership, selectedDate);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Resolve client from profile
   useEffect(() => {
     if (!user) return;
@@ -247,7 +269,7 @@ const UserPortal = () => {
       if (clientId) {
         const { data: vehs } = await supabase
           .from('vehicles')
-          .select('id, plate, year, color, mileage, vin, warranty_active, purchase_date, vehicle_models(name, brand)')
+          .select('id, plate, year, color, mileage, vin, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km)')
           .eq('client_id', clientId)
           .eq('is_active', true)
           .order('year', { ascending: false });
@@ -308,23 +330,27 @@ const UserPortal = () => {
   }, [vehicles]);
 
   const evaluateVehicleWarranty = (v: Vehicle) => {
-    if (!warrantyCond) return { active: false, reason: 'Sin condiciones configuradas', monthsRemaining: 0, kmRemaining: 0, servicesExpected: 0, servicesCompleted: 0, nextServiceKm: 0 };
-    const cond = warrantyCond;
+    const m = v.vehicle_models;
+    const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);
+    const maxKm = hasModelWarranty && m!.warranty_km != null ? m!.warranty_km : warrantyCond?.max_km ?? 0;
+    const maxMonths = hasModelWarranty && m!.warranty_months != null ? m!.warranty_months : warrantyCond?.max_months ?? 0;
+    const intervalKm = hasModelWarranty && m!.warranty_service_interval_km != null ? m!.warranty_service_interval_km : warrantyCond?.service_interval_km ?? 0;
+    if (!hasModelWarranty && !warrantyCond) return { active: false, reason: 'Sin condiciones configuradas', monthsRemaining: 0, kmRemaining: 0, servicesExpected: 0, servicesCompleted: 0, nextServiceKm: 0 };
     const reasons: string[] = [];
-    const kmRemaining = cond.max_km - v.mileage;
-    if (v.mileage > cond.max_km) reasons.push(`Excede ${cond.max_km.toLocaleString()} km`);
-    let monthsRemaining = cond.max_months;
+    const kmRemaining = maxKm - v.mileage;
+    if (maxKm > 0 && v.mileage > maxKm) reasons.push(`Excede ${maxKm.toLocaleString()} km`);
+    let monthsRemaining = maxMonths;
     if (v.purchase_date) {
       const purchase = new Date(v.purchase_date);
       const now = new Date();
       const elapsed = (now.getFullYear() - purchase.getFullYear()) * 12 + (now.getMonth() - purchase.getMonth());
-      monthsRemaining = cond.max_months - elapsed;
-      if (elapsed > cond.max_months) reasons.push(`Excede ${cond.max_months} meses`);
+      monthsRemaining = maxMonths - elapsed;
+      if (maxMonths > 0 && elapsed > maxMonths) reasons.push(`Excede ${maxMonths} meses`);
     }
-    const servicesExpected = cond.service_interval_km > 0 ? Math.floor(v.mileage / cond.service_interval_km) : 0;
+    const servicesExpected = intervalKm > 0 ? Math.floor(v.mileage / intervalKm) : 0;
     const servicesCompleted = vehServiceCounts[v.id] || 0;
     if (servicesCompleted < servicesExpected) reasons.push(`Servicios: ${servicesCompleted}/${servicesExpected}`);
-    const nextServiceKm = cond.service_interval_km > 0 ? (Math.floor(v.mileage / cond.service_interval_km) + 1) * cond.service_interval_km : 0;
+    const nextServiceKm = intervalKm > 0 ? (Math.floor(v.mileage / intervalKm) + 1) * intervalKm : 0;
     return { active: reasons.length === 0, reason: reasons.join(' · '), monthsRemaining: Math.max(0, monthsRemaining), kmRemaining: Math.max(0, kmRemaining), servicesExpected, servicesCompleted, nextServiceKm };
   };
 
@@ -343,6 +369,7 @@ const UserPortal = () => {
   };
 
   const iniciarReserva = (dealershipId: string) => {
+    try { localStorage.removeItem(UP_LS_KEY); } catch {}
     setSelectedDealership(dealershipId);
     setSelectedVehicle('');
     setSelectedService('');
@@ -372,6 +399,7 @@ const UserPortal = () => {
     });
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
     else {
+      try { localStorage.removeItem(UP_LS_KEY); } catch {}
       setReservaConfirmada(true);
       setPaso(4);
       // Refresh reservations
@@ -387,6 +415,7 @@ const UserPortal = () => {
   };
 
   const volverInicio = () => {
+    try { localStorage.removeItem(UP_LS_KEY); } catch {}
     setVista('inicio');
     setReservaConfirmada(false);
     setPaso(1);

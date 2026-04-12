@@ -29,7 +29,7 @@ interface VehicleRow {
   mileage: number;
   warranty_active: boolean;
   purchase_date: string | null;
-  vehicle_models: { name: string; brand: string } | null;
+  vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null } | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
 }
 
@@ -84,7 +84,7 @@ const AdminGarantias = () => {
     while (hasMore) {
       const { data } = await supabase
         .from('vehicles')
-        .select('id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand), clients(full_name, cedula, phone)')
+        .select('id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km), clients(full_name, cedula, phone)')
         .eq('is_active', true)
         .order('created_at', { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
@@ -110,35 +110,42 @@ const AdminGarantias = () => {
   useEffect(() => { fetchData(); }, []);
 
   const evaluateWarranty = (v: VehicleRow, completedServices: number): WarrantyResult => {
-    if (conditions.length === 0) {
+    const m = v.vehicle_models;
+    // Use model-level warranty if set, otherwise fall back to global condition
+    const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);
+    const maxKm = hasModelWarranty && m!.warranty_km != null ? m!.warranty_km : conditions[0]?.max_km ?? 0;
+    const maxMonths = hasModelWarranty && m!.warranty_months != null ? m!.warranty_months : conditions[0]?.max_months ?? 0;
+    const intervalKm = hasModelWarranty && m!.warranty_service_interval_km != null ? m!.warranty_service_interval_km : conditions[0]?.service_interval_km ?? 0;
+    const conditionName = hasModelWarranty ? `${m!.brand} ${m!.name}` : (conditions[0]?.name ?? '-');
+
+    if (!hasModelWarranty && conditions.length === 0) {
       return { active: false, reason: 'No hay condiciones de garantía configuradas', conditionName: '-', servicesExpected: 0, servicesCompleted: completedServices, nextServiceKm: 0, monthsRemaining: 0, kmRemaining: 0 };
     }
-    const cond = conditions[0];
-    const reasons: string[] = [];
 
+    const reasons: string[] = [];
     if (!v.warranty_active) reasons.push('Garantía desactivada manualmente');
 
-    const kmRemaining = cond.max_km - v.mileage;
-    if (v.mileage > cond.max_km) reasons.push(`Excede ${cond.max_km.toLocaleString()} km (actual: ${v.mileage.toLocaleString()} km)`);
+    const kmRemaining = maxKm - v.mileage;
+    if (maxKm > 0 && v.mileage > maxKm) reasons.push(`Excede ${maxKm.toLocaleString()} km (actual: ${v.mileage.toLocaleString()} km)`);
 
-    let monthsRemaining = cond.max_months;
+    let monthsRemaining = maxMonths;
     if (v.purchase_date) {
       const purchase = new Date(v.purchase_date);
       const now = new Date();
       const monthsElapsed = (now.getFullYear() - purchase.getFullYear()) * 12 + (now.getMonth() - purchase.getMonth());
-      monthsRemaining = cond.max_months - monthsElapsed;
-      if (monthsElapsed > cond.max_months) reasons.push(`Excede ${cond.max_months} meses desde la compra (${monthsElapsed} meses transcurridos)`);
+      monthsRemaining = maxMonths - monthsElapsed;
+      if (maxMonths > 0 && monthsElapsed > maxMonths) reasons.push(`Excede ${maxMonths} meses desde la compra (${monthsElapsed} meses transcurridos)`);
     }
 
-    const servicesExpected = cond.service_interval_km > 0 ? Math.floor(v.mileage / cond.service_interval_km) : 0;
+    const servicesExpected = intervalKm > 0 ? Math.floor(v.mileage / intervalKm) : 0;
     if (completedServices < servicesExpected) reasons.push(`Servicios atrasados: ${completedServices}/${servicesExpected} realizados`);
 
-    const nextServiceKm = cond.service_interval_km > 0 ? (Math.floor(v.mileage / cond.service_interval_km) + 1) * cond.service_interval_km : 0;
+    const nextServiceKm = intervalKm > 0 ? (Math.floor(v.mileage / intervalKm) + 1) * intervalKm : 0;
 
     return {
       active: reasons.length === 0,
       reason: reasons.length > 0 ? reasons.join(' · ') : null,
-      conditionName: cond.name,
+      conditionName,
       servicesExpected,
       servicesCompleted: completedServices,
       nextServiceKm,

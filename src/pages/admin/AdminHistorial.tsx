@@ -37,7 +37,7 @@ interface ServiceEntry {
     mileage: number;
     warranty_active: boolean;
     purchase_date: string | null;
-    vehicle_models: { name: string; brand: string } | null;
+    vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null } | null;
   } | null;
 }
 
@@ -87,7 +87,7 @@ const AdminHistorial = () => {
     let query = supabase
       .from('reservations')
       .select(
-        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand))',
+        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km))',
         { count: 'exact' }
       );
 
@@ -130,13 +130,18 @@ const AdminHistorial = () => {
   };
 
   const evaluateWarranty = (entry: ServiceEntry): { active: boolean; reason: string | null } => {
-    if (!entry.vehicles || !warrantyCond) return { active: entry.vehicles?.warranty_active ?? false, reason: null };
+    if (!entry.vehicles) return { active: false, reason: null };
     const v = entry.vehicles;
+    const m = v.vehicle_models;
+    const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);
+    const maxKm = hasModelWarranty && m!.warranty_km != null ? m!.warranty_km : warrantyCond?.max_km ?? 0;
+    const maxMonths = hasModelWarranty && m!.warranty_months != null ? m!.warranty_months : warrantyCond?.max_months ?? 0;
+    if (!hasModelWarranty && !warrantyCond) return { active: v.warranty_active, reason: null };
     const reasons: string[] = [];
-    if (v.mileage > warrantyCond.max_km) reasons.push(`Km excedido (${v.mileage.toLocaleString()} / ${warrantyCond.max_km.toLocaleString()})`);
-    if (v.purchase_date) {
+    if (maxKm > 0 && v.mileage > maxKm) reasons.push(`Km excedido (${v.mileage.toLocaleString()} / ${maxKm.toLocaleString()})`);
+    if (v.purchase_date && maxMonths > 0) {
       const months = Math.floor((Date.now() - new Date(v.purchase_date).getTime()) / (1000 * 60 * 60 * 24 * 30));
-      if (months > warrantyCond.max_months) reasons.push(`Tiempo excedido (${months} / ${warrantyCond.max_months} meses)`);
+      if (months > maxMonths) reasons.push(`Tiempo excedido (${months} / ${maxMonths} meses)`);
     }
     return { active: reasons.length === 0 && v.warranty_active, reason: reasons.length > 0 ? reasons.join('; ') : null };
   };

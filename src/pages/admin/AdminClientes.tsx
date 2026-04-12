@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -62,6 +62,7 @@ interface ServiceRecord {
 interface ClientVehicleInfo {
   id: string;
   warranty_active: boolean;
+  vehicle_models: { brand: string } | null;
 }
 
 interface Client {
@@ -161,7 +162,7 @@ const AdminClientes = () => {
     setLoading(true);
     let query = supabase
       .from('clients')
-      .select('*, vehicles(id, warranty_active), client_users(count)', { count: 'exact' });
+      .select('*, vehicles(id, warranty_active, vehicle_models(brand)), client_users(count)', { count: 'exact' });
 
     if (busqueda.trim()) {
       query = query.or(`full_name.ilike.%${busqueda}%,cedula.ilike.%${busqueda}%,email.ilike.%${busqueda}%,phone.ilike.%${busqueda}%`);
@@ -413,6 +414,22 @@ const AdminClientes = () => {
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
+  const buildClientWaUrl = (c: Client) => {
+    if (!c.phone) return null;
+    const digits = c.phone.replace(/\D/g, '');
+    let normalized: string;
+    if (digits.startsWith('58')) {
+      normalized = `+${digits}`;
+    } else if (digits.startsWith('0')) {
+      normalized = `+58${digits.slice(1)}`;
+    } else {
+      normalized = `+58${digits}`;
+    }
+    const brand = c.vehicles?.find(v => v.vehicle_models?.brand)?.vehicle_models?.brand || '';
+    const msg = `¡Es un gusto saludarte! *${c.full_name}* Te hablamos del departamento de post venta de *${brand}*`;
+    return `https://wa.me/${normalized.replace('+', '')}?text=${encodeURIComponent(msg)}`;
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -547,11 +564,23 @@ const AdminClientes = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right" onClick={e => e.stopPropagation()}>
-                      {canEdit && (
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
-                          <Pencil className="w-3 h-3" />
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-1">
+                        {(() => {
+                          const waUrl = buildClientWaUrl(c);
+                          return waUrl ? (
+                            <Button variant="ghost" size="icon" className="h-6 w-6 text-green-600 hover:text-green-700" asChild>
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp">
+                                <MessageCircle className="w-3 h-3" />
+                              </a>
+                            </Button>
+                          ) : null;
+                        })()}
+                        {canEdit && (
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                   {expandedClient === c.id && (

@@ -23,6 +23,9 @@ interface VehicleModel {
   image_url: string | null;
   is_active: boolean;
   created_at: string;
+  warranty_km: number | null;
+  warranty_months: number | null;
+  warranty_service_interval_km: number | null;
 }
 
 const BRANDS = ['GAC', 'DFSK', 'SHINERAY'];
@@ -45,6 +48,9 @@ const AdminModelos = () => {
   const [formEngine, setFormEngine] = useState('');
   const [formTransmission, setFormTransmission] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
+  const [formWarrantyKm, setFormWarrantyKm] = useState('');
+  const [formWarrantyMonths, setFormWarrantyMonths] = useState('');
+  const [formWarrantyIntervalKm, setFormWarrantyIntervalKm] = useState('');
   const [formImageFile, setFormImageFile] = useState<File | null>(null);
   const [formImagePreview, setFormImagePreview] = useState<string | null>(null);
   const [removeImage, setRemoveImage] = useState(false);
@@ -79,6 +85,9 @@ const AdminModelos = () => {
     setFormEngine('');
     setFormTransmission('');
     setFormIsActive(true);
+    setFormWarrantyKm('');
+    setFormWarrantyMonths('');
+    setFormWarrantyIntervalKm('');
     setFormImageFile(null);
     setFormImagePreview(null);
     setRemoveImage(false);
@@ -93,6 +102,9 @@ const AdminModelos = () => {
     setFormEngine(model.engine || '');
     setFormTransmission(model.transmission || '');
     setFormIsActive(model.is_active);
+    setFormWarrantyKm(model.warranty_km?.toString() || '');
+    setFormWarrantyMonths(model.warranty_months?.toString() || '');
+    setFormWarrantyIntervalKm(model.warranty_service_interval_km?.toString() || '');
     setFormImageFile(null);
     setFormImagePreview(model.image_url || null);
     setRemoveImage(false);
@@ -150,6 +162,9 @@ const AdminModelos = () => {
       engine: formEngine.trim() || null,
       transmission: formTransmission.trim() || null,
       is_active: formIsActive,
+      warranty_km: formWarrantyKm ? parseInt(formWarrantyKm) : null,
+      warranty_months: formWarrantyMonths ? parseInt(formWarrantyMonths) : null,
+      warranty_service_interval_km: formWarrantyIntervalKm ? parseInt(formWarrantyIntervalKm) : null,
     };
     const payload = imageUrl !== undefined ? { ...base, image_url: imageUrl } : base;
 
@@ -232,6 +247,7 @@ const AdminModelos = () => {
                 <TableHead>Modelo</TableHead>
                 <TableHead>Motor</TableHead>
                 <TableHead>Transmisión</TableHead>
+                <TableHead>Garantía</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead className="text-right">Acc.</TableHead>
               </TableRow>
@@ -254,6 +270,11 @@ const AdminModelos = () => {
                   <TableCell className="font-medium">{m.name}</TableCell>
                   <TableCell>{m.engine || '-'}</TableCell>
                   <TableCell>{m.transmission || '-'}</TableCell>
+                  <TableCell className="text-[11px] text-muted-foreground">
+                    {m.warranty_km || m.warranty_months ? (
+                      <span>{m.warranty_km ? `${(m.warranty_km / 1000).toFixed(0)}k km` : '—'} · {m.warranty_months ? `${m.warranty_months} m` : '—'}</span>
+                    ) : <span className="italic">Global</span>}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={m.is_active ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
                       {m.is_active ? 'Activo' : 'Inactivo'}
@@ -306,6 +327,26 @@ const AdminModelos = () => {
                 <Input id="modelTransmission" value={formTransmission} onChange={e => setFormTransmission(e.target.value)} placeholder="Ej: Automática 7DCT" />
               </div>
             </div>
+            {/* Warranty fields */}
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Garantía del Modelo</Label>
+              <p className="text-[11px] text-muted-foreground">Deja vacío para usar la condición global de garantía</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <Label htmlFor="warrantyKm" className="text-xs">Km máximos</Label>
+                  <Input id="warrantyKm" type="number" value={formWarrantyKm} onChange={e => setFormWarrantyKm(e.target.value)} placeholder="Ej: 100000" className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="warrantyMonths" className="text-xs">Meses máximos</Label>
+                  <Input id="warrantyMonths" type="number" value={formWarrantyMonths} onChange={e => setFormWarrantyMonths(e.target.value)} placeholder="Ej: 72" className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="warrantyInterval" className="text-xs">Intervalo servicio (km)</Label>
+                  <Input id="warrantyInterval" type="number" value={formWarrantyIntervalKm} onChange={e => setFormWarrantyIntervalKm(e.target.value)} placeholder="Ej: 5000" className="h-8 text-xs" />
+                </div>
+              </div>
+            </div>
+
             {/* Image upload */}
             <div className="space-y-2">
               <Label>Imagen del Modelo</Label>
