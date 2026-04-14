@@ -105,6 +105,31 @@ const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
   return `${h.toString().padStart(2, '0')}:${m}`;
 }).filter(t => t !== '12:00' && t !== '12:30');
 
+// Retorna la fecha de hoy en la zona horaria de Venezuela (UTC-4)
+const getTodayVzla = () => {
+  const now = new Date();
+  const vzla = new Date(now.toLocaleString('en-US', { timeZone: 'America/Caracas' }));
+  return new Date(vzla.getFullYear(), vzla.getMonth(), vzla.getDate());
+};
+
+// Retorna la hora actual en Venezuela como string "HH:MM"
+const getNowTimeVzla = () => {
+  const now = new Date();
+  const vzla = new Date(now.toLocaleString('en-US', { timeZone: 'America/Caracas' }));
+  const h = vzla.getHours().toString().padStart(2, '0');
+  const m = vzla.getMinutes().toString().padStart(2, '0');
+  return `${h}:${m}`;
+};
+
+// True si el slot de hora ya pasó en el día de hoy Venezuela
+const isSlotPast = (slot: string, selectedDate: Date | undefined) => {
+  if (!selectedDate) return false;
+  const todayVzla = getTodayVzla();
+  const sel = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+  if (sel.getTime() !== todayVzla.getTime()) return false;
+  return slot <= getNowTimeVzla();
+};
+
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
   confirmada: { label: 'Confirmada', color: 'bg-blue-100 text-blue-800' },
@@ -467,26 +492,43 @@ const UserPortal = () => {
   const handleCancelReservation = async () => {
     if (!cancelTarget || !clientData) return;
     setCancelling(true);
-    const { error } = await supabase.from('reservations').update({ status: 'cancelada' }).eq('id', cancelTarget.id);
-    if (error) {
-      toast.error('Error al cancelar la cita');
-      console.error(error);
-    } else {
-      // Send notification to admin profiles
+
+    // Fetch dealership_id antes del update para usarlo en notificaciones
+    const { data: resData } = await supabase
+      .from('reservations')
+      .select('dealership_id')
+      .eq('id', cancelTarget.id)
+      .single();
+
+    const { error, count } = await supabase
+      .from('reservations')
+      .update({ status: 'cancelada' })
+      .eq('id', cancelTarget.id)
+      .select('id', { count: 'exact', head: true });
+
+    if (error || count === 0) {
+      toast.error('No se pudo cancelar la cita. Por favor contacta al concesionario.');
+      console.error('Cancel error:', error, 'rows updated:', count);
+      setCancelling(false);
+      return;
+    }
+
+    // Construir y enviar notificaciones
+    const vehicleInfo = cancelTarget.vehicles
+      ? `${cancelTarget.vehicles.vehicle_models?.brand} ${cancelTarget.vehicles.vehicle_models?.name} ${cancelTarget.vehicles.year} (${cancelTarget.vehicles.plate})`
+      : '';
+    const notifTitle = 'Cita Cancelada por Cliente';
+    const notifMessage = `${clientData.full_name} canceló su cita de ${cancelTarget.service_type} programada para el ${cancelTarget.reservation_date} a las ${cancelTarget.reservation_time?.slice(0, 5)}. Vehículo: ${vehicleInfo}. Concesionario: ${cancelTarget.dealerships?.name || 'N/A'}.`;
+
+    const notifications: any[] = [];
+
+    // Notificar admins
+    const { data: adminRoles } = await supabase.from('roles').select('id').in('name', ['superadmin', 'admin']);
+    if (adminRoles && adminRoles.length > 0) {
       const { data: adminProfiles } = await supabase
         .from('profiles')
-        .select('id, roles(name)')
-        .in('role_id', (await supabase.from('roles').select('id').in('name', ['superadmin', 'admin'])).data?.map(r => r.id) || []);
-
-      const vehicleInfo = cancelTarget.vehicles
-        ? `${cancelTarget.vehicles.vehicle_models?.brand} ${cancelTarget.vehicles.vehicle_models?.name} ${cancelTarget.vehicles.year} (${cancelTarget.vehicles.plate})`
-        : '';
-      const notifTitle = 'Cita Cancelada';
-      const notifMessage = `${clientData.full_name} canceló su cita de ${cancelTarget.service_type} para el ${cancelTarget.reservation_date} a las ${cancelTarget.reservation_time?.slice(0, 5)}. Vehículo: ${vehicleInfo}. Concesionario: ${cancelTarget.dealerships?.name || 'N/A'}.`;
-
-      const notifications: any[] = [];
-
-      // Notify admin users
+        .select('id')
+        .in('role_id', adminRoles.map((r: any) => r.id));
       if (adminProfiles) {
         adminProfiles.forEach((p: any) => {
           notifications.push({
@@ -498,32 +540,28 @@ const UserPortal = () => {
           });
         });
       }
-
-      // Notify dealership
-      if (cancelTarget.dealerships) {
-        // Find dealership_id from reservations
-        const { data: resData } = await supabase.from('reservations').select('dealership_id').eq('id', cancelTarget.id).single();
-        if (resData) {
-          notifications.push({
-            recipient_dealership_id: resData.dealership_id,
-            type: 'cancelacion',
-            title: notifTitle,
-            message: notifMessage,
-            metadata: { reservation_id: cancelTarget.id },
-          });
-        }
-      }
-
-      if (notifications.length > 0) {
-        await supabase.from('notifications').insert(notifications);
-      }
-
-      toast.success('Cita cancelada');
-      setCancelOpen(false);
-      setCancelTarget(null);
-      refreshReservations();
     }
+
+    // Notificar concesionario
+    if (resData?.dealership_id) {
+      notifications.push({
+        recipient_dealership_id: resData.dealership_id,
+        type: 'cancelacion',
+        title: notifTitle,
+        message: notifMessage,
+        metadata: { reservation_id: cancelTarget.id },
+      });
+    }
+
+    if (notifications.length > 0) {
+      await supabase.from('notifications').insert(notifications);
+    }
+
+    toast.success('Tu cita ha sido cancelada. El bloque de horario quedó liberado.', { duration: 5000 });
+    setCancelOpen(false);
+    setCancelTarget(null);
     setCancelling(false);
+    refreshReservations();
   };
 
   const selectedDealershipData = dealerships.find(d => d.id === selectedDealership);
@@ -770,7 +808,10 @@ const UserPortal = () => {
                       selected={selectedDate}
                       onSelect={handleDateSelectReserva}
                       locale={es}
-                      disabled={(date) => date < new Date() || date.getDay() === 0}
+                      disabled={(date) => {
+                        const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+                        return d < getTodayVzla() || date.getDay() === 0;
+                      }}
                       className="rounded-lg border p-3 pointer-events-auto"
                     />
                   </div>
@@ -797,17 +838,19 @@ const UserPortal = () => {
                         <div className="grid grid-cols-4 gap-2">
                           {TIME_SLOTS.map(h => {
                             const isOccupied = occupiedTimes.includes(h);
+                            const isPast = isSlotPast(h, selectedDate);
+                            const isUnavailable = isOccupied || isPast;
                             return (
                               <button
                                 key={h}
-                                onClick={() => !isOccupied && setSelectedTime(h)}
-                                disabled={isOccupied}
+                                onClick={() => !isUnavailable && setSelectedTime(h)}
+                                disabled={isUnavailable}
                                 className={cn(
                                   "py-2 px-1 text-sm rounded-lg border transition-all font-medium",
-                                  isOccupied 
-                                    ? "border-red-200 bg-red-50 text-red-400 cursor-not-allowed line-through" 
-                                    : selectedTime === h 
-                                      ? "gac-gradient text-primary-foreground border-transparent" 
+                                  isUnavailable
+                                    ? "border-red-200 bg-red-50 text-red-400 cursor-not-allowed line-through"
+                                    : selectedTime === h
+                                      ? "gac-gradient text-primary-foreground border-transparent"
                                       : "hover:border-primary"
                                 )}
                               >
@@ -1033,7 +1076,10 @@ const UserPortal = () => {
                     selected={editDate}
                     onSelect={setEditDate}
                     locale={es}
-                    disabled={(date) => date < new Date() || date.getDay() === 0}
+                    disabled={(date) => {
+                      const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+                      return d < getTodayVzla() || date.getDay() === 0;
+                    }}
                     className="rounded-lg border p-2 pointer-events-auto"
                   />
                 </div>
@@ -1042,18 +1088,26 @@ const UserPortal = () => {
                 <div>
                   <Label className="text-xs">Hora</Label>
                   <div className="grid grid-cols-4 gap-1.5 mt-1">
-                    {TIME_SLOTS.map(h => (
-                      <button
-                        key={h}
-                        onClick={() => setEditTime(h)}
-                        className={cn(
-                          "py-1.5 text-xs rounded-lg border transition-all font-medium",
-                          editTime === h ? "gac-gradient text-primary-foreground border-transparent" : "hover:border-primary"
-                        )}
-                      >
-                        {h}
-                      </button>
-                    ))}
+                    {TIME_SLOTS.map(h => {
+                      const isPast = isSlotPast(h, editDate);
+                      return (
+                        <button
+                          key={h}
+                          onClick={() => !isPast && setEditTime(h)}
+                          disabled={isPast}
+                          className={cn(
+                            "py-1.5 text-xs rounded-lg border transition-all font-medium",
+                            isPast
+                              ? "border-red-200 bg-red-50 text-red-400 cursor-not-allowed line-through"
+                              : editTime === h
+                                ? "gac-gradient text-primary-foreground border-transparent"
+                                : "hover:border-primary"
+                          )}
+                        >
+                          {h}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}

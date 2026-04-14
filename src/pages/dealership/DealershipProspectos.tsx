@@ -342,7 +342,7 @@ const DealershipProspectos = () => {
     setPStatus(p.status || 'nuevo');
     setPNotes(p.notes || '');
     setPSalesperson(p.salesperson || autoSalesperson);
-    setPEventName('');
+    setPEventName(p.event_name || '');
     setPEstadoVzla(p['Estado de Vnzla'] || '');
     setDialogOpenRaw(true);
   };
