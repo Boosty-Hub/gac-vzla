@@ -699,38 +699,45 @@ const UserPortal = () => {
                   </CardContent>
                 </Card>
               ) : (
-                filteredDealerships.map(d => (
-                  <Card key={d.id} className="overflow-hidden gac-shadow hover:gac-shadow-lg transition-shadow cursor-pointer" onClick={() => vehicles.length > 0 && iniciarReserva(d.id)}>
-                    <div className="h-24 bg-gac-charcoal flex items-center justify-center">
-                      <Car className="w-10 h-10 text-gac-silver" />
-                    </div>
-                    <CardContent className="p-4">
-                      <h3 className="font-display font-semibold text-base">{d.name}</h3>
-                      <div className="mt-2 space-y-1 text-sm text-muted-foreground">
-                        {d.city && (
-                        d.google_maps_url ? (
-                          <a 
-                            href={d.google_maps_url} 
-                            target="_blank" 
+                <div className="space-y-2">
+                  {filteredDealerships.map(d => (
+                    <div key={d.id} className="flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-border gac-shadow hover:shadow-md transition-shadow">
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <p className="font-display font-semibold text-sm leading-tight truncate">{d.name}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                          {d.city}{d.state ? `, ${d.state}` : ''}
+                        </p>
+                      </div>
+                      {/* Acciones */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {d.google_maps_url ? (
+                          <a
+                            href={d.google_maps_url}
+                            target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center gap-2 text-primary hover:underline"
-                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center justify-center w-9 h-9 rounded-lg border border-border text-muted-foreground hover:text-primary hover:border-primary transition-colors"
+                            title="Ver en Google Maps"
                           >
-                            <MapPin className="w-3.5 h-3.5 shrink-0" />
-                            {d.city}{d.state ? `, ${d.state}` : ''}
-                            <ExternalLink className="w-3 h-3" />
+                            <MapPin className="w-4 h-4" />
                           </a>
                         ) : (
-                          <div className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5 text-primary shrink-0" />{d.city}{d.state ? `, ${d.state}` : ''}</div>
-                        )
-                      )}
+                          <div className="flex items-center justify-center w-9 h-9 rounded-lg border border-border text-muted-foreground/40 cursor-default" title="Sin ubicación">
+                            <MapPin className="w-4 h-4" />
+                          </div>
+                        )}
+                        <Button
+                          size="sm"
+                          className="gac-gradient text-primary-foreground h-9 px-4 text-sm font-medium"
+                          disabled={vehicles.length === 0}
+                          onClick={() => iniciarReserva(d.id)}
+                        >
+                          Agendar
+                        </Button>
                       </div>
-                      <Button className="w-full mt-3 gac-gradient text-primary-foreground" size="sm" disabled={vehicles.length === 0}>
-                        Agendar Servicio
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           );
