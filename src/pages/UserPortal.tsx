@@ -99,11 +99,20 @@ interface Reservation {
 }
 
 
-const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
-  const h = Math.floor(i / 2) + 8;
-  const m = i % 2 === 0 ? '00' : '30';
-  return `${h.toString().padStart(2, '0')}:${m}`;
-}).filter(t => t !== '12:00' && t !== '12:30');
+// Genera bloques de hora según la duración del servicio (en minutos).
+// Horario: 08:00 – 17:00, se omite la hora de almuerzo (12:xx).
+const generateTimeSlots = (durationMinutes: number): string[] => {
+  const slots: string[] = [];
+  const step = Math.max(durationMinutes, 30); // mínimo 30 min de intervalo
+  for (let min = 8 * 60; min <= 17 * 60; min += step) {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    if (h === 12) continue; // omitir hora de almuerzo
+    slots.push(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
+  }
+  return slots;
+};
+
 
 // Retorna la fecha de hoy en la zona horaria de Venezuela (UTC-4)
 const getTodayVzla = () => {
@@ -843,7 +852,7 @@ const UserPortal = () => {
                           </p>
                         )}
                         <div className="grid grid-cols-4 gap-2">
-                          {TIME_SLOTS.map(h => {
+                          {generateTimeSlots(serviceTypes.find(s => s.name === selectedService)?.duration_minutes ?? 30).map(h => {
                             const isOccupied = occupiedTimes.includes(h);
                             const isPast = isSlotPast(h, selectedDate);
                             const isUnavailable = isOccupied || isPast;
@@ -1095,7 +1104,7 @@ const UserPortal = () => {
                 <div>
                   <Label className="text-xs">Hora</Label>
                   <div className="grid grid-cols-4 gap-1.5 mt-1">
-                    {TIME_SLOTS.map(h => {
+                    {generateTimeSlots(serviceTypes.find(s => s.name === editService)?.duration_minutes ?? 30).map(h => {
                       const isPast = isSlotPast(h, editDate);
                       return (
                         <button
