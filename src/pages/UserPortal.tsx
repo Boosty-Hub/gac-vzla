@@ -100,11 +100,11 @@ interface Reservation {
 
 
 // Genera bloques de hora según la duración del servicio (en minutos).
-// Horario: 08:00 – 17:00, se omite la hora de almuerzo (12:xx).
+// Horario: 08:00 – 16:00 (última cita), el concesionario cierra a las 17:00.
 const generateTimeSlots = (durationMinutes: number): string[] => {
   const slots: string[] = [];
   const step = Math.max(durationMinutes, 30); // mínimo 30 min de intervalo
-  for (let min = 8 * 60; min <= 17 * 60; min += step) {
+  for (let min = 8 * 60; min <= 16 * 60; min += step) {
     const h = Math.floor(min / 60);
     const m = min % 60;
     if (h === 12) continue; // omitir hora de almuerzo
