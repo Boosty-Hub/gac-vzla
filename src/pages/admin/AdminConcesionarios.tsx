@@ -32,6 +32,8 @@ interface Dealership {
   instagram: string | null;
   website: string | null;
   google_maps_url: string | null;
+  opening_hour: number;
+  closing_hour: number;
   created_at: string;
 }
 
@@ -66,6 +68,8 @@ const AdminConcesionarios = () => {
   const [formInstagram, setFormInstagram] = useState('');
   const [formWebsite, setFormWebsite] = useState('');
   const [formGoogleMapsUrl, setFormGoogleMapsUrl] = useState('');
+  const [formOpeningHour, setFormOpeningHour] = useState(8);
+  const [formClosingHour, setFormClosingHour] = useState(17);
 
   const fetchDealerships = async () => {
     setLoading(true);
@@ -95,6 +99,7 @@ const AdminConcesionarios = () => {
     setFormName(''); setFormCity(''); setFormState(''); setFormAddress('');
     setFormPhone(''); setFormSchedule('8:00 AM - 5:00 PM'); setFormBays('3'); setFormIsActive(true);
     setFormBrand(['GAC']); setFormIsServiceCenter(false); setFormEmail(''); setFormInstagram(''); setFormWebsite(''); setFormGoogleMapsUrl('');
+    setFormOpeningHour(8); setFormClosingHour(17);
     setDialogOpen(true);
   };
 
@@ -114,6 +119,8 @@ const AdminConcesionarios = () => {
     setFormInstagram(d.instagram || '');
     setFormWebsite(d.website || '');
     setFormGoogleMapsUrl(d.google_maps_url || '');
+    setFormOpeningHour(d.opening_hour ?? 8);
+    setFormClosingHour(d.closing_hour ?? 17);
     setDialogOpen(true);
   };
 
@@ -138,6 +145,8 @@ const AdminConcesionarios = () => {
       instagram: formInstagram.trim() || null,
       website: formWebsite.trim() || null,
       google_maps_url: formGoogleMapsUrl.trim() || null,
+      opening_hour: formOpeningHour,
+      closing_hour: formClosingHour,
     };
 
     if (editing) {
@@ -365,12 +374,13 @@ const AdminConcesionarios = () => {
                     </a>
                   </div>
                 )}
-                {detailDealer.schedule && (
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
-                    <span>{detailDealer.schedule}</span>
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
+                  <span>
+                    {detailDealer.schedule || `${String(detailDealer.opening_hour ?? 8).padStart(2, '0')}:00 – ${String(detailDealer.closing_hour ?? 17).padStart(2, '0')}:00`}
+                    {detailDealer.schedule && ` (citas: ${String(detailDealer.opening_hour ?? 8).padStart(2, '0')}:00 – ${String((detailDealer.closing_hour ?? 17) - 1).padStart(2, '0')}:00)`}
+                  </span>
+                </div>
                 <div className="flex items-center gap-2">
                   <Car className="w-4 h-4 text-muted-foreground shrink-0" />
                   <span>Bahías: {detailDealer.bays}</span>
@@ -466,15 +476,38 @@ const AdminConcesionarios = () => {
               <Input value={formGoogleMapsUrl} onChange={e => setFormGoogleMapsUrl(e.target.value)} placeholder="https://maps.google.com/..." />
               <p className="text-xs text-muted-foreground">Pega el enlace de Google Maps para que los clientes puedan ver la ubicación</p>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>Bahías</Label>
                 <Input type="number" value={formBays} onChange={e => setFormBays(e.target.value)} placeholder="3" />
               </div>
               <div className="space-y-2">
-                <Label>Horario</Label>
-                <Input value={formSchedule} onChange={e => setFormSchedule(e.target.value)} placeholder="8:00 AM - 5:00 PM" />
+                <Label className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Apertura</Label>
+                <Select value={String(formOpeningHour)} onValueChange={v => setFormOpeningHour(Number(v))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 13 }, (_, i) => i + 6).map(h => (
+                      <SelectItem key={h} value={String(h)}>{h.toString().padStart(2, '0')}:00</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> Cierre</Label>
+                <Select value={String(formClosingHour)} onValueChange={v => setFormClosingHour(Number(v))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 13 }, (_, i) => i + 6).map(h => (
+                      <SelectItem key={h} value={String(h)}>{h.toString().padStart(2, '0')}:00</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Horario (texto)</Label>
+              <Input value={formSchedule} onChange={e => setFormSchedule(e.target.value)} placeholder="8:00 AM - 5:00 PM" />
+              <p className="text-xs text-muted-foreground">Texto descriptivo del horario (informativo). Los bloques de cita se generan con Apertura/Cierre.</p>
             </div>
             <div className="flex items-center justify-between">
               <div>

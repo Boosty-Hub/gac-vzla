@@ -74,6 +74,8 @@ interface Dealership {
   address: string | null;
   google_maps_url: string | null;
   is_service_center: boolean;
+  opening_hour: number;
+  closing_hour: number;
 }
 
 interface ServiceType {
@@ -99,12 +101,14 @@ interface Reservation {
 }
 
 
-// Genera bloques de hora según la duración del servicio (en minutos).
-// Horario: 08:00 – 16:00 (última cita), el concesionario cierra a las 17:00.
-const generateTimeSlots = (durationMinutes: number): string[] => {
+// Genera bloques de hora según la duración del servicio y el horario del concesionario.
+// openingHour: hora de apertura (ej. 8 = 08:00). closingHour: hora de cierre (ej. 17 = 17:00).
+// El último bloque disponible es (closingHour - 1):00 — una hora antes del cierre.
+const generateTimeSlots = (durationMinutes: number, openingHour = 8, closingHour = 17): string[] => {
   const slots: string[] = [];
   const step = Math.max(durationMinutes, 30); // mínimo 30 min de intervalo
-  for (let min = 8 * 60; min <= 16 * 60; min += step) {
+  const lastSlotMin = (closingHour - 1) * 60;
+  for (let min = openingHour * 60; min <= lastSlotMin; min += step) {
     const h = Math.floor(min / 60);
     const m = min % 60;
     if (h === 12) continue; // omitir hora de almuerzo
@@ -322,7 +326,7 @@ const UserPortal = () => {
       // Fetch dealerships
       const { data: deals } = await supabase
         .from('dealerships')
-        .select('id, name, city, state, phone, address, google_maps_url, is_service_center')
+        .select('id, name, city, state, phone, address, google_maps_url, is_service_center, opening_hour, closing_hour')
         .eq('is_active', true)
         .eq('is_service_center', true);
       setDealerships(sortDealerships((deals || []) as Dealership[]));
@@ -575,6 +579,7 @@ const UserPortal = () => {
 
   const selectedDealershipData = dealerships.find(d => d.id === selectedDealership);
   const selectedVehicleData = vehicles.find(v => v.id === selectedVehicle);
+  const editDealershipData = editRes ? dealerships.find(d => d.name === editRes.dealerships?.name) : undefined;
 
   if (loading) {
     return (
@@ -852,7 +857,7 @@ const UserPortal = () => {
                           </p>
                         )}
                         <div className="grid grid-cols-4 gap-2">
-                          {generateTimeSlots(serviceTypes.find(s => s.name === selectedService)?.duration_minutes ?? 30).map(h => {
+                          {generateTimeSlots(serviceTypes.find(s => s.name === selectedService)?.duration_minutes ?? 30, selectedDealershipData?.opening_hour ?? 8, selectedDealershipData?.closing_hour ?? 17).map(h => {
                             const isOccupied = occupiedTimes.includes(h);
                             const isPast = isSlotPast(h, selectedDate);
                             const isUnavailable = isOccupied || isPast;
@@ -1104,7 +1109,7 @@ const UserPortal = () => {
                 <div>
                   <Label className="text-xs">Hora</Label>
                   <div className="grid grid-cols-4 gap-1.5 mt-1">
-                    {generateTimeSlots(serviceTypes.find(s => s.name === editService)?.duration_minutes ?? 30).map(h => {
+                    {generateTimeSlots(serviceTypes.find(s => s.name === editService)?.duration_minutes ?? 30, editDealershipData?.opening_hour ?? 8, editDealershipData?.closing_hour ?? 17).map(h => {
                       const isPast = isSlotPast(h, editDate);
                       return (
                         <button
