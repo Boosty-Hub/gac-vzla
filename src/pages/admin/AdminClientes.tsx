@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,12 +9,15 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+
+const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
 interface VehicleModel {
   id: string;
@@ -82,8 +86,10 @@ interface Client {
 
 const AdminClientes = () => {
   const { hasPermission } = useAuth();
+  const isMobile = useIsMobile();
   const canCreate = hasPermission('clientes.create');
   const canEdit = hasPermission('clientes.edit');
+  const canDelete = hasPermission('clientes.delete');
   const [clients, setClients] = useState<Client[]>([]);
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,6 +148,17 @@ const AdminClientes = () => {
   const [vDetailVehicle, setVDetailVehicle] = useState<Vehicle | null>(null);
   const [vDetailHistory, setVDetailHistory] = useState<ServiceRecord[]>([]);
   const [vDetailLoading, setVDetailLoading] = useState(false);
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  type BulkActionType = 'city' | 'state' | 'email' | 'isActive' | null;
+  const [bulkAction, setBulkAction] = useState<BulkActionType>(null);
+  const [bulkCity, setBulkCity] = useState('');
+  const [bulkState, setBulkState] = useState('');
+  const [bulkEmail, setBulkEmail] = useState('');
+  const [bulkIsActive, setBulkIsActive] = useState(true);
+  const [bulkConfirmDeleteOpen, setBulkConfirmDeleteOpen] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const openVehicleDetail = async (v: Vehicle) => {
     setVDetailVehicle(v);
@@ -430,6 +447,53 @@ const AdminClientes = () => {
     return `https://wa.me/${normalized.replace('+', '')}?text=${encodeURIComponent(msg)}`;
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (clients.length > 0 && clients.every(c => selectedIds.has(c.id))) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(clients.map(c => c.id)));
+    }
+  };
+
+  const executeBulkUpdate = async (payload: Record<string, any>) => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('clients').update(payload).in('id', ids);
+    if (error) toast.error('Error al actualizar clientes');
+    else { toast.success(`${ids.length} cliente(s) actualizados`); setSelectedIds(new Set()); setBulkAction(null); fetchClients(); }
+    setBulkLoading(false);
+  };
+
+  const executeBulkDelete = async () => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('clients').delete().in('id', ids);
+    if (error) toast.error('Error al eliminar clientes');
+    else { toast.success(`${ids.length} cliente(s) eliminados`); setSelectedIds(new Set()); setBulkConfirmDeleteOpen(false); fetchClients(); }
+    setBulkLoading(false);
+  };
+
+  const handleBulkApply = async () => {
+    if (!bulkAction) return;
+    let payload: Record<string, any> = {};
+    switch (bulkAction) {
+      case 'city': payload = { city: bulkCity.trim() || null }; break;
+      case 'state': payload = { state: (!bulkState || bulkState === '__clear') ? null : bulkState }; break;
+      case 'email': payload = { email: bulkEmail.trim() || null }; break;
+      case 'isActive': payload = { is_active: bulkIsActive }; break;
+      default: return;
+    }
+    await executeBulkUpdate(payload);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -446,13 +510,13 @@ const AdminClientes = () => {
         )}
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[180px] max-w-sm">
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+        <div className="relative col-span-2 sm:flex-1 sm:min-w-[180px] sm:max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Buscar nombre, cédula, correo, teléfono..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
         </div>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="w-[120px] h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
+          <SelectTrigger className="h-8 text-xs sm:w-[120px]"><SelectValue placeholder="Estado" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todos</SelectItem>
             <SelectItem value="activo">Activos</SelectItem>
@@ -460,7 +524,7 @@ const AdminClientes = () => {
           </SelectContent>
         </Select>
         <Select value={filterWarranty} onValueChange={setFilterWarranty}>
-          <SelectTrigger className="w-[150px] h-8 text-xs"><SelectValue placeholder="Garantía" /></SelectTrigger>
+          <SelectTrigger className="h-8 text-xs sm:w-[150px]"><SelectValue placeholder="Garantía" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todas las garantías</SelectItem>
             <SelectItem value="activa">Garantía activa</SelectItem>
@@ -468,7 +532,7 @@ const AdminClientes = () => {
           </SelectContent>
         </Select>
         <Select value={filterCity} onValueChange={setFilterCity}>
-          <SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue placeholder="Ciudad" /></SelectTrigger>
+          <SelectTrigger className="h-8 text-xs sm:w-[140px]"><SelectValue placeholder="Ciudad" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todas las ciudades</SelectItem>
             {Array.from(new Set(clients.map(c => c.city).filter(Boolean))).sort().map(city => (
@@ -477,7 +541,7 @@ const AdminClientes = () => {
           </SelectContent>
         </Select>
         <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
-          <SelectTrigger className="w-[100px] h-8 text-xs">
+          <SelectTrigger className="h-8 text-xs sm:w-[100px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -488,21 +552,159 @@ const AdminClientes = () => {
         </Select>
       </div>
 
-      <Card className="gac-shadow">
-        {loading ? (
+      {loading ? (
+        <Card className="gac-shadow">
           <CardContent className="p-8 text-center">
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">Cargando clientes...</p>
           </CardContent>
-        ) : clients.length === 0 ? (
+        </Card>
+      ) : clients.length === 0 ? (
+        <Card className="gac-shadow">
           <CardContent className="p-8 text-center">
             <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No se encontraron clientes</p>
           </CardContent>
-        ) : (
+        </Card>
+      ) : isMobile ? (
+        /* ── MOBILE CARD LIST ── */
+        <div className="space-y-2">
+          {clients.map(c => {
+            const hasWarranty = c.vehicles?.some(v => v.warranty_active);
+            const waUrl = buildClientWaUrl(c);
+            const isExpanded = expandedClient === c.id;
+            return (
+              <Card key={c.id} className={cn("gac-shadow cursor-pointer", selectedIds.has(c.id) && "ring-1 ring-primary/40 bg-primary/5")}>
+                <CardContent className="p-3 space-y-2" onClick={() => toggleExpand(c.id)}>
+                  {/* Row 1: checkbox + name + status badge */}
+                  <div className="flex items-start gap-2">
+                    <div onClick={e => e.stopPropagation()} className="shrink-0 pt-0.5">
+                      <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                        checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-bold truncate">{c.full_name}</p>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Badge variant={c.is_active ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
+                            {c.is_active ? 'Activo' : 'Inactivo'}
+                          </Badge>
+                          {c.vehicles?.length > 0 && (
+                            hasWarranty ? (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-800 gap-0.5">
+                                <ShieldCheck className="w-2.5 h-2.5" /> Garantía
+                              </Badge>
+                            ) : (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-red-100 text-red-800 gap-0.5">
+                                <ShieldX className="w-2.5 h-2.5" /> Sin garantía
+                              </Badge>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Row 2: cedula + phone + email */}
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground pl-5">
+                    {c.cedula && <span>{c.cedula}</span>}
+                    {c.phone && <span>{c.phone}</span>}
+                    {c.email && <span className="truncate max-w-[180px]">{c.email}</span>}
+                    {c.city && <span>{c.city}{c.state ? `, ${c.state}` : ''}</span>}
+                  </div>
+                  {/* Row 3: vehicles count + actions */}
+                  <div className="flex items-center justify-between pl-5" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
+                        <Car className="w-2.5 h-2.5" /> {c.vehicles?.length ?? 0} veh.
+                      </Badge>
+                      <button
+                        className="text-[10px] text-primary flex items-center gap-0.5"
+                        onClick={() => toggleExpand(c.id)}
+                      >
+                        {isExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                        {isExpanded ? 'Ocultar' : 'Ver vehículos'}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 relative" onClick={() => openUsersDialog(c)}>
+                        <UserPlus className="w-3.5 h-3.5" />
+                        {(c.client_users?.[0]?.count || 0) > 0 && (
+                          <span className="absolute -top-1 -right-1 flex items-center justify-center w-3.5 h-3.5 rounded-full bg-primary text-[8px] font-bold text-primary-foreground">
+                            {c.client_users[0].count}
+                          </span>
+                        )}
+                      </Button>
+                      {waUrl && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-green-600" asChild>
+                          <a href={waUrl} target="_blank" rel="noopener noreferrer">
+                            <MessageCircle className="w-3.5 h-3.5" />
+                          </a>
+                        </Button>
+                      )}
+                      {canEdit && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditClient(c)}>
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {/* Expanded vehicles */}
+                  {isExpanded && (
+                    <div className="mt-2 pt-2 border-t space-y-2" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold flex items-center gap-1"><Car className="w-3.5 h-3.5" /> Vehículos</p>
+                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddVehicle(c.id)}>
+                          <Plus className="w-3 h-3 mr-1" /> Agregar
+                        </Button>
+                      </div>
+                      {!clientVehicles[c.id] ? (
+                        <p className="text-xs text-muted-foreground">Cargando...</p>
+                      ) : clientVehicles[c.id].length === 0 ? (
+                        <p className="text-xs text-muted-foreground">Sin vehículos registrados</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {clientVehicles[c.id].map(v => (
+                            <div key={v.id} className="flex items-center justify-between bg-muted/50 rounded-md p-2 border cursor-pointer" onClick={() => openVehicleDetail(v)}>
+                              <div className="min-w-0">
+                                <p className="text-xs font-medium truncate">
+                                  {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}
+                                </p>
+                                <p className="text-[10px] text-muted-foreground">
+                                  {v.plate && `${v.plate} · `}{v.mileage.toLocaleString()} km
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <Badge variant={v.warranty_active ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
+                                  {v.warranty_active ? 'Garantía' : 'Sin garantía'}
+                                </Badge>
+                                {canEdit && (
+                                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={e => { e.stopPropagation(); openEditVehicle(v); }}>
+                                    <Pencil className="w-3 h-3" />
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      ) : (
+        /* ── DESKTOP TABLE ── */
+        <Card className="gac-shadow">
           <Table className="text-xs">
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                <TableHead className="w-8 pl-3">
+                  <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                    checked={clients.length > 0 && clients.every(c => selectedIds.has(c.id))}
+                    onChange={toggleSelectAll} />
+                </TableHead>
                 <TableHead className="w-6"></TableHead>
                 <TableHead>Nombre</TableHead>
                 <TableHead>Cédula</TableHead>
@@ -520,6 +722,10 @@ const AdminClientes = () => {
               {clients.map(c => (
                 <Fragment key={c.id}>
                   <TableRow className="cursor-pointer [&>td]:py-1.5" onClick={() => toggleExpand(c.id)}>
+                    <TableCell className="pl-3" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                        checked={selectedIds.has(c.id)} onChange={() => toggleSelect(c.id)} />
+                    </TableCell>
                     <TableCell className="w-6 pr-0">
                       {expandedClient === c.id
                         ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
@@ -585,7 +791,7 @@ const AdminClientes = () => {
                   </TableRow>
                   {expandedClient === c.id && (
                     <TableRow key={`${c.id}-vehicles`}>
-                      <TableCell colSpan={10} className="bg-muted/50 p-4">
+                      <TableCell colSpan={11} className="bg-muted/50 p-4">
                         <div className="flex items-center justify-between mb-3">
                           <h4 className="text-sm font-semibold flex items-center gap-2">
                             <Car className="w-4 h-4" /> Vehículos del cliente
@@ -639,8 +845,8 @@ const AdminClientes = () => {
               ))}
             </TableBody>
           </Table>
-        )}
-      </Card>
+        </Card>
+      )}
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
@@ -671,7 +877,7 @@ const AdminClientes = () => {
 
       {/* Client Dialog */}
       <Dialog open={clientDialogOpen} onOpenChange={setClientDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display">
               {editingClient ? 'Editar Cliente' : 'Nuevo Cliente'}
@@ -716,9 +922,9 @@ const AdminClientes = () => {
               <Switch checked={formIsActive} onCheckedChange={setFormIsActive} />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setClientDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSaveClient} disabled={saving} className="gac-gradient">
+          <DialogFooter className="flex-row gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setClientDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSaveClient} disabled={saving} className="flex-1 gac-gradient">
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingClient ? 'Guardar Cambios' : 'Crear Cliente'}
             </Button>
           </DialogFooter>
@@ -727,7 +933,7 @@ const AdminClientes = () => {
 
       {/* Client Users Dialog */}
       <Dialog open={usersDialogOpen} onOpenChange={setUsersDialogOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">Usuarios del cliente</DialogTitle>
           </DialogHeader>
@@ -809,7 +1015,7 @@ const AdminClientes = () => {
 
       {/* Vehicle Detail Dialog */}
       <Dialog open={vDetailOpen} onOpenChange={setVDetailOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               <Car className="w-4 h-4" /> Detalle del Vehículo
@@ -879,9 +1085,118 @@ const AdminClientes = () => {
         </DialogContent>
       </Dialog>
 
+      {/* FLOATING BULK ACTION BAR */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+          <div className="flex items-center gap-1 bg-gray-900 text-white rounded-2xl shadow-2xl px-3 py-2 border border-gray-700 max-w-[calc(100vw-2rem)] overflow-x-auto">
+            <span className="text-xs font-bold whitespace-nowrap text-primary bg-primary/20 px-2 py-0.5 rounded-full shrink-0">
+              {selectedIds.size} sel.
+            </span>
+            <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('city'); setBulkCity(''); }}>
+              <MapPin className="w-3 h-3" /> Ciudad
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('state'); setBulkState(''); }}>
+              <MapPin className="w-3 h-3" /> Estado (Vzla)
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('email'); setBulkEmail(''); }}>
+              <Mail className="w-3 h-3" /> Correo
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('isActive'); setBulkIsActive(true); }}>
+              <Power className="w-3 h-3" /> Estado
+            </Button>
+            {canDelete && (
+              <>
+                <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
+                <Button size="sm" variant="ghost" className="text-red-400 hover:bg-white/10 hover:text-red-300 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+                  onClick={() => setBulkConfirmDeleteOpen(true)}>
+                  <Trash2 className="w-3 h-3" /> Eliminar
+                </Button>
+              </>
+            )}
+            <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
+            <Button size="sm" variant="ghost" className="text-gray-400 hover:bg-white/10 hover:text-white h-7 w-7 p-0 shrink-0"
+              onClick={() => setSelectedIds(new Set())}>
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* BULK ACTION DIALOG */}
+      <Dialog open={bulkAction !== null} onOpenChange={open => { if (!open) setBulkAction(null); }}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-display">
+              {bulkAction === 'city' && 'Cambiar ciudad'}
+              {bulkAction === 'state' && 'Cambiar estado (Venezuela)'}
+              {bulkAction === 'email' && 'Cambiar correo electrónico'}
+              {bulkAction === 'isActive' && 'Cambiar estado activo'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-1 space-y-3">
+            <p className="text-xs text-muted-foreground">Se aplicará a <strong>{selectedIds.size}</strong> cliente(s) seleccionado(s).</p>
+            {bulkAction === 'city' && (
+              <Input value={bulkCity} onChange={e => setBulkCity(e.target.value)}
+                placeholder="Ej: Caracas · vacío = quitar ciudad" className="h-9 text-xs" />
+            )}
+            {bulkAction === 'state' && (
+              <Select value={bulkState} onValueChange={setBulkState}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado venezolano" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__clear">Sin estado</SelectItem>
+                  {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {bulkAction === 'email' && (
+              <Input type="email" value={bulkEmail} onChange={e => setBulkEmail(e.target.value)}
+                placeholder="correo@ejemplo.com · vacío = quitar correo" className="h-9 text-xs" />
+            )}
+            {bulkAction === 'isActive' && (
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <p className="text-sm font-medium">{bulkIsActive ? 'Activo' : 'Inactivo'}</p>
+                  <p className="text-xs text-muted-foreground">Estado del cliente en el sistema</p>
+                </div>
+                <Switch checked={bulkIsActive} onCheckedChange={setBulkIsActive} />
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex-row gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => setBulkAction(null)}>Cancelar</Button>
+            <Button size="sm" className="flex-1 gac-gradient" disabled={bulkLoading} onClick={handleBulkApply}>
+              {bulkLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Aplicar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BULK DELETE CONFIRMATION */}
+      <AlertDialog open={bulkConfirmDeleteOpen} onOpenChange={setBulkConfirmDeleteOpen}>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar {selectedIds.size} cliente(s)?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará permanentemente <strong>{selectedIds.size}</strong> cliente(s) y sus datos asociados. No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkLoading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={executeBulkDelete} disabled={bulkLoading} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {bulkLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : `Eliminar ${selectedIds.size}`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Vehicle Dialog */}
       <Dialog open={vehicleDialogOpen} onOpenChange={setVehicleDialogOpen}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display">
               {editingVehicle ? 'Editar Vehículo' : 'Agregar Vehículo'}
@@ -933,9 +1248,9 @@ const AdminClientes = () => {
               <Switch checked={vFormWarranty} onCheckedChange={setVFormWarranty} />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setVehicleDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={handleSaveVehicle} disabled={savingVehicle} className="gac-gradient">
+          <DialogFooter className="flex-row gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setVehicleDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSaveVehicle} disabled={savingVehicle} className="flex-1 gac-gradient">
               {savingVehicle ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingVehicle ? 'Guardar Cambios' : 'Registrar Vehículo'}
             </Button>
           </DialogFooter>

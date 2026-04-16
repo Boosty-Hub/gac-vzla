@@ -12,8 +12,11 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2, Trash2, Navigation } from 'lucide-react';
+import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2, Trash2, Navigation, X, Power, Tag } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+
+const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
 interface Dealership {
   id: string;
@@ -52,6 +55,21 @@ const AdminConcesionarios = () => {
   const [deleteTarget, setDeleteTarget] = useState<Dealership | null>(null);
 
   const [filterBrand, setFilterBrand] = useState('todos');
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  type BulkActionType = 'brand' | 'city' | 'state' | 'isServiceCenter' | 'bays' | 'openingHour' | 'closingHour' | 'isActive' | null;
+  const [bulkAction, setBulkAction] = useState<BulkActionType>(null);
+  const [bulkBrand, setBulkBrand] = useState<string[]>(['GAC']);
+  const [bulkCity, setBulkCity] = useState('');
+  const [bulkState, setBulkState] = useState('');
+  const [bulkIsServiceCenter, setBulkIsServiceCenter] = useState(false);
+  const [bulkBays, setBulkBays] = useState('3');
+  const [bulkOpeningHour, setBulkOpeningHour] = useState(8);
+  const [bulkClosingHour, setBulkClosingHour] = useState(17);
+  const [bulkIsActive, setBulkIsActive] = useState(true);
+  const [bulkConfirmDeleteOpen, setBulkConfirmDeleteOpen] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   // Form
   const [formName, setFormName] = useState('');
@@ -191,6 +209,57 @@ const AdminConcesionarios = () => {
     setDeleteTarget(null);
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (filteredDealerships.length > 0 && filteredDealerships.every(d => selectedIds.has(d.id))) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredDealerships.map(d => d.id)));
+    }
+  };
+
+  const executeBulkUpdate = async (payload: Record<string, any>) => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('dealerships').update(payload).in('id', ids);
+    if (error) toast.error('Error al actualizar concesionarios');
+    else { toast.success(`${ids.length} concesionario(s) actualizados`); setSelectedIds(new Set()); setBulkAction(null); fetchDealerships(); }
+    setBulkLoading(false);
+  };
+
+  const executeBulkDelete = async () => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('dealerships').delete().in('id', ids);
+    if (error) toast.error('Error al eliminar concesionarios');
+    else { toast.success(`${ids.length} concesionario(s) eliminados`); setSelectedIds(new Set()); setBulkConfirmDeleteOpen(false); fetchDealerships(); }
+    setBulkLoading(false);
+  };
+
+  const handleBulkApply = async () => {
+    if (!bulkAction) return;
+    let payload: Record<string, any> = {};
+    switch (bulkAction) {
+      case 'brand': if (bulkBrand.length === 0) return; payload = { brand: bulkBrand }; break;
+      case 'city': payload = { city: bulkCity.trim() || null }; break;
+      case 'state': payload = { state: (!bulkState || bulkState === '__clear') ? null : bulkState }; break;
+      case 'isServiceCenter': payload = { is_service_center: bulkIsServiceCenter }; break;
+      case 'bays': if (!bulkBays) return; payload = { bays: parseInt(bulkBays) || 1 }; break;
+      case 'openingHour': payload = { opening_hour: bulkOpeningHour }; break;
+      case 'closingHour': payload = { closing_hour: bulkClosingHour }; break;
+      case 'isActive': payload = { is_active: bulkIsActive }; break;
+      default: return;
+    }
+    await executeBulkUpdate(payload);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -208,7 +277,7 @@ const AdminConcesionarios = () => {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Tabs value={filterBrand} onValueChange={setFilterBrand}>
+        <Tabs value={filterBrand} onValueChange={v => { setFilterBrand(v); setSelectedIds(new Set()); }}>
           <TabsList className="h-8">
             <TabsTrigger value="todos" className="text-xs px-3 h-6">Todas</TabsTrigger>
             <TabsTrigger value="GAC" className="text-xs px-3 h-6">GAC</TabsTrigger>
@@ -232,6 +301,14 @@ const AdminConcesionarios = () => {
           <Table className="text-xs">
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                <TableHead className="w-8 pl-3">
+                  <input
+                    type="checkbox"
+                    className="h-3.5 w-3.5 rounded border-gray-300 cursor-pointer"
+                    checked={filteredDealerships.length > 0 && filteredDealerships.every(d => selectedIds.has(d.id))}
+                    onChange={toggleSelectAll}
+                  />
+                </TableHead>
                 <TableHead>Nombre</TableHead>
                 <TableHead>Marca</TableHead>
                 <TableHead>Centro Serv.</TableHead>
@@ -245,7 +322,15 @@ const AdminConcesionarios = () => {
             </TableHeader>
             <TableBody>
               {filteredDealerships.map(d => (
-                <TableRow key={d.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => { setDetailDealer(d); setDetailOpen(true); }}>
+                <TableRow key={d.id} className={cn("[&>td]:py-1.5 cursor-pointer hover:bg-muted/50", selectedIds.has(d.id) && "bg-primary/5")} onClick={() => { setDetailDealer(d); setDetailOpen(true); }}>
+                  <TableCell className="pl-3" onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 rounded border-gray-300 cursor-pointer"
+                      checked={selectedIds.has(d.id)}
+                      onChange={() => toggleSelect(d.id)}
+                    />
+                  </TableCell>
                   <TableCell className="font-medium max-w-[200px] truncate">{d.name}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
@@ -532,6 +617,166 @@ const AdminConcesionarios = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Floating bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-background border shadow-lg rounded-full px-4 py-2 overflow-x-auto max-w-[95vw]">
+          <span className="text-xs font-medium text-muted-foreground shrink-0">{selectedIds.size} sel.</span>
+          <div className="w-px h-4 bg-border shrink-0" />
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkBrand(['GAC']); setBulkAction('brand'); }}>
+            <Tag className="w-3 h-3" /> Marca
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkCity(''); setBulkAction('city'); }}>
+            <MapPin className="w-3 h-3" /> Ciudad
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkState(''); setBulkAction('state'); }}>
+            <MapPin className="w-3 h-3" /> Estado
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkIsServiceCenter(false); setBulkAction('isServiceCenter'); }}>
+            <Wrench className="w-3 h-3" /> C.Servicio
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkBays('3'); setBulkAction('bays'); }}>
+            <Car className="w-3 h-3" /> Bahías
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkOpeningHour(8); setBulkAction('openingHour'); }}>
+            <Clock className="w-3 h-3" /> Apertura
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkClosingHour(17); setBulkAction('closingHour'); }}>
+            <Clock className="w-3 h-3" /> Cierre
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkIsActive(true); setBulkAction('isActive'); }}>
+            <Power className="w-3 h-3" /> Estado
+          </Button>
+          {canDelete && (
+            <Button variant="destructive" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => setBulkConfirmDeleteOpen(true)}>
+              <Trash2 className="w-3 h-3" /> Eliminar
+            </Button>
+          )}
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setSelectedIds(new Set())}>
+            <X className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      )}
+
+      {/* Bulk action dialog */}
+      <Dialog open={bulkAction !== null} onOpenChange={open => { if (!open) setBulkAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-display text-sm">
+              Acción masiva — {selectedIds.size} concesionario(s)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-3 space-y-3">
+            {bulkAction === 'brand' && (
+              <div className="space-y-2">
+                <Label>Marcas</Label>
+                <div className="flex items-center gap-4">
+                  {['GAC', 'DFSK'].map(b => (
+                    <label key={b} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={bulkBrand.includes(b)}
+                        onChange={e => {
+                          if (e.target.checked) setBulkBrand(prev => [...prev, b]);
+                          else setBulkBrand(prev => prev.filter(x => x !== b));
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-primary"
+                      />
+                      <span className="text-sm font-medium">{b}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            {bulkAction === 'city' && (
+              <div className="space-y-2">
+                <Label>Ciudad</Label>
+                <Input value={bulkCity} onChange={e => setBulkCity(e.target.value)} placeholder="Ej: Caracas" autoFocus />
+              </div>
+            )}
+            {bulkAction === 'state' && (
+              <div className="space-y-2">
+                <Label>Estado</Label>
+                <Select value={bulkState || '__clear'} onValueChange={setBulkState}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__clear">— Limpiar estado —</SelectItem>
+                    {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'isServiceCenter' && (
+              <div className="flex items-center justify-between">
+                <Label>Centro de Servicio</Label>
+                <Switch checked={bulkIsServiceCenter} onCheckedChange={setBulkIsServiceCenter} />
+              </div>
+            )}
+            {bulkAction === 'bays' && (
+              <div className="space-y-2">
+                <Label>Número de Bahías</Label>
+                <Input type="number" min={1} value={bulkBays} onChange={e => setBulkBays(e.target.value)} autoFocus />
+              </div>
+            )}
+            {bulkAction === 'openingHour' && (
+              <div className="space-y-2">
+                <Label>Hora de Apertura</Label>
+                <Select value={String(bulkOpeningHour)} onValueChange={v => setBulkOpeningHour(Number(v))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 13 }, (_, i) => i + 6).map(h => (
+                      <SelectItem key={h} value={String(h)}>{h.toString().padStart(2, '0')}:00</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'closingHour' && (
+              <div className="space-y-2">
+                <Label>Hora de Cierre</Label>
+                <Select value={String(bulkClosingHour)} onValueChange={v => setBulkClosingHour(Number(v))}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 13 }, (_, i) => i + 6).map(h => (
+                      <SelectItem key={h} value={String(h)}>{h.toString().padStart(2, '0')}:00</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'isActive' && (
+              <div className="flex items-center justify-between">
+                <Label>Estado activo</Label>
+                <Switch checked={bulkIsActive} onCheckedChange={setBulkIsActive} />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkAction(null)}>Cancelar</Button>
+            <Button onClick={handleBulkApply} disabled={bulkLoading || (bulkAction === 'brand' && bulkBrand.length === 0)} className="imb-gradient">
+              {bulkLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Aplicar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk delete confirmation */}
+      <AlertDialog open={bulkConfirmDeleteOpen} onOpenChange={setBulkConfirmDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar {selectedIds.size} concesionario(s)?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará permanentemente los concesionarios seleccionados. No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={executeBulkDelete} disabled={bulkLoading} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {bulkLoading ? 'Eliminando...' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirmation */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>

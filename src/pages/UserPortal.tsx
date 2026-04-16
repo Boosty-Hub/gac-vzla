@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
-import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink } from 'lucide-react';
+import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink, Search } from 'lucide-react';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
@@ -209,6 +209,7 @@ const UserPortal = () => {
   const [notes, setNotes] = useState<string>(() => getUpLS().notes || '');
   const [occupiedTimes, setOccupiedTimes] = useState<string[]>([]);
   const [loadingTimes, setLoadingTimes] = useState(false);
+  const [vehicleSearch, setVehicleSearch] = useState('');
 
   const handleSignOut = async () => {
     try { await signOut(); } catch (e) { console.error(e); }
@@ -416,6 +417,7 @@ const UserPortal = () => {
     setMileage('');
     setNotes('');
     setOccupiedTimes([]);
+    setVehicleSearch('');
     setReservaConfirmada(false);
     setPaso(1);
     setVista('reservar');
@@ -602,25 +604,29 @@ const UserPortal = () => {
               <ArrowLeft className="w-5 h-5" />
             </button>
           )}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             {(() => {
               const brands = Array.from(new Set(vehicles.map(v => v.vehicle_models?.brand).filter(Boolean) as string[]));
               const hasGac = brands.some(b => b.toUpperCase() === 'GAC');
               const hasDfsk = brands.some(b => b.toUpperCase() === 'DFSK');
               if (!hasGac && !hasDfsk) return null;
               return (
-                <div className="flex items-center gap-2">
-                  {hasGac && <img src={gacLogo} alt="GAC" className="h-9 brightness-0 invert" />}
-                  {hasGac && hasDfsk && <div className="w-px h-7 bg-white/30" />}
-                  {hasDfsk && <img src={dfskLogo} alt="DFSK" className="h-8 brightness-0 invert" />}
+                <div className="flex items-center gap-2 h-8">
+                  {hasGac && (
+                    <img src={gacLogo} alt="GAC" className="h-7 w-auto object-contain brightness-0 invert" />
+                  )}
+                  {hasGac && hasDfsk && (
+                    <div className="w-px h-5 bg-white/30 self-center" />
+                  )}
+                  {hasDfsk && (
+                    <img src={dfskLogo} alt="DFSK" className="h-7 w-auto object-contain brightness-0 invert" />
+                  )}
                 </div>
               );
             })()}
-            <div>
-              <p className="text-xs text-white/60 leading-tight">
-                {clientData ? clientData.full_name : profile?.full_name || 'Portal Cliente'}
-              </p>
-            </div>
+            <p className="text-xs text-white/60 leading-tight">
+              {clientData ? clientData.full_name : profile?.full_name || 'Portal Cliente'}
+            </p>
           </div>
         </div>
         <button onClick={handleSignOut} className="p-2 rounded-lg text-white/60 hover:text-white hover:bg-white/10">
@@ -774,25 +780,80 @@ const UserPortal = () => {
             {/* Paso 1: Vehículo y tipo */}
             {paso === 1 && (
               <div className="space-y-4">
-                <div>
+                <div className="space-y-2">
                   <Label>Vehículo</Label>
-                  <Select value={selectedVehicle} onValueChange={setSelectedVehicle}>
-                    <SelectTrigger className="mt-1"><SelectValue placeholder="Selecciona tu vehículo" /></SelectTrigger>
-                    <SelectContent>
-                      {vehicles.map(v => (
-                        <SelectItem key={v.id} value={v.id}>
-                          {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year} - {v.plate}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {/* Barra de búsqueda por placa */}
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar por placa (ej: AH9630D)..."
+                      className="pl-9 h-9 text-sm"
+                      value={vehicleSearch}
+                      onChange={e => {
+                        setVehicleSearch(e.target.value);
+                        setSelectedVehicle('');
+                      }}
+                    />
+                    {vehicleSearch && (
+                      <button
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        onClick={() => { setVehicleSearch(''); setSelectedVehicle(''); }}
+                      >
+                        <XCircle className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  {/* Resultados inline al buscar, dropdown normal si no hay búsqueda */}
+                  {vehicleSearch.trim() ? (
+                    (() => {
+                      const q = vehicleSearch.trim().toLowerCase();
+                      const filtered = vehicles.filter(v =>
+                        (v.plate || '').toLowerCase().includes(q) ||
+                        (v.vehicle_models?.name || '').toLowerCase().includes(q) ||
+                        (v.vehicle_models?.brand || '').toLowerCase().includes(q)
+                      );
+                      return filtered.length === 0 ? (
+                        <div className="border rounded-md px-3 py-4 text-center text-xs text-muted-foreground">
+                          No se encontraron vehículos con placa "{vehicleSearch}"
+                        </div>
+                      ) : (
+                        <div className="border rounded-md divide-y overflow-hidden">
+                          {filtered.map(v => (
+                            <button
+                              key={v.id}
+                              type="button"
+                              className="w-full text-left px-3 py-2.5 text-sm hover:bg-muted/60 transition-colors flex items-center gap-2"
+                              onClick={() => { setSelectedVehicle(v.id); setVehicleSearch(''); }}
+                            >
+                              <Car className="w-4 h-4 text-muted-foreground shrink-0" />
+                              <span className="font-medium">{v.plate || 'Sin placa'}</span>
+                              <span className="text-muted-foreground">— {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</span>
+                            </button>
+                          ))}
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <Select value={selectedVehicle} onValueChange={setSelectedVehicle}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecciona tu vehículo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {vehicles.map(v => (
+                          <SelectItem key={v.id} value={v.id}>
+                            {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year} — {v.plate || 'Sin placa'}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div>
                   <Label>Tipo de Servicio</Label>
                   <Select value={selectedService} onValueChange={v => { setSelectedService(v); setNotes(''); }}>
                     <SelectTrigger className="mt-1"><SelectValue placeholder="Selecciona el servicio" /></SelectTrigger>
                     <SelectContent>
-                      {serviceTypes.map(t => <SelectItem key={t.id} value={t.name}>{t.name} ({t.duration_minutes >= 60 ? `${Math.floor(t.duration_minutes / 60)}h${t.duration_minutes % 60 > 0 ? ` ${t.duration_minutes % 60}min` : ''}` : `${t.duration_minutes}min`})</SelectItem>)}
+                      {serviceTypes.map(t => <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   {selectedService && serviceTypes.find(s => s.name === selectedService)?.requires_description && (

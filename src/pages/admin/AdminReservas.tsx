@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, Star } from 'lucide-react';
+import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, Star, X, Clock } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -107,6 +107,19 @@ const AdminReservas = () => {
   // Delete
   const [deleteTarget, setDeleteTarget] = useState<Reservation | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  type BulkActionType = 'status' | 'service' | 'dealership' | 'date' | 'time' | 'mileage' | null;
+  const [bulkAction, setBulkAction] = useState<BulkActionType>(null);
+  const [bulkStatus, setBulkStatus] = useState('pendiente');
+  const [bulkService, setBulkService] = useState('');
+  const [bulkDealership, setBulkDealership] = useState('');
+  const [bulkDate, setBulkDate] = useState('');
+  const [bulkTime, setBulkTime] = useState('08:00');
+  const [bulkMileage, setBulkMileage] = useState('');
+  const [bulkConfirmDeleteOpen, setBulkConfirmDeleteOpen] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   // Detail dialog
   const [detailRes, setDetailRes] = useState<Reservation | null>(null);
@@ -338,6 +351,55 @@ const AdminReservas = () => {
     setDialogOpen(true);
   };
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (filteredReservations.length > 0 && filteredReservations.every(r => selectedIds.has(r.id))) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredReservations.map(r => r.id)));
+    }
+  };
+
+  const executeBulkUpdate = async (payload: Record<string, any>) => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('reservations').update(payload).in('id', ids);
+    if (error) toast.error('Error al actualizar reservas');
+    else { toast.success(`${ids.length} reserva(s) actualizadas`); setSelectedIds(new Set()); setBulkAction(null); fetchReservations(); }
+    setBulkLoading(false);
+  };
+
+  const executeBulkDelete = async () => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('reservations').delete().in('id', ids);
+    if (error) toast.error('Error al eliminar reservas');
+    else { toast.success(`${ids.length} reserva(s) eliminadas`); setSelectedIds(new Set()); setBulkConfirmDeleteOpen(false); fetchReservations(); }
+    setBulkLoading(false);
+  };
+
+  const handleBulkApply = async () => {
+    if (!bulkAction) return;
+    let payload: Record<string, any> = {};
+    switch (bulkAction) {
+      case 'status': payload = { status: bulkStatus }; break;
+      case 'service': if (!bulkService) return; payload = { service_type: bulkService }; break;
+      case 'dealership': if (!bulkDealership) return; payload = { dealership_id: bulkDealership }; break;
+      case 'date': if (!bulkDate) return; payload = { reservation_date: bulkDate }; break;
+      case 'time': payload = { reservation_time: bulkTime + ':00' }; break;
+      case 'mileage': if (!bulkMileage) return; payload = { current_mileage: parseInt(bulkMileage) || 0 }; break;
+      default: return;
+    }
+    await executeBulkUpdate(payload);
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -522,7 +584,7 @@ const AdminReservas = () => {
           </Badge>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <Tabs value={view} onValueChange={v => setView(v as 'table' | 'matrix')}>
+          <Tabs value={view} onValueChange={v => { setView(v as 'table' | 'matrix'); setSelectedIds(new Set()); }}>
             <TabsList className="h-8">
               <TabsTrigger value="table" className="gap-1 text-xs h-7 px-2"><List className="w-3.5 h-3.5" /><span className="hidden sm:inline"> Tabla</span></TabsTrigger>
               <TabsTrigger value="matrix" className="gap-1 text-xs h-7 px-2"><LayoutGrid className="w-3.5 h-3.5" /><span className="hidden sm:inline"> Matriz</span></TabsTrigger>
@@ -563,7 +625,7 @@ const AdminReservas = () => {
         </div>
         {/* Row 2: filters */}
         <div className="flex items-center gap-2 flex-wrap">
-          <Select value={filtroConc} onValueChange={setFiltroConc}>
+          <Select value={filtroConc} onValueChange={v => { setFiltroConc(v); setSelectedIds(new Set()); }}>
             <SelectTrigger className="w-full sm:w-[170px] h-8 text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="todos">Todos los concesionarios</SelectItem>
@@ -572,14 +634,14 @@ const AdminReservas = () => {
           </Select>
           {view === 'table' && (
             <>
-              <Select value={filtroEstado} onValueChange={setFiltroEstado}>
+              <Select value={filtroEstado} onValueChange={v => { setFiltroEstado(v); setSelectedIds(new Set()); }}>
                 <SelectTrigger className="flex-1 sm:w-[120px] sm:flex-none h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos</SelectItem>
                   {Object.entries(STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Select value={filtroServicio} onValueChange={setFiltroServicio}>
+              <Select value={filtroServicio} onValueChange={v => { setFiltroServicio(v); setSelectedIds(new Set()); }}>
                 <SelectTrigger className="flex-1 sm:w-[150px] sm:flex-none h-8 text-xs"><SelectValue placeholder="Servicio" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los servicios</SelectItem>
@@ -628,13 +690,23 @@ const AdminReservas = () => {
           /* ── MOBILE CARDS ── */
           <div className="space-y-2">
             {filteredReservations.map(r => (
-              <Card key={r.id} className="gac-shadow cursor-pointer" onClick={() => setDetailRes(r)}>
+              <Card key={r.id} className={cn("gac-shadow cursor-pointer", selectedIds.has(r.id) && "ring-1 ring-primary/40 bg-primary/5")} onClick={() => setDetailRes(r)}>
                 <CardContent className="p-3 space-y-2">
                   {/* Row 1: date + status */}
                   <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-bold">{formatDate(r.reservation_date)} · {formatTime(r.reservation_time)}</p>
-                      <p className="text-[11px] text-muted-foreground">{r.dealerships?.name || '-'}</p>
+                    <div className="flex items-start gap-2 min-w-0">
+                      <div onClick={e => e.stopPropagation()} className="shrink-0 pt-0.5">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-gray-300 cursor-pointer"
+                          checked={selectedIds.has(r.id)}
+                          onChange={() => toggleSelect(r.id)}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold">{formatDate(r.reservation_date)} · {formatTime(r.reservation_time)}</p>
+                        <p className="text-[11px] text-muted-foreground">{r.dealerships?.name || '-'}</p>
+                      </div>
                     </div>
                     {canEdit ? (
                       <Select value={r.status} onValueChange={val => {
@@ -708,6 +780,14 @@ const AdminReservas = () => {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                  <TableHead className="w-8 pl-3">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 rounded border-gray-300 cursor-pointer"
+                      checked={filteredReservations.length > 0 && filteredReservations.every(r => selectedIds.has(r.id))}
+                      onChange={toggleSelectAll}
+                    />
+                  </TableHead>
                   <TableHead>Fecha / Hora</TableHead>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Estado (Vzla)</TableHead>
@@ -720,7 +800,15 @@ const AdminReservas = () => {
               </TableHeader>
               <TableBody>
                 {filteredReservations.map(r => (
-                  <TableRow key={r.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => setDetailRes(r)}>
+                  <TableRow key={r.id} className={cn("[&>td]:py-1.5 cursor-pointer hover:bg-muted/50", selectedIds.has(r.id) && "bg-primary/5")} onClick={() => setDetailRes(r)}>
+                    <TableCell className="pl-3" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 rounded border-gray-300 cursor-pointer"
+                        checked={selectedIds.has(r.id)}
+                        onChange={() => toggleSelect(r.id)}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">
                       {formatDate(r.reservation_date)}
                       <br />
@@ -872,6 +960,143 @@ const AdminReservas = () => {
           )}
         </Card>
       )}
+
+      {/* Floating bulk action bar */}
+      {view === 'table' && selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-background border shadow-lg rounded-full px-4 py-2 overflow-x-auto max-w-[95vw]">
+          <span className="text-xs font-medium text-muted-foreground shrink-0">{selectedIds.size} sel.</span>
+          <div className="w-px h-4 bg-border shrink-0" />
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkStatus('pendiente'); setBulkAction('status'); }}>
+            <CalendarDays className="w-3 h-3" /> Estado
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkService(''); setBulkAction('service'); }}>
+            <Settings className="w-3 h-3" /> Servicio
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkDealership(''); setBulkAction('dealership'); }}>
+            <MapPin className="w-3 h-3" /> Concesionario
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkDate(''); setBulkAction('date'); }}>
+            <CalendarDays className="w-3 h-3" /> Fecha
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkTime('08:00'); setBulkAction('time'); }}>
+            <Clock className="w-3 h-3" /> Hora
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => { setBulkMileage(''); setBulkAction('mileage'); }}>
+            <Gauge className="w-3 h-3" /> Km
+          </Button>
+          {canDelete && (
+            <Button variant="destructive" size="sm" className="h-7 text-xs shrink-0 whitespace-nowrap gap-1" onClick={() => setBulkConfirmDeleteOpen(true)}>
+              <Trash2 className="w-3 h-3" /> Eliminar
+            </Button>
+          )}
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setSelectedIds(new Set())}>
+            <X className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      )}
+
+      {/* Bulk action dialog */}
+      <Dialog open={bulkAction !== null} onOpenChange={open => { if (!open) setBulkAction(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-display text-sm">
+              Acción masiva — {selectedIds.size} reserva(s)
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-3 space-y-3">
+            {bulkAction === 'status' && (
+              <div className="space-y-2">
+                <Label>Nuevo estado</Label>
+                <Select value={bulkStatus} onValueChange={setBulkStatus}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(STATUS_LABELS).map(([k, v]) => (
+                      <SelectItem key={k} value={k}>{v}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'service' && (
+              <div className="space-y-2">
+                <Label>Tipo de servicio</Label>
+                <Select value={bulkService} onValueChange={setBulkService}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Seleccionar servicio" /></SelectTrigger>
+                  <SelectContent>
+                    {serviceTypes.filter(s => s.is_active).map(s => (
+                      <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'dealership' && (
+              <div className="space-y-2">
+                <Label>Concesionario</Label>
+                <Select value={bulkDealership} onValueChange={setBulkDealership}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
+                  <SelectContent>
+                    {dealerships.map(d => (
+                      <SelectItem key={d.id} value={d.id}>{d.name}{d.city ? ` — ${d.city}` : ''}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'date' && (
+              <div className="space-y-2">
+                <Label>Nueva fecha</Label>
+                <Input type="date" value={bulkDate} onChange={e => setBulkDate(e.target.value)} autoFocus />
+              </div>
+            )}
+            {bulkAction === 'time' && (
+              <div className="space-y-2">
+                <Label>Nueva hora</Label>
+                <Select value={bulkTime} onValueChange={setBulkTime}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {HOURS.map(h => <SelectItem key={h} value={h}>{HOUR_LABELS[h]}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'mileage' && (
+              <div className="space-y-2">
+                <Label>Kilometraje</Label>
+                <Input type="number" min={0} value={bulkMileage} onChange={e => setBulkMileage(e.target.value)} placeholder="Ej: 15000" autoFocus />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkAction(null)}>Cancelar</Button>
+            <Button
+              onClick={handleBulkApply}
+              disabled={bulkLoading || (bulkAction === 'service' && !bulkService) || (bulkAction === 'dealership' && !bulkDealership) || (bulkAction === 'date' && !bulkDate) || (bulkAction === 'mileage' && !bulkMileage)}
+              className="gac-gradient"
+            >
+              {bulkLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Aplicar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk delete confirmation */}
+      <AlertDialog open={bulkConfirmDeleteOpen} onOpenChange={setBulkConfirmDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar {selectedIds.size} reserva(s)?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará permanentemente las reservas seleccionadas. No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={executeBulkDelete} disabled={bulkLoading} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {bulkLoading ? 'Eliminando...' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* CREATE/EDIT DIALOG */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

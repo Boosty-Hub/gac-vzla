@@ -141,6 +141,15 @@ const AdminProspectos = () => {
   // Updates sidebar
   const [updatesSidebarProspect, setUpdatesSidebarProspect] = useState<Prospect | null>(null);
 
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  type BulkActionType = 'status' | 'model' | 'estadoVzla' | 'source' | 'eventName' | 'salesperson' | null;
+  const [bulkAction, setBulkAction] = useState<BulkActionType>(null);
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkBrand, setBulkBrand] = useState('');
+  const [bulkConfirmDeleteOpen, setBulkConfirmDeleteOpen] = useState(false);
+  const [bulkLoading, setBulkLoading] = useState(false);
+
   const fetchDealerships = async () => {
     const { data } = await supabase
       .from('dealerships')
@@ -606,6 +615,55 @@ const AdminProspectos = () => {
   const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
   const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (displayedProspects.length > 0 && displayedProspects.every(p => selectedIds.has(p.id))) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(displayedProspects.map(p => p.id)));
+    }
+  };
+
+  const executeBulkUpdate = async (payload: Record<string, any>) => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('prospects').update(payload).in('id', ids);
+    if (error) toast.error('Error al actualizar prospectos');
+    else { toast.success(`${ids.length} prospecto(s) actualizados`); setSelectedIds(new Set()); setBulkAction(null); setBulkValue(''); setBulkBrand(''); fetchProspects(); }
+    setBulkLoading(false);
+  };
+
+  const executeBulkDelete = async () => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('prospects').delete().in('id', ids);
+    if (error) toast.error('Error al eliminar prospectos');
+    else { toast.success(`${ids.length} prospecto(s) eliminados`); setSelectedIds(new Set()); setBulkConfirmDeleteOpen(false); fetchProspects(); }
+    setBulkLoading(false);
+  };
+
+  const handleBulkApply = async () => {
+    if (!bulkAction) return;
+    let payload: Record<string, any> = {};
+    switch (bulkAction) {
+      case 'status': if (!bulkValue || bulkValue === '__none') return; payload = { status: bulkValue }; break;
+      case 'estadoVzla': payload = { 'Estado de Vnzla': (!bulkValue || bulkValue === '__clear') ? null : bulkValue }; break;
+      case 'model': payload = { model_interest: (!bulkValue || bulkValue === '__none') ? null : (bulkBrand ? `${bulkBrand} ${bulkValue}` : bulkValue) }; break;
+      case 'source': if (!bulkValue || bulkValue === '__none') return; payload = { source: bulkValue }; break;
+      case 'eventName': payload = { event_name: bulkValue.trim() || null }; break;
+      case 'salesperson': payload = { salesperson: (!bulkValue || bulkValue === '__none') ? null : bulkValue }; break;
+      default: return;
+    }
+    await executeBulkUpdate(payload);
+  };
+
   // Mobile prospect card
   const ProspectCard = ({ p }: { p: Prospect }) => {
     const st = PROSPECT_STATUSES.find(s => s.name === p.status) || FALLBACK_STATUS;
@@ -614,9 +672,13 @@ const AdminProspectos = () => {
       <Card className="gac-shadow" onClick={() => openDetail(p)}>
         <CardContent className="p-3 space-y-2">
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold truncate">{p.name}</p>
-              <p className="text-[11px] text-muted-foreground truncate">{p.dealerships?.name || '-'}</p>
+            <div className="flex items-start gap-2 flex-1 min-w-0">
+              <input type="checkbox" className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 accent-primary cursor-pointer shrink-0"
+                checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold truncate">{p.name}</p>
+                <p className="text-[11px] text-muted-foreground truncate">{p.dealerships?.name || '-'}</p>
+              </div>
             </div>
             <Badge className={cn("text-[10px] px-1.5 py-0 shrink-0", st.color)}>{st.label}</Badge>
           </div>
@@ -725,7 +787,7 @@ const AdminProspectos = () => {
         </Card>
       </div>
 
-      <Tabs value={activeTab} onValueChange={v => setActiveTab(v as 'abiertos' | 'cerrados')} className="space-y-3">
+      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados'); setSelectedIds(new Set()); }} className="space-y-3">
         <TabsList>
           <TabsTrigger value="abiertos" className="text-xs gap-1">
             Abiertos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{openProspects.length}</Badge>
@@ -824,6 +886,11 @@ const AdminProspectos = () => {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                  <TableHead className="w-8 pl-3">
+                    <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                      checked={displayedProspects.length > 0 && displayedProspects.every(p => selectedIds.has(p.id))}
+                      onChange={toggleSelectAll} />
+                  </TableHead>
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
                   <TableHead>Marca</TableHead>
@@ -843,6 +910,10 @@ const AdminProspectos = () => {
                   const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                   return (
                     <TableRow key={p.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(p)}>
+                      <TableCell className="pl-3" onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                          checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} />
+                      </TableCell>
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell>
                         {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
@@ -1312,6 +1383,160 @@ const AdminProspectos = () => {
           />
         </>
       )}
+
+      {/* FLOATING BULK ACTION BAR */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+          <div className="flex items-center gap-1 bg-gray-900 text-white rounded-2xl shadow-2xl px-3 py-2 border border-gray-700 max-w-[calc(100vw-2rem)] overflow-x-auto">
+            <span className="text-xs font-bold whitespace-nowrap text-primary bg-primary/20 px-2 py-0.5 rounded-full shrink-0">
+              {selectedIds.size} sel.
+            </span>
+            <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('status'); setBulkValue(''); }}>
+              <Tag className="w-3 h-3" /> Estado
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('estadoVzla'); setBulkValue(''); }}>
+              <MapPin className="w-3 h-3" /> Ubicación
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('model'); setBulkValue(''); setBulkBrand(''); }}>
+              <Car className="w-3 h-3" /> Modelo
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('source'); setBulkValue(''); }}>
+              <Tag className="w-3 h-3" /> Fuente
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('eventName'); setBulkValue(''); }}>
+              <CalendarDays className="w-3 h-3" /> Evento
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('salesperson'); setBulkValue(''); }}>
+              <User className="w-3 h-3" /> Vendedor
+            </Button>
+            {canDelete && (
+              <>
+                <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
+                <Button size="sm" variant="ghost" className="text-red-400 hover:bg-white/10 hover:text-red-300 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+                  onClick={() => setBulkConfirmDeleteOpen(true)}>
+                  <Trash2 className="w-3 h-3" /> Eliminar
+                </Button>
+              </>
+            )}
+            <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
+            <Button size="sm" variant="ghost" className="text-gray-400 hover:bg-white/10 hover:text-white h-7 w-7 p-0 shrink-0"
+              onClick={() => setSelectedIds(new Set())}>
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* BULK ACTION DIALOG */}
+      <Dialog open={bulkAction !== null} onOpenChange={open => { if (!open) { setBulkAction(null); setBulkValue(''); setBulkBrand(''); } }}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-display">
+              {bulkAction === 'status' && 'Cambiar estado'}
+              {bulkAction === 'estadoVzla' && 'Cambiar ubicación'}
+              {bulkAction === 'model' && 'Cambiar marca / modelo'}
+              {bulkAction === 'source' && 'Cambiar fuente'}
+              {bulkAction === 'eventName' && 'Cambiar nombre de evento'}
+              {bulkAction === 'salesperson' && 'Cambiar vendedor'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-1 space-y-3">
+            <p className="text-xs text-muted-foreground">Se aplicará a <strong>{selectedIds.size}</strong> prospecto(s) seleccionado(s).</p>
+            {bulkAction === 'status' && (
+              <Select value={bulkValue} onValueChange={setBulkValue}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                <SelectContent>
+                  {PROSPECT_STATUSES.map(s => (
+                    <SelectItem key={s.name} value={s.name}>
+                      <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {bulkAction === 'estadoVzla' && (
+              <Select value={bulkValue} onValueChange={setBulkValue}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado venezolano" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__clear">Sin estado</SelectItem>
+                  {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {bulkAction === 'model' && (
+              <div className="space-y-2">
+                <Select value={bulkBrand || '__none'} onValueChange={v => { setBulkBrand(v === '__none' ? '' : v); setBulkValue(''); }}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar marca" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin marca</SelectItem>
+                    {prospectBrands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={bulkValue || '__none'} onValueChange={setBulkValue} disabled={!bulkBrand}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder={bulkBrand ? 'Seleccionar modelo' : 'Primero seleccione marca'} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin modelo</SelectItem>
+                    {prospectModels.filter(m => m.brand === bulkBrand).map(m => (
+                      <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'source' && (
+              <Select value={bulkValue} onValueChange={setBulkValue}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar fuente" /></SelectTrigger>
+                <SelectContent>
+                  {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {bulkAction === 'eventName' && (
+              <Input value={bulkValue} onChange={e => setBulkValue(e.target.value)} placeholder="Nombre del evento" className="h-9 text-xs" />
+            )}
+            {bulkAction === 'salesperson' && (
+              <Select value={bulkValue || '__none'} onValueChange={setBulkValue}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">Sin vendedor</SelectItem>
+                  {salespersons.map(sp => <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <DialogFooter className="flex-row gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={() => { setBulkAction(null); setBulkValue(''); setBulkBrand(''); }}>Cancelar</Button>
+            <Button size="sm" className="flex-1 gac-gradient" disabled={bulkLoading || (bulkAction !== 'eventName' && bulkAction !== 'estadoVzla' && (!bulkValue || bulkValue === '__none'))} onClick={handleBulkApply}>
+              {bulkLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Aplicar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* BULK DELETE CONFIRMATION */}
+      <AlertDialog open={bulkConfirmDeleteOpen} onOpenChange={setBulkConfirmDeleteOpen}>
+        <AlertDialogContent className={cn(isMobile && "max-w-[calc(100vw-2rem)]")}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar {selectedIds.size} prospecto(s)?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará permanentemente <strong>{selectedIds.size}</strong> prospecto(s) seleccionados. No se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+            <AlertDialogCancel disabled={bulkLoading} className="w-full sm:w-auto">Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={executeBulkDelete} disabled={bulkLoading} className="bg-destructive text-destructive-foreground hover:bg-destructive/90 w-full sm:w-auto">
+              {bulkLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : `Eliminar ${selectedIds.size}`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

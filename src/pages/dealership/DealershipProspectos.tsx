@@ -14,7 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ResponsiveModal, ResponsiveModalHeader, ResponsiveModalTitle, ResponsiveModalFooter } from '@/components/ui/responsive-modal';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Search, Users, Phone, Mail, ExternalLink, MessageCircle, Activity, Pencil, Download, Upload, FileText, X, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Users, Phone, Mail, ExternalLink, MessageCircle, Activity, Pencil, Download, Upload, FileText, X, CheckCircle2, AlertTriangle, Tag, MapPin, Car, CalendarDays, User, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
@@ -105,6 +105,14 @@ const DealershipProspectos = () => {
   const [greetingTemplate, setGreetingTemplate] = useState<string>('Hola {{prospecto}}, ¡es un gusto saludarte! Mi nombre es {{vendedor}}, seré el asesor de ventas encargado de brindarte información de nuestros vehículos. ¿En qué puedo ayudarte hoy? 🚗');
   const [updatesSidebarProspect, setUpdatesSidebarProspect] = useState<Prospect | null>(null);
 
+  // Bulk selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  type BulkActionType = 'status' | 'model' | 'estadoVzla' | 'source' | 'eventName' | 'salesperson' | null;
+  const [bulkAction, setBulkAction] = useState<BulkActionType>(null);
+  const [bulkValue, setBulkValue] = useState('');
+  const [bulkBrand, setBulkBrand] = useState('');
+  const [bulkLoading, setBulkLoading] = useState(false);
+
 
   useEffect(() => {
     (async () => {
@@ -183,6 +191,46 @@ const DealershipProspectos = () => {
   const openProspects = filteredProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
   const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
   const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (displayedProspects.length > 0 && displayedProspects.every(p => selectedIds.has(p.id))) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(displayedProspects.map(p => p.id)));
+    }
+  };
+
+  const executeBulkUpdate = async (payload: Record<string, any>) => {
+    setBulkLoading(true);
+    const ids = [...selectedIds];
+    const { error } = await supabase.from('prospects').update(payload).in('id', ids);
+    if (error) toast.error('Error al actualizar prospectos');
+    else { toast.success(`${ids.length} prospecto(s) actualizados`); setSelectedIds(new Set()); setBulkAction(null); setBulkValue(''); setBulkBrand(''); fetchProspects(); }
+    setBulkLoading(false);
+  };
+
+  const handleBulkApply = async () => {
+    if (!bulkAction) return;
+    let payload: Record<string, any> = {};
+    switch (bulkAction) {
+      case 'status': if (!bulkValue || bulkValue === '__none') return; payload = { status: bulkValue }; break;
+      case 'estadoVzla': payload = { 'Estado de Vnzla': (!bulkValue || bulkValue === '__clear') ? null : bulkValue }; break;
+      case 'model': payload = { model_interest: (!bulkValue || bulkValue === '__none') ? null : (bulkBrand ? `${bulkBrand} ${bulkValue}` : bulkValue) }; break;
+      case 'source': if (!bulkValue || bulkValue === '__none') return; payload = { source: bulkValue }; break;
+      case 'eventName': payload = { event_name: bulkValue.trim() || null }; break;
+      case 'salesperson': payload = { salesperson: (!bulkValue || bulkValue === '__none') ? null : bulkValue }; break;
+      default: return;
+    }
+    await executeBulkUpdate(payload);
+  };
 
   const autoSalesperson = isSalesperson && currentSalesperson
     ? currentSalesperson.name
@@ -430,9 +478,13 @@ const DealershipProspectos = () => {
       <Card className="gac-shadow">
         <CardContent className="p-3 space-y-2">
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold truncate">{p.name}</p>
-              {!isSalesperson && p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
+            <div className="flex items-start gap-2 flex-1 min-w-0">
+              <input type="checkbox" className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 accent-primary cursor-pointer shrink-0"
+                checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold truncate">{p.name}</p>
+                {!isSalesperson && p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
+              </div>
             </div>
             <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
               <SelectTrigger className="h-6 w-auto text-[10px] px-1.5 py-0 border-0 bg-transparent shrink-0">
@@ -513,7 +565,7 @@ const DealershipProspectos = () => {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={v => setActiveTab(v as 'abiertos' | 'cerrados')} className="space-y-3">
+      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados'); setSelectedIds(new Set()); }} className="space-y-3">
         <TabsList>
           <TabsTrigger value="abiertos" className="text-xs gap-1">
             Abiertos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{openProspects.length}</Badge>
@@ -597,6 +649,11 @@ const DealershipProspectos = () => {
             <Table className="text-xs">
               <TableHeader>
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
+                  <TableHead className="w-8 pl-3">
+                    <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                      checked={displayedProspects.length > 0 && displayedProspects.every(p => selectedIds.has(p.id))}
+                      onChange={toggleSelectAll} />
+                  </TableHead>
                   <TableHead>Nombre</TableHead>
                   <TableHead>Contacto</TableHead>
                   <TableHead>Marca</TableHead>
@@ -613,6 +670,10 @@ const DealershipProspectos = () => {
                   const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                   return (
                     <TableRow key={p.id} className="[&>td]:py-1.5">
+                      <TableCell className="pl-3">
+                        <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                          checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
+                      </TableCell>
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell>
                         {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
@@ -880,6 +941,135 @@ const DealershipProspectos = () => {
           />
         </>
       )}
+
+      {/* FLOATING BULK ACTION BAR */}
+      {selectedIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+          <div className="flex items-center gap-1 bg-gray-900 text-white rounded-2xl shadow-2xl px-3 py-2 border border-gray-700 max-w-[calc(100vw-2rem)] overflow-x-auto">
+            <span className="text-xs font-bold whitespace-nowrap text-primary bg-primary/20 px-2 py-0.5 rounded-full shrink-0">
+              {selectedIds.size} sel.
+            </span>
+            <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('status'); setBulkValue(''); }}>
+              <Tag className="w-3 h-3" /> Estado
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('estadoVzla'); setBulkValue(''); }}>
+              <MapPin className="w-3 h-3" /> Ubicación
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('model'); setBulkValue(''); setBulkBrand(''); }}>
+              <Car className="w-3 h-3" /> Modelo
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('source'); setBulkValue(''); }}>
+              <Tag className="w-3 h-3" /> Fuente
+            </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('eventName'); setBulkValue(''); }}>
+              <CalendarDays className="w-3 h-3" /> Evento
+            </Button>
+            {!isSalesperson && !isVendedor && (
+              <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+                onClick={() => { setBulkAction('salesperson'); setBulkValue(''); }}>
+                <User className="w-3 h-3" /> Vendedor
+              </Button>
+            )}
+            <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
+            <Button size="sm" variant="ghost" className="text-gray-400 hover:bg-white/10 hover:text-white h-7 w-7 p-0 shrink-0"
+              onClick={() => setSelectedIds(new Set())}>
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* BULK ACTION DIALOG */}
+      <Dialog open={bulkAction !== null} onOpenChange={open => { if (!open) { setBulkAction(null); setBulkValue(''); setBulkBrand(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-display">
+              {bulkAction === 'status' && 'Cambiar estado'}
+              {bulkAction === 'estadoVzla' && 'Cambiar ubicación'}
+              {bulkAction === 'model' && 'Cambiar marca / modelo'}
+              {bulkAction === 'source' && 'Cambiar fuente'}
+              {bulkAction === 'eventName' && 'Cambiar nombre de evento'}
+              {bulkAction === 'salesperson' && 'Cambiar vendedor'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-1 space-y-3">
+            <p className="text-xs text-muted-foreground">Se aplicará a <strong>{selectedIds.size}</strong> prospecto(s) seleccionado(s).</p>
+            {bulkAction === 'status' && (
+              <Select value={bulkValue} onValueChange={setBulkValue}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                <SelectContent>
+                  {PROSPECT_STATUSES.map(s => (
+                    <SelectItem key={s.name} value={s.name}>
+                      <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {bulkAction === 'estadoVzla' && (
+              <Select value={bulkValue} onValueChange={setBulkValue}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado venezolano" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__clear">Sin estado</SelectItem>
+                  {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {bulkAction === 'model' && (
+              <div className="space-y-2">
+                <Select value={bulkBrand || '__none'} onValueChange={v => { setBulkBrand(v === '__none' ? '' : v); setBulkValue(''); }}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar marca" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin marca</SelectItem>
+                    {prospectBrands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={bulkValue || '__none'} onValueChange={setBulkValue} disabled={!bulkBrand}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder={bulkBrand ? 'Seleccionar modelo' : 'Primero seleccione marca'} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin modelo</SelectItem>
+                    {prospectModels.filter(m => m.brand === bulkBrand).map(m => (
+                      <SelectItem key={m.id} value={`${m.brand} ${m.name}`}>{m.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {bulkAction === 'source' && (
+              <Select value={bulkValue} onValueChange={setBulkValue}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar fuente" /></SelectTrigger>
+                <SelectContent>
+                  {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {bulkAction === 'eventName' && (
+              <Input value={bulkValue} onChange={e => setBulkValue(e.target.value)} placeholder="Nombre del evento" className="h-9 text-xs" />
+            )}
+            {bulkAction === 'salesperson' && (
+              <Select value={bulkValue || '__none'} onValueChange={setBulkValue}>
+                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">Sin vendedor</SelectItem>
+                  {salespersons.map(sp => <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => { setBulkAction(null); setBulkValue(''); setBulkBrand(''); }}>Cancelar</Button>
+            <Button size="sm" className="gac-gradient" disabled={bulkLoading || (bulkAction !== 'eventName' && bulkAction !== 'estadoVzla' && (!bulkValue || bulkValue === '__none'))} onClick={handleBulkApply}>
+              {bulkLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Aplicar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
