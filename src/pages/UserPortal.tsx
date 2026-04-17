@@ -102,12 +102,12 @@ interface Reservation {
 
 
 // Genera bloques de hora según la duración del servicio y el horario del concesionario.
-// openingHour: hora de apertura (ej. 8 = 08:00). closingHour: hora de cierre (ej. 17 = 17:00).
-// El último bloque disponible es (closingHour - 1):00 — una hora antes del cierre.
+// openingHour: hora de apertura (ej. 8 = 08:00). closingHour: hora de cierre (ej. 16 = 16:00).
+// El último bloque disponible inicia exactamente en closingHour:00.
 const generateTimeSlots = (durationMinutes: number, openingHour = 8, closingHour = 17): string[] => {
   const slots: string[] = [];
   const step = Math.max(durationMinutes, 30); // mínimo 30 min de intervalo
-  const lastSlotMin = (closingHour - 1) * 60;
+  const lastSlotMin = closingHour * 60;
   for (let min = openingHour * 60; min <= lastSlotMin; min += step) {
     const h = Math.floor(min / 60);
     const m = min % 60;
