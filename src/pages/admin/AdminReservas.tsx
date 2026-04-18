@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, Star, X, Clock } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
+import { WarrantyChip } from '@/components/WarrantyChip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
@@ -1152,16 +1153,19 @@ const AdminReservas = () => {
                 {clientVehicles.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Este cliente no tiene vehículos registrados</p>
                 ) : (
-                  <Select value={fVehicleId} onValueChange={setFVehicleId}>
-                    <SelectTrigger><SelectValue placeholder="Seleccionar vehículo" /></SelectTrigger>
-                    <SelectContent>
-                      {clientVehicles.map(v => (
-                        <SelectItem key={v.id} value={v.id}>
-                          {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year} {v.plate ? `· ${v.plate}` : ''}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <>
+                    <Select value={fVehicleId} onValueChange={setFVehicleId}>
+                      <SelectTrigger><SelectValue placeholder="Seleccionar vehículo" /></SelectTrigger>
+                      <SelectContent>
+                        {clientVehicles.map(v => (
+                          <SelectItem key={v.id} value={v.id}>
+                            {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year} {v.plate ? `· ${v.plate}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {fVehicleId && <WarrantyChip vehicleId={fVehicleId} />}
+                  </>
                 )}
               </div>
             )}

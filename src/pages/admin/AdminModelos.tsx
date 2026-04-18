@@ -28,6 +28,7 @@ interface VehicleModel {
   warranty_km: number | null;
   warranty_months: number | null;
   warranty_service_interval_km: number | null;
+  warranty_condition_id: number | null;
 }
 
 interface WarrantyCondition {
@@ -126,12 +127,7 @@ const AdminModelos = () => {
     setFormWarrantyKm(model.warranty_km?.toString() || '');
     setFormWarrantyMonths(model.warranty_months?.toString() || '');
     setFormWarrantyIntervalKm(model.warranty_service_interval_km?.toString() || '');
-    const matched = warrantyConditions.find(c =>
-      c.max_km === model.warranty_km &&
-      c.max_months === model.warranty_months &&
-      c.service_interval_km === model.warranty_service_interval_km
-    );
-    setFormWarrantyConditionId(matched ? matched.id.toString() : 'global');
+    setFormWarrantyConditionId(model.warranty_condition_id != null ? model.warranty_condition_id.toString() : 'global');
     setFormImageFile(null);
     setFormImagePreview(model.image_url || null);
     setRemoveImage(false);
@@ -198,6 +194,7 @@ const AdminModelos = () => {
       imageUrl = null;
     }
 
+    const conditionId = formWarrantyConditionId === 'global' ? null : parseInt(formWarrantyConditionId);
     const base = {
       name: formName.trim(),
       brand: formBrand,
@@ -205,6 +202,7 @@ const AdminModelos = () => {
       engine: formEngine.trim() || null,
       transmission: formTransmission.trim() || null,
       is_active: formIsActive,
+      warranty_condition_id: conditionId,
       warranty_km: formWarrantyKm ? parseInt(formWarrantyKm) : null,
       warranty_months: formWarrantyMonths ? parseInt(formWarrantyMonths) : null,
       warranty_service_interval_km: formWarrantyIntervalKm ? parseInt(formWarrantyIntervalKm) : null,
@@ -291,9 +289,7 @@ const AdminModelos = () => {
   const [bulkYear, setBulkYear] = useState('');
   const [bulkEngine, setBulkEngine] = useState('');
   const [bulkTransmission, setBulkTransmission] = useState('');
-  const [bulkWarrantyKm, setBulkWarrantyKm] = useState('');
-  const [bulkWarrantyMonths, setBulkWarrantyMonths] = useState('');
-  const [bulkWarrantyInterval, setBulkWarrantyInterval] = useState('');
+  const [bulkWarrantyConditionId, setBulkWarrantyConditionId] = useState<string>('global');
   const [bulkIsActive, setBulkIsActive] = useState(true);
   const [bulkConfirmDeleteOpen, setBulkConfirmDeleteOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
@@ -340,13 +336,26 @@ const AdminModelos = () => {
       case 'year': payload = { year: bulkYear ? parseInt(bulkYear) : null }; break;
       case 'engine': payload = { engine: bulkEngine.trim() || null }; break;
       case 'transmission': payload = { transmission: bulkTransmission.trim() || null }; break;
-      case 'warranty':
-        payload = {
-          warranty_km: bulkWarrantyKm ? parseInt(bulkWarrantyKm) : null,
-          warranty_months: bulkWarrantyMonths ? parseInt(bulkWarrantyMonths) : null,
-          warranty_service_interval_km: bulkWarrantyInterval ? parseInt(bulkWarrantyInterval) : null,
-        };
+      case 'warranty': {
+        if (bulkWarrantyConditionId === 'global') {
+          payload = {
+            warranty_condition_id: null,
+            warranty_km: null,
+            warranty_months: null,
+            warranty_service_interval_km: null,
+          };
+        } else {
+          const condId = parseInt(bulkWarrantyConditionId);
+          const c = warrantyConditions.find(wc => wc.id === condId);
+          payload = {
+            warranty_condition_id: condId,
+            warranty_km: c?.max_km ?? null,
+            warranty_months: c?.max_months ?? null,
+            warranty_service_interval_km: c?.service_interval_km ?? null,
+          };
+        }
         break;
+      }
       case 'isActive': payload = { is_active: bulkIsActive }; break;
       default: return;
     }
@@ -466,9 +475,16 @@ const AdminModelos = () => {
                   <TableCell>{m.engine || '-'}</TableCell>
                   <TableCell>{m.transmission || '-'}</TableCell>
                   <TableCell className="text-[11px] text-muted-foreground">
-                    {m.warranty_km || m.warranty_months ? (
-                      <span>{m.warranty_km ? `${(m.warranty_km / 1000).toFixed(0)}k km` : '—'} · {m.warranty_months ? `${m.warranty_months} m` : '—'}</span>
-                    ) : <span className="italic">Global</span>}
+                    {(() => {
+                      if (m.warranty_condition_id != null) {
+                        const c = warrantyConditions.find(wc => wc.id === m.warranty_condition_id);
+                        if (c) return <span>{c.name}</span>;
+                      }
+                      if (m.warranty_km || m.warranty_months) {
+                        return <span>{m.warranty_km ? `${(m.warranty_km / 1000).toFixed(0)}k km` : '—'} · {m.warranty_months ? `${m.warranty_months} m` : '—'}</span>;
+                      }
+                      return <span className="italic">Global</span>;
+                    })()}
                   </TableCell>
                   <TableCell>
                     <Badge variant={m.is_active ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
@@ -514,7 +530,7 @@ const AdminModelos = () => {
               <Settings2 className="w-3 h-3" /> Transmisión
             </Button>
             <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
-              onClick={() => { setBulkAction('warranty'); setBulkWarrantyKm(''); setBulkWarrantyMonths(''); setBulkWarrantyInterval(''); }}>
+              onClick={() => { setBulkAction('warranty'); setBulkWarrantyConditionId('global'); }}>
               <Shield className="w-3 h-3" /> Garantía
             </Button>
             <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
@@ -576,21 +592,33 @@ const AdminModelos = () => {
             )}
             {bulkAction === 'warranty' && (
               <div className="space-y-2">
-                <p className="text-[11px] text-muted-foreground">Deja vacío para usar la condición global</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="space-y-1">
-                    <Label className="text-[10px]">Km máx.</Label>
-                    <Input type="number" value={bulkWarrantyKm} onChange={e => setBulkWarrantyKm(e.target.value)} placeholder="100000" className="h-8 text-xs" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px]">Meses</Label>
-                    <Input type="number" value={bulkWarrantyMonths} onChange={e => setBulkWarrantyMonths(e.target.value)} placeholder="72" className="h-8 text-xs" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px]">Intervalo (km)</Label>
-                    <Input type="number" value={bulkWarrantyInterval} onChange={e => setBulkWarrantyInterval(e.target.value)} placeholder="5000" className="h-8 text-xs" />
-                  </div>
-                </div>
+                <Select value={bulkWarrantyConditionId} onValueChange={setBulkWarrantyConditionId}>
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Selecciona una condición" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="global">Usar condición global</SelectItem>
+                    {warrantyConditions.map(c => (
+                      <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {bulkWarrantyConditionId === 'global' ? (
+                  <p className="text-[11px] text-muted-foreground">Se aplicarán las condiciones globales de garantía configuradas en el sistema.</p>
+                ) : (
+                  (() => {
+                    const c = warrantyConditions.find(wc => wc.id.toString() === bulkWarrantyConditionId);
+                    if (!c) return null;
+                    return (
+                      <div className="rounded-md bg-muted/50 px-3 py-2 text-[11px] text-muted-foreground space-y-0.5">
+                        {c.description && <p>{c.description}</p>}
+                        <p className="font-medium text-foreground/70">
+                          {c.max_km ? `${(c.max_km / 1000).toFixed(0)}k km` : '—'} · {c.max_months ? `${c.max_months} meses` : '—'} · Servicio c/{c.service_interval_km ? `${(c.service_interval_km / 1000).toFixed(0)}k km` : '—'}
+                        </p>
+                      </div>
+                    );
+                  })()
+                )}
               </div>
             )}
             {bulkAction === 'isActive' && (

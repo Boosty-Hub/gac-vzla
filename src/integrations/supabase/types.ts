@@ -723,6 +723,10 @@ export type Database = {
           is_active: boolean
           name: string
           transmission: string | null
+          warranty_condition_id: number | null
+          warranty_km: number | null
+          warranty_months: number | null
+          warranty_service_interval_km: number | null
           year: number | null
         }
         Insert: {
@@ -734,6 +738,10 @@ export type Database = {
           is_active?: boolean
           name: string
           transmission?: string | null
+          warranty_condition_id?: number | null
+          warranty_km?: number | null
+          warranty_months?: number | null
+          warranty_service_interval_km?: number | null
           year?: number | null
         }
         Update: {
@@ -745,9 +753,21 @@ export type Database = {
           is_active?: boolean
           name?: string
           transmission?: string | null
+          warranty_condition_id?: number | null
+          warranty_km?: number | null
+          warranty_months?: number | null
+          warranty_service_interval_km?: number | null
           year?: number | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_models_warranty_condition_id_fkey"
+            columns: ["warranty_condition_id"]
+            isOneToOne: false
+            referencedRelation: "warranty_conditions"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       vehicles: {
         Row: {

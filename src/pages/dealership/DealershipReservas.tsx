@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
+import { WarrantyChip } from '@/components/WarrantyChip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
@@ -694,10 +695,11 @@ const DealershipReservas = () => {
                 {plateResult ? (
                   <div className="flex items-start gap-2">
                     <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
-                    <div className="text-xs space-y-1">
+                    <div className="text-xs space-y-1 flex-1 min-w-0">
                       <p className="font-semibold text-green-800">Vehículo encontrado</p>
                       <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span>{plateResult.color && <span className="text-muted-foreground">· {plateResult.color}</span>}</div>
                       <div className="flex items-center gap-2"><User className="w-3 h-3" /><span>{plateResult.clients?.full_name}</span>{plateResult.clients?.cedula && <span className="text-muted-foreground">· {plateResult.clients.cedula}</span>}</div>
+                      <div className="pt-1"><WarrantyChip vehicleId={plateResult.id} /></div>
                     </div>
                   </div>
                 ) : (

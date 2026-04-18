@@ -9,8 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Car, ShieldCheck, ShieldX, Search, CalendarDays, Hash, MapPin, Clock, ClipboardCheck, User, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Car, ShieldCheck, ShieldX, AlertTriangle, Search, CalendarDays, Hash, MapPin, Clock, ClipboardCheck, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { evaluateWarranty, resolveWarrantyCondition, type WarrantyEvaluation } from '@/lib/warranty';
 
 interface WarrantyCondition {
   id: number;
@@ -19,6 +20,7 @@ interface WarrantyCondition {
   max_months: number;
   service_interval_km: number;
   description: string | null;
+  is_active: boolean;
 }
 
 interface VehicleRow {
@@ -30,7 +32,14 @@ interface VehicleRow {
   mileage: number;
   warranty_active: boolean;
   purchase_date: string | null;
-  vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null } | null;
+  vehicle_models: {
+    name: string;
+    brand: string;
+    warranty_km: number | null;
+    warranty_months: number | null;
+    warranty_service_interval_km: number | null;
+    warranty_condition_id: number | null;
+  } | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
 }
 
@@ -46,18 +55,29 @@ interface ServiceRecord {
   dealerships: { name: string } | null;
 }
 
-interface WarrantyResult {
-  active: boolean;
-  reason: string | null;
-  conditionName: string;
-  servicesExpected: number;
-  servicesCompleted: number;
-  nextServiceKm: number;
-  monthsRemaining: number;
-  kmRemaining: number;
-}
+type WarrantyResult = WarrantyEvaluation;
 
 const ROW_OPTIONS = [10, 25, 50, 100];
+
+const statusBadgeClass = (status: WarrantyEvaluation['status']): string => {
+  if (status === 'active') return 'bg-green-100 text-green-800';
+  if (status === 'expired') return 'bg-gray-200 text-gray-800';
+  if (status === 'violated') return 'bg-red-100 text-red-800';
+  return 'bg-muted text-muted-foreground';
+};
+
+const statusLabel = (status: WarrantyEvaluation['status']): string => {
+  if (status === 'active') return 'Activa';
+  if (status === 'expired') return 'Expirada';
+  if (status === 'violated') return 'Violada';
+  return 'Sin condición';
+};
+
+const StatusIcon = ({ status, className }: { status: WarrantyEvaluation['status']; className?: string }) => {
+  if (status === 'active') return <ShieldCheck className={className} />;
+  if (status === 'violated') return <AlertTriangle className={className} />;
+  return <ShieldX className={className} />;
+};
 
 const AdminGarantias = () => {
   const isMobile = useIsMobile();
@@ -86,7 +106,7 @@ const AdminGarantias = () => {
     while (hasMore) {
       const { data } = await supabase
         .from('vehicles')
-        .select('id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km), clients(full_name, cedula, phone)')
+        .select('id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, warranty_condition_id), clients(full_name, cedula, phone)')
         .eq('is_active', true)
         .order('created_at', { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
@@ -111,49 +131,13 @@ const AdminGarantias = () => {
 
   useEffect(() => { fetchData(); }, []);
 
-  const evaluateWarranty = (v: VehicleRow, completedServices: number): WarrantyResult => {
-    const m = v.vehicle_models;
-    // Use model-level warranty if set, otherwise fall back to global condition
-    const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);
-    const maxKm = hasModelWarranty && m!.warranty_km != null ? m!.warranty_km : conditions[0]?.max_km ?? 0;
-    const maxMonths = hasModelWarranty && m!.warranty_months != null ? m!.warranty_months : conditions[0]?.max_months ?? 0;
-    const intervalKm = hasModelWarranty && m!.warranty_service_interval_km != null ? m!.warranty_service_interval_km : conditions[0]?.service_interval_km ?? 0;
-    const conditionName = hasModelWarranty ? `${m!.brand} ${m!.name}` : (conditions[0]?.name ?? '-');
-
-    if (!hasModelWarranty && conditions.length === 0) {
-      return { active: false, reason: 'No hay condiciones de garantía configuradas', conditionName: '-', servicesExpected: 0, servicesCompleted: completedServices, nextServiceKm: 0, monthsRemaining: 0, kmRemaining: 0 };
-    }
-
-    const reasons: string[] = [];
-    if (!v.warranty_active) reasons.push('Garantía desactivada manualmente');
-
-    const kmRemaining = maxKm - v.mileage;
-    if (maxKm > 0 && v.mileage > maxKm) reasons.push(`Excede ${maxKm.toLocaleString()} km (actual: ${v.mileage.toLocaleString()} km)`);
-
-    let monthsRemaining = maxMonths;
-    if (v.purchase_date) {
-      const purchase = new Date(v.purchase_date);
-      const now = new Date();
-      const monthsElapsed = (now.getFullYear() - purchase.getFullYear()) * 12 + (now.getMonth() - purchase.getMonth());
-      monthsRemaining = maxMonths - monthsElapsed;
-      if (maxMonths > 0 && monthsElapsed > maxMonths) reasons.push(`Excede ${maxMonths} meses desde la compra (${monthsElapsed} meses transcurridos)`);
-    }
-
-    const servicesExpected = intervalKm > 0 ? Math.floor(v.mileage / intervalKm) : 0;
-    if (completedServices < servicesExpected) reasons.push(`Servicios atrasados: ${completedServices}/${servicesExpected} realizados`);
-
-    const nextServiceKm = intervalKm > 0 ? (Math.floor(v.mileage / intervalKm) + 1) * intervalKm : 0;
-
-    return {
-      active: reasons.length === 0,
-      reason: reasons.length > 0 ? reasons.join(' · ') : null,
-      conditionName,
-      servicesExpected,
-      servicesCompleted: completedServices,
-      nextServiceKm,
-      monthsRemaining: Math.max(0, monthsRemaining),
-      kmRemaining: Math.max(0, kmRemaining),
-    };
+  const evaluate = (v: VehicleRow, completedServices: number): WarrantyResult => {
+    const resolved = resolveWarrantyCondition(v.vehicle_models, conditions);
+    return evaluateWarranty(
+      { mileage: v.mileage, warranty_active: v.warranty_active, purchase_date: v.purchase_date },
+      resolved,
+      completedServices,
+    );
   };
 
   const [serviceCounts, setServiceCounts] = useState<Record<string, number>>({});
@@ -178,12 +162,14 @@ const AdminGarantias = () => {
 
   const vehiclesWithWarranty = vehicles.map(v => ({
     vehicle: v,
-    warranty: evaluateWarranty(v, serviceCounts[v.id] || 0),
+    warranty: evaluate(v, serviceCounts[v.id] || 0),
   }));
 
   const filtered = vehiclesWithWarranty.filter(({ vehicle: v, warranty: w }) => {
-    if (statusFilter === 'activa' && !w.active) return false;
-    if (statusFilter === 'inactiva' && w.active) return false;
+    if (statusFilter === 'activa' && w.status !== 'active') return false;
+    if (statusFilter === 'expirada' && w.status !== 'expired') return false;
+    if (statusFilter === 'violada' && w.status !== 'violated') return false;
+    if (statusFilter === 'inactiva' && w.status === 'active') return false;
     if (search.trim()) {
       const q = search.toLowerCase();
       if (
@@ -197,8 +183,9 @@ const AdminGarantias = () => {
     return true;
   });
 
-  const totalActive = vehiclesWithWarranty.filter(x => x.warranty.active).length;
-  const totalInactive = vehiclesWithWarranty.filter(x => !x.warranty.active).length;
+  const totalActive = vehiclesWithWarranty.filter(x => x.warranty.status === 'active').length;
+  const totalExpired = vehiclesWithWarranty.filter(x => x.warranty.status === 'expired').length;
+  const totalViolated = vehiclesWithWarranty.filter(x => x.warranty.status === 'violated').length;
 
   // Pagination logic
   const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
@@ -236,7 +223,8 @@ const AdminGarantias = () => {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <Badge className="bg-green-100 text-green-800 gap-1 text-xs"><ShieldCheck className="w-3 h-3" /> {totalActive}</Badge>
-          <Badge className="bg-red-100 text-red-800 gap-1 text-xs"><ShieldX className="w-3 h-3" /> {totalInactive}</Badge>
+          <Badge className="bg-gray-200 text-gray-800 gap-1 text-xs"><ShieldX className="w-3 h-3" /> {totalExpired}</Badge>
+          <Badge className="bg-red-100 text-red-800 gap-1 text-xs"><AlertTriangle className="w-3 h-3" /> {totalViolated}</Badge>
         </div>
       </div>
 
@@ -247,11 +235,13 @@ const AdminGarantias = () => {
           <Input placeholder="Buscar placa, VIN, modelo, cliente..." className="pl-8 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-8 text-xs sm:w-[160px]"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="h-8 text-xs sm:w-[180px]"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="todos">Todas</SelectItem>
             <SelectItem value="activa">Garantía Activa</SelectItem>
-            <SelectItem value="inactiva">Garantía Inactiva</SelectItem>
+            <SelectItem value="expirada">Garantía Expirada</SelectItem>
+            <SelectItem value="violada">Garantía Violada</SelectItem>
+            <SelectItem value="inactiva">Inactiva (expirada + violada)</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -282,9 +272,9 @@ const AdminGarantias = () => {
                     <p className="text-sm font-semibold truncate">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</p>
                     <p className="text-[11px] text-muted-foreground font-mono">{v.plate || '-'}{v.vin ? ` · ${v.vin}` : ''}</p>
                   </div>
-                  <Badge className={cn("text-[10px] px-1.5 py-0 gap-0.5 shrink-0", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                    {w.active ? <ShieldCheck className="w-2.5 h-2.5" /> : <ShieldX className="w-2.5 h-2.5" />}
-                    {w.active ? 'Activa' : 'Inactiva'}
+                  <Badge className={cn("text-[10px] px-1.5 py-0 gap-0.5 shrink-0", statusBadgeClass(w.status))}>
+                    <StatusIcon status={w.status} className="w-2.5 h-2.5" />
+                    {statusLabel(w.status)}
                   </Badge>
                 </div>
                 {/* Row 2: client + km */}
@@ -299,9 +289,16 @@ const AdminGarantias = () => {
                   <span className="text-[10px] bg-muted rounded px-1.5 py-0.5">{w.kmRemaining > 0 ? w.kmRemaining.toLocaleString() : '0'} km rest.</span>
                   {v.purchase_date && <span className="text-[10px] bg-muted rounded px-1.5 py-0.5 flex items-center gap-1"><CalendarDays className="w-2.5 h-2.5" />{v.purchase_date}</span>}
                 </div>
-                {/* Reason if inactive */}
-                {!w.active && w.reason && (
-                  <p className="text-[10px] text-red-600 leading-tight">{w.reason}</p>
+                {/* Violation alert — prominent */}
+                {w.status === 'violated' && w.reasons.length > 0 && (
+                  <div className="border border-red-300 bg-red-50 rounded-md px-2 py-1.5 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3 h-3 text-red-600 mt-0.5 shrink-0" />
+                    <p className="text-[10px] text-red-700 leading-tight font-medium">Garantía violada · {w.reasons.join(' · ')}</p>
+                  </div>
+                )}
+                {/* Expired reason (less prominent) */}
+                {w.status === 'expired' && w.reasons.length > 0 && (
+                  <p className="text-[10px] text-gray-600 leading-tight">{w.reasons.join(' · ')}</p>
                 )}
               </CardContent>
             </Card>
@@ -359,9 +356,9 @@ const AdminGarantias = () => {
                       <TableCell className="text-xs text-center">{w.monthsRemaining > 0 ? w.monthsRemaining : '0'}</TableCell>
                       <TableCell className="text-xs text-center">{w.kmRemaining > 0 ? w.kmRemaining.toLocaleString() : '0'}</TableCell>
                       <TableCell className="text-center">
-                        <Badge className={cn("text-[10px] gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                          {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                          {w.active ? 'Activa' : 'Inactiva'}
+                        <Badge className={cn("text-[10px] gap-1", statusBadgeClass(w.status))}>
+                          <StatusIcon status={w.status} className="w-3 h-3" />
+                          {statusLabel(w.status)}
                         </Badge>
                       </TableCell>
                     </TableRow>
@@ -413,9 +410,9 @@ const AdminGarantias = () => {
                     <h3 className="font-display font-bold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
                     <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
                   </div>
-                  <Badge className={cn("text-xs flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                    {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                    {w.active ? 'Activa' : 'Inactiva'}
+                  <Badge className={cn("text-xs flex items-center gap-1", statusBadgeClass(w.status))}>
+                    <StatusIcon status={w.status} className="w-3 h-3" />
+                    {statusLabel(w.status)}
                   </Badge>
                 </div>
 
@@ -444,10 +441,19 @@ const AdminGarantias = () => {
                   </div>
                 </div>
 
-                {!w.active && w.reason && (
-                  <div className="bg-red-50 border border-red-200 rounded-md p-2.5 text-xs">
-                    <p className="font-semibold text-red-800 mb-1">Razón de invalidez</p>
-                    <p className="text-red-700">{w.reason}</p>
+                {w.status === 'violated' && w.reasons.length > 0 && (
+                  <div className="bg-red-50 border border-red-300 rounded-md p-2.5 text-xs flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-red-800 mb-1">Garantía violada</p>
+                      <p className="text-red-700">{w.reasons.join(' · ')}</p>
+                    </div>
+                  </div>
+                )}
+                {w.status === 'expired' && w.reasons.length > 0 && (
+                  <div className="bg-gray-100 border border-gray-300 rounded-md p-2.5 text-xs">
+                    <p className="font-semibold text-gray-800 mb-1">Garantía expirada</p>
+                    <p className="text-gray-700">{w.reasons.join(' · ')}</p>
                   </div>
                 )}
 
