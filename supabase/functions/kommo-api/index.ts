@@ -358,8 +358,9 @@ Deno.serve(async (req) => {
         throw new Error(`Kommo API error: ${JSON.stringify(kommoData)}`)
       }
 
-      const leads = (kommoData._embedded as Record<string, unknown>)?.leads as Array<{ id: number }>
-      const newLead = leads?.[0]
+      // /leads/complex returns a plain array [{id, ...}]
+      const leadsArray = Array.isArray(kommoData) ? kommoData as Array<{ id: number }> : []
+      const newLead = leadsArray[0]
       if (newLead?.id) {
         await supabase.from('prospects').update({ kommo_lead_id: newLead.id }).eq('id', prospect_id)
         await supabase.from('integration_logs').insert({
