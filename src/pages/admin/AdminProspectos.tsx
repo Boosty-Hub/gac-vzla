@@ -29,6 +29,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import ProspectSourceManager from '@/components/ProspectSourceManager';
 import { useProspectSources } from '@/hooks/useProspectSources';
+import { createKommoLead, updateKommoLeadStage } from '@/lib/kommo';
 
 
 interface Dealership {
@@ -50,6 +51,7 @@ interface Prospect {
   salesperson: string | null;
   event_name: string | null;
   'Estado de Vnzla': string | null;
+  kommo_lead_id: number | null;
   created_at: string;
   updated_at: string;
   dealerships: { name: string } | null;
@@ -274,15 +276,27 @@ const AdminProspectos = () => {
       }
       const { error } = await supabase.from('prospects').update(payload).eq('id', editing.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
-      else { toast.success('Prospecto actualizado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
+      else {
+        toast.success('Prospecto actualizado');
+        setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
+        // Sync stage to Kommo if status changed and lead exists in Kommo
+        if (editing.kommo_lead_id && payload.status !== editing.status) {
+          updateKommoLeadStage(editing.id, editing.kommo_lead_id, payload.status).catch(console.error);
+        }
+      }
     } else {
       if (payload.phone) {
         const isDuplicate = await checkDuplicatePhone(payload.phone);
         if (isDuplicate) { setSaving(false); return; }
       }
-      const { error } = await supabase.from('prospects').insert(payload);
+      const { data: inserted, error } = await supabase.from('prospects').insert(payload).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
-      else { toast.success('Prospecto creado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
+      else {
+        toast.success('Prospecto creado');
+        setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
+        // Fire-and-forget: create lead in Kommo
+        createKommoLead(inserted.id).catch(console.error);
+      }
     }
     setSaving(false);
   };
@@ -308,7 +322,13 @@ const AdminProspectos = () => {
   const updateStatus = async (id: string, newStatus: string) => {
     const { error } = await supabase.from('prospects').update({ status: newStatus }).eq('id', id);
     if (error) { toast.error('Error al actualizar estado'); console.error(error); }
-    else { fetchProspects(); }
+    else {
+      fetchProspects();
+      const p = prospects.find(x => x.id === id);
+      if (p?.kommo_lead_id) {
+        updateKommoLeadStage(id, p.kommo_lead_id, newStatus).catch(console.error);
+      }
+    }
   };
 
   const openDetail = (p: Prospect) => {

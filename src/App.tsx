@@ -28,6 +28,7 @@ import AdminServicios from './pages/admin/config/AdminServicios';
 import AdminCondicionesGarantia from './pages/admin/config/AdminCondicionesGarantia';
 import AdminGeneral from './pages/admin/config/AdminGeneral';
 import AdminPlantillas from './pages/admin/config/AdminPlantillas';
+import AdminAutomatizaciones from './pages/admin/config/AdminAutomatizaciones';
 import ConfigLayout from "./components/layouts/ConfigLayout";
 import PublicReserva from "./pages/PublicReserva";
 import PublicProspectos from "./pages/PublicProspectos";
@@ -90,6 +91,7 @@ const App = () => (
             <Route path="/admin/configuracion/servicios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminServicios /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/garantias" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminCondicionesGarantia /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/plantillas" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminPlantillas /></ConfigLayout></ProtectedRoute>} />
+            <Route path="/admin/configuracion/automatizaciones" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminAutomatizaciones /></ConfigLayout></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

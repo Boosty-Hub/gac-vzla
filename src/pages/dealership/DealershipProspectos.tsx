@@ -26,6 +26,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useProspectModels } from '@/hooks/useProspectModels';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
+import { createKommoLead, updateKommoLeadStage } from '@/lib/kommo';
 
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
@@ -41,7 +42,9 @@ interface Prospect {
   status: string;
   notes: string | null;
   salesperson: string | null;
+  event_name: string | null;
   'Estado de Vnzla': string | null;
+  kommo_lead_id: number | null;
   created_at: string;
 }
 
@@ -430,7 +433,7 @@ const DealershipProspectos = () => {
         const isDuplicate = await checkDuplicatePhone(phone);
         if (isDuplicate) { setSaving(false); return; }
       }
-      const { error } = await supabase.from('prospects').insert({
+      const { data: inserted, error } = await supabase.from('prospects').insert({
         dealership_id: selectedDealership,
         name: pName.trim(),
         phone: phone || null,
@@ -442,9 +445,13 @@ const DealershipProspectos = () => {
         salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
         event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
         'Estado de Vnzla': pEstadoVzla.trim() || null,
-      });
+      }).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
-      else { toast.success('Prospecto creado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
+      else {
+        toast.success('Prospecto creado');
+        setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
+        createKommoLead(inserted.id).catch(console.error);
+      }
     }
     setSaving(false);
   };
@@ -467,7 +474,11 @@ const DealershipProspectos = () => {
   const updateStatus = async (id: string, newStatus: string) => {
     const { error } = await supabase.from('prospects').update({ status: newStatus }).eq('id', id);
     if (error) { toast.error('Error al actualizar estado'); console.error(error); }
-    else { fetchProspects(); }
+    else {
+      fetchProspects();
+      const p = prospects.find(x => x.id === id);
+      if (p?.kommo_lead_id) updateKommoLeadStage(id, p.kommo_lead_id, newStatus).catch(console.error);
+    }
   };
 
   // Mobile card
