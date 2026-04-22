@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ResponsiveModal, ResponsiveModalHeader, ResponsiveModalTitle, ResponsiveModalFooter } from '@/components/ui/responsive-modal';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
@@ -142,6 +143,20 @@ const AdminProspectos = () => {
 
   // Updates sidebar
   const [updatesSidebarProspect, setUpdatesSidebarProspect] = useState<Prospect | null>(null);
+
+  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
+  const applyThisMonth = () => {
+    const t = new Date(); const y = t.getFullYear(), m = t.getMonth();
+    setFechaDesde(new Date(y, m, 1).toISOString().slice(0, 10));
+    setFechaHasta(new Date(y, m + 1, 0).toISOString().slice(0, 10));
+    setCurrentPage(1);
+  };
+  const applyLastMonth = () => {
+    const t = new Date(); const y = t.getFullYear(), m = t.getMonth();
+    setFechaDesde(new Date(y, m - 1, 1).toISOString().slice(0, 10));
+    setFechaHasta(new Date(y, m, 0).toISOString().slice(0, 10));
+    setCurrentPage(1);
+  };
 
   // Sort & pagination
   const [sortField, setSortField] = useState<string>('created_at');
@@ -846,67 +861,83 @@ const AdminProspectos = () => {
           </TabsTrigger>
         </TabsList>
 
-        {/* Filters */}
-        <div className="flex flex-col gap-2">
-          {/* Search */}
-          <div className="relative">
+        {/* Filters — single row */}
+        <div className="flex flex-wrap gap-1.5 items-center">
+          <div className="relative min-w-[160px] flex-1 max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={search} onChange={e => setSearch(e.target.value)} />
+            <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={search} onChange={e => { setSearch(e.target.value); setCurrentPage(1); }} />
           </div>
-          {/* Filters grid */}
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
-            <Select value={dealershipFilter} onValueChange={setDealershipFilter}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Concesionario" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los concesionarios</SelectItem>
-                {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Estado" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los estados</SelectItem>
-                {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={sourceFilter} onValueChange={setSourceFilter}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Fuente" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todas las fuentes</SelectItem>
-                {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={salespersonFilter} onValueChange={setSalespersonFilter}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Vendedor" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los vendedores</SelectItem>
-                {salespersons.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={estadoVzlaFilter} onValueChange={setEstadoVzlaFilter}>
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Estado (Vzla)" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los estados</SelectItem>
-                {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          {/* Date range */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              <span className="text-[11px] text-muted-foreground shrink-0">Desde</span>
-              <Input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
-            </div>
-            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-              <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
-              <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
-            </div>
-            {(fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos') && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setSearch(''); setCurrentPage(1); }}>
-                Limpiar
+          <Select value={dealershipFilter} onValueChange={v => { setDealershipFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[150px] shrink-0"><SelectValue placeholder="Concesionario" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los concesionarios</SelectItem>
+              {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={v => { setStatusFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los estados</SelectItem>
+              {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={sourceFilter} onValueChange={v => { setSourceFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[120px] shrink-0"><SelectValue placeholder="Fuente" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todas las fuentes</SelectItem>
+              {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={salespersonFilter} onValueChange={v => { setSalespersonFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Vendedor" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los vendedores</SelectItem>
+              {salespersons.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={estadoVzlaFilter} onValueChange={v => { setEstadoVzlaFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Estado (Vzla)" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los estados</SelectItem>
+              {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className={cn("h-8 text-xs shrink-0 gap-1.5", (fechaDesde || fechaHasta) && "border-primary text-primary")}>
+                <CalendarDays className="w-3.5 h-3.5" />
+                {fechaDesde || fechaHasta
+                  ? `${fechaDesde ? new Date(fechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'} – ${fechaHasta ? new Date(fechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'}`
+                  : 'Fecha'}
               </Button>
-            )}
-          </div>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-3 space-y-3" align="start">
+              <div className="flex gap-1.5">
+                <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyThisMonth}>Este mes</Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyLastMonth}>Mes pasado</Button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">Desde</span>
+                  <Input type="date" value={fechaDesde} onChange={e => { setFechaDesde(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">Hasta</span>
+                  <Input type="date" value={fechaHasta} onChange={e => { setFechaHasta(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
+                </div>
+              </div>
+              {(fechaDesde || fechaHasta) && (
+                <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground" onClick={() => { setFechaDesde(''); setFechaHasta(''); setCurrentPage(1); }}>
+                  Quitar rango
+                </Button>
+              )}
+            </PopoverContent>
+          </Popover>
+          {(search || fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos') && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setSearch(''); setCurrentPage(1); }}>
+              <X className="w-3 h-3" />Limpiar
+            </Button>
+          )}
         </div>
 
         {/* Content: Cards on mobile, Table on desktop */}
