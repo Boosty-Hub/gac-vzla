@@ -14,7 +14,7 @@ import { ResponsiveModal, ResponsiveModalHeader, ResponsiveModalTitle, Responsiv
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -143,6 +143,20 @@ const AdminProspectos = () => {
   // Updates sidebar
   const [updatesSidebarProspect, setUpdatesSidebarProspect] = useState<Prospect | null>(null);
 
+  // Sort & pagination
+  const [sortField, setSortField] = useState<string>('created_at');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 25;
+  const toggleSort = (field: string) => {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortDir('asc'); }
+    setCurrentPage(1);
+  };
+  const SortIcon = ({ field }: { field: string }) => sortField !== field
+    ? <ChevronsUpDown className="w-3 h-3 ml-0.5 text-muted-foreground/40 inline" />
+    : sortDir === 'asc' ? <ChevronUp className="w-3 h-3 ml-0.5 inline" /> : <ChevronDown className="w-3 h-3 ml-0.5 inline" />;
+
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   type BulkActionType = 'status' | 'model' | 'estadoVzla' | 'source' | 'eventName' | 'salesperson' | null;
@@ -191,11 +205,24 @@ const AdminProspectos = () => {
         !p.name.toLowerCase().includes(q) &&
         !(p.phone || '').toLowerCase().includes(q) &&
         !(p.email || '').toLowerCase().includes(q) &&
+        !(p.salesperson || '').toLowerCase().includes(q) &&
         !(p.model_interest || '').toLowerCase().includes(q) &&
         !(p.dealerships?.name || '').toLowerCase().includes(q)
       ) return false;
     }
     return true;
+  });
+
+  const sortedProspects = [...filteredProspects].sort((a, b) => {
+    let av = '', bv = '';
+    if (sortField === 'name') { av = a.name; bv = b.name; }
+    else if (sortField === 'salesperson') { av = a.salesperson || ''; bv = b.salesperson || ''; }
+    else if (sortField === 'status') { av = a.status; bv = b.status; }
+    else if (sortField === 'source') { av = a.source; bv = b.source; }
+    else if (sortField === 'model_interest') { av = a.model_interest || ''; bv = b.model_interest || ''; }
+    else if (sortField === 'dealership') { av = a.dealerships?.name || ''; bv = b.dealerships?.name || ''; }
+    else { av = a.created_at; bv = b.created_at; }
+    return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
   });
 
   const resetForm = () => {
@@ -631,9 +658,11 @@ const AdminProspectos = () => {
   const totalInteresados = prospects.filter(p => !CLOSED_STATUSES.includes(p.status) && p.status !== 'nuevo').length;
   const totalGanados = prospects.filter(p => p.status === 'ganado').length;
 
-  const openProspects = filteredProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
-  const closedProspects = filteredProspects.filter(p => CLOSED_STATUSES.includes(p.status));
+  const openProspects = sortedProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
+  const closedProspects = sortedProspects.filter(p => CLOSED_STATUSES.includes(p.status));
   const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
+  const totalPages = Math.ceil(displayedProspects.length / PAGE_SIZE);
+  const paginatedProspects = displayedProspects.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   const toggleSelect = (id: string) => {
     setSelectedIds(prev => {
@@ -644,10 +673,10 @@ const AdminProspectos = () => {
   };
 
   const toggleSelectAll = () => {
-    if (displayedProspects.length > 0 && displayedProspects.every(p => selectedIds.has(p.id))) {
+    if (paginatedProspects.length > 0 && paginatedProspects.every(p => selectedIds.has(p.id))) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(displayedProspects.map(p => p.id)));
+      setSelectedIds(new Set(paginatedProspects.map(p => p.id)));
     }
   };
 
@@ -807,7 +836,7 @@ const AdminProspectos = () => {
         </Card>
       </div>
 
-      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados'); setSelectedIds(new Set()); }} className="space-y-3">
+      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados'); setSelectedIds(new Set()); setCurrentPage(1); }} className="space-y-3">
         <TabsList>
           <TabsTrigger value="abiertos" className="text-xs gap-1">
             Abiertos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{openProspects.length}</Badge>
@@ -873,7 +902,7 @@ const AdminProspectos = () => {
               <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
             </div>
             {(fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos') && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setSearch(''); }}>
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setSearch(''); setCurrentPage(1); }}>
                 Limpiar
               </Button>
             )}
@@ -908,24 +937,24 @@ const AdminProspectos = () => {
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                   <TableHead className="w-8 pl-3">
                     <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
-                      checked={displayedProspects.length > 0 && displayedProspects.every(p => selectedIds.has(p.id))}
+                      checked={paginatedProspects.length > 0 && paginatedProspects.every(p => selectedIds.has(p.id))}
                       onChange={toggleSelectAll} />
                   </TableHead>
-                  <TableHead>Nombre</TableHead>
+                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('name')}>Nombre<SortIcon field="name" /></TableHead>
                   <TableHead>Contacto</TableHead>
-                  <TableHead>Marca</TableHead>
+                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('model_interest')}>Marca<SortIcon field="model_interest" /></TableHead>
                   <TableHead>Modelo</TableHead>
-                  <TableHead>Vendedor</TableHead>
-                  <TableHead>Concesionario</TableHead>
-                  <TableHead>Fuente</TableHead>
-                  <TableHead>Estado</TableHead>
+                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('salesperson')}>Vendedor<SortIcon field="salesperson" /></TableHead>
+                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('dealership')}>Concesionario<SortIcon field="dealership" /></TableHead>
+                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>
+                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>
                   <TableHead>Estado Vzla</TableHead>
-                  <TableHead>Fecha</TableHead>
+                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('created_at')}>Fecha<SortIcon field="created_at" /></TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {displayedProspects.map(p => {
+                {paginatedProspects.map(p => {
                   const st = PROSPECT_STATUSES.find(s => s.name === p.status) || FALLBACK_STATUS;
                   const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                   return (
@@ -1003,6 +1032,17 @@ const AdminProspectos = () => {
                 })}
               </TableBody>
             </Table>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-3 py-2 border-t text-[11px] text-muted-foreground">
+                <span>{displayedProspects.length} prospectos · pág. {currentPage} de {totalPages}</span>
+                <div className="flex items-center gap-0.5">
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-xs" disabled={currentPage === 1} onClick={() => setCurrentPage(1)}>«</Button>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-xs" disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)}>‹</Button>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-xs" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => p + 1)}>›</Button>
+                  <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-xs" disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)}>»</Button>
+                </div>
+              </div>
+            )}
           </Card>
         )}
       </Tabs>
