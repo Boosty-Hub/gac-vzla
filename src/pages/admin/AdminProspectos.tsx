@@ -999,8 +999,8 @@ const AdminProspectos = () => {
                         {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
                         {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                       </TableCell>
-                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); return (parts.length > 1 && ['GAC','DFSK','SHINERAY'].includes(parts[0])) ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{parts[0]}</Badge> : '-'; })()}</TableCell>
-                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); return (parts.length > 1 && ['GAC','DFSK','SHINERAY'].includes(parts[0])) ? parts.slice(1).join(' ') : (p.model_interest || '-'); })()}</TableCell>
+                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{parts[0]}</Badge> : '-'; })()}</TableCell>
+                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? (parts.slice(1).join(' ') || '-') : (p.model_interest || '-'); })()}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {salespersons.find(sp => sp.name === (p as any).salesperson)?.name || (p as any).salesperson || '-'}
                       </TableCell>

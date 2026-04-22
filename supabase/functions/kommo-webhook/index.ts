@@ -187,21 +187,27 @@ async function autoCreateProspectFromKommo(
     }
   }
 
-  // Extract contact info (phone/email)
-  const contacts = ((lead as Record<string, unknown>)._embedded as Record<string, unknown>)?.contacts as Array<Record<string, unknown>> || []
-  const contact = contacts[0]
-  const leadName = (lead.name as string) || (contact?.name as string) || 'Sin nombre'
+  // Extract contact info — fetch contact separately to get phone/email
+  const contacts = ((lead as Record<string, unknown>)._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }> || []
+  const leadName = (lead.name as string) || 'Sin nombre'
 
   let phone: string | null = null
   let email: string | null = null
-  if (contact?.custom_fields_values) {
-    const cfs = contact.custom_fields_values as Array<{ field_code?: string; values: Array<{ value?: string }> }>
-    phone = cfs.find(f => f.field_code === 'PHONE')?.values?.[0]?.value ?? null
-    email = cfs.find(f => f.field_code === 'EMAIL')?.values?.[0]?.value ?? null
+  if (contacts[0]?.id) {
+    const contactRes = await fetch(`${baseUrl}/contacts/${contacts[0].id}?with=custom_fields`, { headers: authHeaders })
+    if (contactRes.ok && contactRes.status !== 204) {
+      try {
+        const contactData = await contactRes.json() as Record<string, unknown>
+        const cfs = (contactData.custom_fields_values as Array<{ field_code?: string; values: Array<{ value?: string }> }>) || []
+        phone = cfs.find(f => f.field_code === 'PHONE')?.values?.[0]?.value ?? null
+        email = cfs.find(f => f.field_code === 'EMAIL')?.values?.[0]?.value ?? null
+      } catch { /* ignore */ }
+    }
   }
 
   // Build prospect fields from Kommo custom fields
-  const salesperson = getCF(CF_IDS.salesperson)
+  // CF 3193866 = text salesperson field; CF 2988736 = "Vendedor Asignado" select (value = display name)
+  const salesperson = getCF(CF_IDS.salesperson) || getCF(2988736)
   const notes = getCF(CF_IDS.notes)
   const estadoVzla = getCF(CF_IDS.estado_vzla)
   const eventName = getCF(CF_IDS.event_name)
