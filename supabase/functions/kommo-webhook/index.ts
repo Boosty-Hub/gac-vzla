@@ -137,7 +137,7 @@ async function autoCreateProspectFromKommo(
   }
 
   const leadRes = await fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields`, { headers: authHeaders })
-  if (!leadRes.ok) {
+  if (!leadRes.ok || leadRes.status === 204) {
     await supabase.from('integration_logs').insert({
       integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
       kommo_lead_id: kommoLeadId, status: 'error',
@@ -146,7 +146,17 @@ async function autoCreateProspectFromKommo(
     return
   }
 
-  const lead = await leadRes.json() as Record<string, unknown>
+  let lead: Record<string, unknown>
+  try {
+    lead = await leadRes.json() as Record<string, unknown>
+  } catch {
+    await supabase.from('integration_logs').insert({
+      integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
+      kommo_lead_id: kommoLeadId, status: 'error',
+      details: { reason: 'json_parse_failed', http_status: leadRes.status },
+    })
+    return
+  }
   const cfValues = (lead.custom_fields_values as Array<{ field_id: number; values: Array<{ value?: unknown; enum_id?: number }> }>) || []
 
   const getCF = (id: number): string | null => {
