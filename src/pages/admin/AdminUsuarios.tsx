@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle, Mail } from 'lucide-react';
+import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle, Mail, Phone } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -26,6 +26,7 @@ interface ProfileWithRole {
   created_at: string;
   updated_at: string;
   pin_code: string | null;
+  phone: string | null;
   roles: {
     id: string;
     name: string;
@@ -55,6 +56,7 @@ const AdminUsuarios = () => {
   const [editRoleId, setEditRoleId] = useState('');
   const [editIsActive, setEditIsActive] = useState(true);
   const [editPinCode, setEditPinCode] = useState('');
+  const [editPhone, setEditPhone] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Create dialog state
@@ -65,6 +67,7 @@ const AdminUsuarios = () => {
   const [createRoleId, setCreateRoleId] = useState('');
   const [creating, setCreating] = useState(false);
   const [createPinCode, setCreatePinCode] = useState('');
+  const [createPhone, setCreatePhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [createDealershipId, setCreateDealershipId] = useState('');
   const [generatingLink, setGeneratingLink] = useState<string | null>(null);
@@ -126,6 +129,7 @@ const AdminUsuarios = () => {
     setCreateDealershipId('');
     setCreateDealershipIds([]);
     setCreatePinCode('');
+    setCreatePhone('');
     setShowPassword(false);
     setCreateDialogOpen(true);
   };
@@ -195,6 +199,7 @@ const AdminUsuarios = () => {
           role_id: createRoleId || null,
           dealership_id: primaryDealershipId,
           pin_code: pinValue || null,
+          phone: createPhone.trim() || null,
         },
       });
 
@@ -218,6 +223,7 @@ const AdminUsuarios = () => {
         toast.success('Usuario creado exitosamente');
         setCreateDialogOpen(false);
         setCreateDealershipIds([]);
+        setCreatePhone('');
         fetchUsers();
         fetchLinkedProfiles();
       }
@@ -234,6 +240,7 @@ const AdminUsuarios = () => {
     setEditRoleId(user.role_id || '');
     setEditIsActive(user.is_active);
     setEditPinCode(user.pin_code || '');
+    setEditPhone(user.phone || '');
     setEditDealershipId('');
     setEditDealershipIds([]);
     // Load all current dealership links
@@ -281,6 +288,7 @@ const AdminUsuarios = () => {
         role_id: editRoleId || null,
         is_active: editIsActive,
         pin_code: pinValue || null,
+        phone: editPhone.trim() || null,
       } as any)
       .eq('id', editingUser.id);
 
@@ -425,6 +433,12 @@ const AdminUsuarios = () => {
                         <Mail className="w-2.5 h-2.5 shrink-0" />
                         <span className="truncate">{u.email}</span>
                       </div>
+                      {u.phone && (
+                        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <Phone className="w-2.5 h-2.5 shrink-0" />
+                          <span className="truncate">{u.phone}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
@@ -553,6 +567,20 @@ const AdminUsuarios = () => {
                   onChange={e => setEditFullName(e.target.value)}
                   placeholder="Nombre del usuario"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="editPhone" className="flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5" /> Teléfono
+                </Label>
+                <Input
+                  id="editPhone"
+                  type="tel"
+                  value={editPhone}
+                  onChange={e => setEditPhone(e.target.value)}
+                  placeholder="Ej: 0414-1234567"
+                />
+                <p className="text-xs text-muted-foreground">Móvil o local. Opcional.</p>
               </div>
 
               <div className="space-y-2">
@@ -695,6 +723,18 @@ const AdminUsuarios = () => {
                 onChange={e => setCreateFullName(e.target.value)}
                 placeholder="Nombre del usuario"
               />
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5" /> Teléfono
+              </Label>
+              <Input
+                type="tel"
+                value={createPhone}
+                onChange={e => setCreatePhone(e.target.value)}
+                placeholder="Ej: 0414-1234567"
+              />
+              <p className="text-xs text-muted-foreground">Móvil o local. Opcional.</p>
             </div>
             <div className="space-y-2">
               <Label>Rol</Label>
