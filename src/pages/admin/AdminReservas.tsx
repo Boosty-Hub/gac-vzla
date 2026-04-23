@@ -245,27 +245,36 @@ const AdminReservas = () => {
     if (fClientSearch.trim().length < 2) { setClientResults([]); return; }
     const timer = setTimeout(async () => {
       setSearchingClients(true);
-      // Search by name or cedula
-      const { data: directClients } = await supabase
-        .from('clients')
-        .select('id, full_name, cedula')
-        .or(`full_name.ilike.%${fClientSearch}%,cedula.ilike.%${fClientSearch}%`)
-        .limit(10);
+      const fullTerm = fClientSearch.trim();
+      const words = fullTerm.split(/\s+/).filter(Boolean);
 
-      // Search by vehicle plate
-      const { data: vehicleMatches } = await supabase
-        .from('vehicles')
-        .select('client_id, plate, clients(id, full_name, cedula)')
-        .ilike('plate', `%${fClientSearch}%`)
-        .limit(10);
+      // Build name query: each word must appear somewhere in full_name (AND logic)
+      let nameQuery = supabase.from('clients').select('id, full_name, cedula');
+      for (const w of words) nameQuery = nameQuery.ilike('full_name', `%${w}%`);
+
+      const [{ data: byName }, { data: byCedula }, { data: vehicleMatches }] = await Promise.all([
+        nameQuery.limit(15),
+        supabase.from('clients').select('id, full_name, cedula').ilike('cedula', `%${fullTerm}%`).limit(10),
+        supabase.from('vehicles').select('client_id, plate, clients(id, full_name, cedula)').ilike('plate', `%${fullTerm}%`).limit(10),
+      ]);
 
       const results = new Map<string, ClientOption>();
-      (directClients || []).forEach(c => results.set(c.id, c));
-      (vehicleMatches || []).forEach((v: any) => {
-        if (v.clients) results.set(v.clients.id, v.clients);
-      });
+      (byName || []).forEach(c => results.set(c.id, c));
+      (byCedula || []).forEach(c => results.set(c.id, c));
+      (vehicleMatches || []).forEach((v: any) => { if (v.clients) results.set(v.clients.id, v.clients); });
 
-      setClientResults(Array.from(results.values()));
+      const upperFull = fullTerm.toUpperCase();
+      const upperFirst = words[0].toUpperCase();
+      // rank 0: name starts with the full phrase ("LUIS LOPEZ ...")
+      // rank 1: name starts with the first word ("LUIS JOSE ...") or phrase matches mid-name ("JOSE LUIS LOPEZ")
+      // rank 2: words are scattered across the name
+      const rank = (name: string) => {
+        const n = name.toUpperCase();
+        if (n.startsWith(upperFull)) return 0;
+        if (n.startsWith(upperFirst) || n.includes(' ' + upperFull)) return 1;
+        return 2;
+      };
+      setClientResults(Array.from(results.values()).sort((a, b) => rank(a.full_name) - rank(b.full_name)));
       setSearchingClients(false);
     }, 300);
     return () => clearTimeout(timer);
