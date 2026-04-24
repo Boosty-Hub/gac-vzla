@@ -118,16 +118,30 @@ async function autoCreateProspectFromKommo(
   const CF_IDS = {
     supabase_id: 3192400, salesperson: 3193866, notes: 3192402,
     estado_vzla: 3204218, event_name: 3415147, fuente: 2988728,
-    marca: 2988724, modelo_gac: 2988732, concesionario: 2988984,
+    marca: 2988724, concesionario: 2988984,
+    modelo_interes_gac: 3436641, modelo_interes_dfsk: 3436639, modelo_interes_shinerey: 2988850,
   }
   const KOMMO_TO_SOURCE: Record<string, string> = {
     '7832218':'redes_sociales','7832220':'redes_sociales','7832222':'redes_sociales',
     '7832224':'redes_sociales','7832226':'pagina_web','7832228':'evento',
     '7832230':'concesionario','7832232':'referido','7893992':'redes_sociales','7893994':'redes_sociales',
   }
-  const BRAND_REVERSE: Record<number, string> = { 7832208:'GAC', 7832206:'DFSK', 7857650:'Shinarey' }
-  const KOMMO_GAC_TO_MODEL: Record<string, string> = {
-    '7832236':'EMPOW','7832370':'EMZOOM','7832372':'GS8','7832384':'SMILODON',
+  const KOMMO_TO_BRAND: Record<number, string> = { 7832208:'GAC', 7832206:'DFSK', 7857650:'SHINERAY' }
+  const MODEL_FIELD_FOR_BRAND: Record<string, number> = {
+    GAC: 3436641, DFSK: 3436639, SHINERAY: 2988850,
+  }
+  const KOMMO_GAC_LABEL_TO_MODEL: Record<string, string> = {
+    'EMPOW':'EMPOW GS','EMZOOM':'EMZOOM GB','GS8':'GS8 GT','SMILODON':'SMILODON 4x2',
+  }
+  const KOMMO_DFSK_LABEL_TO_MODEL: Record<string, string> = {
+    'MODELOS PICK UP':          'C31 (Pick up)',
+    'MODELOS BOX / CAVA':       'C31 (Box)',
+    'MODELOS DE CARGA / PANEL': 'C35 (Panel)',
+    'MODELOS VAN PASAJEROS':    'C37 (Pasajeros)',
+    'MODELOS SUV / PASAJEROS':  'GLORY 500 (SUV)',
+  }
+  const KOMMO_SHINEREY_LABEL_TO_MODEL: Record<string, string> = {
+    'X30 (PASAJEROS)':'X30 (Pasajeros)','X30 (PANEL)':'X30 (Panel)',
   }
   // Maps Kommo concesionario enum_id → search keyword for dealerships table
   const CONCESIONARIO_KEYWORD: Record<number, string> = {
@@ -216,11 +230,19 @@ async function autoCreateProspectFromKommo(
   const source = sourceEnumId ? (KOMMO_TO_SOURCE[String(sourceEnumId)] || 'concesionario') : 'concesionario'
 
   const brandEnumId = getEnum(CF_IDS.marca)
-  const gacModelEnumId = getEnum(CF_IDS.modelo_gac)
   let modelInterest: string | null = null
-  if (brandEnumId && BRAND_REVERSE[brandEnumId]) {
-    const brandName = BRAND_REVERSE[brandEnumId]
-    const modelName = gacModelEnumId ? (KOMMO_GAC_TO_MODEL[String(gacModelEnumId)] || '') : ''
+  if (brandEnumId && KOMMO_TO_BRAND[brandEnumId]) {
+    const brandName = KOMMO_TO_BRAND[brandEnumId]
+    const modelFieldId = MODEL_FIELD_FOR_BRAND[brandName]
+    let modelName = ''
+    if (modelFieldId) {
+      const modelCF = cfValues.find(x => x.field_id === modelFieldId)
+      const rawLabel = modelCF?.values?.[0]?.value ? String(modelCF.values[0].value).trim().replace(/\s+/g, ' ').toUpperCase() : ''
+      const labelMap = brandName === 'GAC' ? KOMMO_GAC_LABEL_TO_MODEL
+        : brandName === 'DFSK' ? KOMMO_DFSK_LABEL_TO_MODEL
+        : KOMMO_SHINEREY_LABEL_TO_MODEL
+      modelName = rawLabel ? (labelMap[rawLabel] ?? rawLabel) : ''
+    }
     modelInterest = modelName ? `${brandName} ${modelName}` : brandName
   }
 
@@ -295,16 +317,30 @@ async function syncFieldsFromKommo(
 ) {
   const CF = {
     salesperson: 3193866, notes: 3192402, estado_vzla: 3204218,
-    event_name: 3415147, fuente: 2988728, marca: 2988724, modelo_gac: 2988732,
+    event_name: 3415147, fuente: 2988728, marca: 2988724,
+    modelo_interes_gac: 3436641, modelo_interes_dfsk: 3436639, modelo_interes_shinerey: 2988850,
   }
   const KOMMO_TO_SOURCE: Record<string, string> = {
     '7832218':'redes_sociales','7832220':'redes_sociales','7832222':'redes_sociales',
     '7832224':'redes_sociales','7832226':'pagina_web','7832228':'evento',
     '7832230':'concesionario','7832232':'referido','7893992':'redes_sociales','7893994':'redes_sociales',
   }
-  const BRAND_TO_KOMMO: Record<number, string> = { 7832208:'GAC', 7832206:'DFSK', 7857650:'Shinarey' }
-  const KOMMO_GAC_TO_MODEL: Record<string, string> = {
-    '7832236':'EMPOW','7832370':'EMZOOM','7832372':'GS8','7832384':'SMILODON',
+  const KOMMO_TO_BRAND: Record<number, string> = { 7832208:'GAC', 7832206:'DFSK', 7857650:'SHINERAY' }
+  const MODEL_FIELD_FOR_BRAND: Record<string, number> = {
+    GAC: 3436641, DFSK: 3436639, SHINERAY: 2988850,
+  }
+  const KOMMO_GAC_LABEL_TO_MODEL: Record<string, string> = {
+    'EMPOW':'EMPOW GS','EMZOOM':'EMZOOM GB','GS8':'GS8 GT','SMILODON':'SMILODON 4x2',
+  }
+  const KOMMO_DFSK_LABEL_TO_MODEL: Record<string, string> = {
+    'MODELOS PICK UP':          'C31 (Pick up)',
+    'MODELOS BOX / CAVA':       'C31 (Box)',
+    'MODELOS DE CARGA / PANEL': 'C35 (Panel)',
+    'MODELOS VAN PASAJEROS':    'C37 (Pasajeros)',
+    'MODELOS SUV / PASAJEROS':  'GLORY 500 (SUV)',
+  }
+  const KOMMO_SHINEREY_LABEL_TO_MODEL: Record<string, string> = {
+    'X30 (PASAJEROS)':'X30 (Pasajeros)','X30 (PANEL)':'X30 (Panel)',
   }
 
   const [prospectRes, leadRes] = await Promise.all([
@@ -338,10 +374,18 @@ async function syncFieldsFromKommo(
 
   if (!prospect.model_interest) {
     const brandEnumId = getEnum(CF.marca)
-    const gacModelEnumId = getEnum(CF.modelo_gac)
-    if (brandEnumId && BRAND_TO_KOMMO[brandEnumId]) {
-      const brandName = BRAND_TO_KOMMO[brandEnumId]
-      const modelName = gacModelEnumId ? KOMMO_GAC_TO_MODEL[String(gacModelEnumId)] || '' : ''
+    if (brandEnumId && KOMMO_TO_BRAND[brandEnumId]) {
+      const brandName = KOMMO_TO_BRAND[brandEnumId]
+      const modelFieldId = MODEL_FIELD_FOR_BRAND[brandName]
+      let modelName = ''
+      if (modelFieldId) {
+        const modelCF = cfValues.find(x => x.field_id === modelFieldId)
+        const rawLabel = modelCF?.values?.[0]?.value ? String(modelCF.values[0].value).trim().replace(/\s+/g, ' ').toUpperCase() : ''
+        const labelMap = brandName === 'GAC' ? KOMMO_GAC_LABEL_TO_MODEL
+          : brandName === 'DFSK' ? KOMMO_DFSK_LABEL_TO_MODEL
+          : KOMMO_SHINEREY_LABEL_TO_MODEL
+        modelName = rawLabel ? (labelMap[rawLabel] ?? rawLabel) : ''
+      }
       updates.model_interest = modelName ? `${brandName} ${modelName}` : brandName
     }
   }
@@ -367,14 +411,42 @@ async function syncFieldsToKommo(
   const CF = {
     supabase_id:3192400, dealership_id:3192486, salesperson:3193866, notes:3192402,
     estado_vzla:3204218, event_name:3415147, fuente:2988728, marca:2988724,
-    modelo_gac:2988732, concesionario:2988984,
+    concesionario:2988984,
+    modelo_interes_gac:3436641, modelo_interes_dfsk:3436639, modelo_interes_shinerey:2988850,
   }
   const SOURCE_TO_KOMMO: Record<string, number> = {
     concesionario:7832230,evento:7832228,pagina_web:7832226,
     redes_sociales:7893992,referido:7832232,visita:7832230,
   }
-  const BRAND_TO_KOMMO: Record<string, number> = { GAC:7832208,DFSK:7832206,Shinarey:7857650 }
-  const MODEL_GAC_TO_KOMMO: Record<string, number> = { EMPOW:7832236,EMZOOM:7832370,GS8:7832372,SMILODON:7832384 }
+  const BRAND_TO_KOMMO: Record<string, number> = { GAC:7832208, DFSK:7832206, SHINERAY:7857650 }
+  const MODEL_FIELD_FOR_BRAND: Record<string, number> = {
+    GAC:3436641, DFSK:3436639, SHINERAY:2988850,
+  }
+  // TODO: Reemplazar 0 con los enum_id reales de Kommo para cada opción de modelo
+  const K_GAC = { EMPOW:0, EMZOOM:1, GS8:2, SMILODON:3 }
+  const K_DFSK = { PICK_UP:0, BOX_CAVA:1, CARGA_PANEL:2, VAN_PASAJEROS:3, SUV_PASAJEROS:4 }
+  const K_SHINEREY = { PASAJEROS:0, PANEL:1 }
+  const MODEL_GAC_TO_KOMMO: Record<string, number> = {
+    'EMPOW GS':K_GAC.EMPOW,'EMPOW GE':K_GAC.EMPOW,'EMPOW GE 2.0':K_GAC.EMPOW,'EMPOW GL':K_GAC.EMPOW,
+    'EMZOOM GB':K_GAC.EMZOOM,'EMZOOM GS':K_GAC.EMZOOM,'EMZOOM GB RSTYLE':K_GAC.EMZOOM,
+    'GS8 GT':K_GAC.GS8,'GS8 4WD GT':K_GAC.GS8,'GS8 FACELIFT':K_GAC.GS8,
+    'SMILODON 4x2':K_GAC.SMILODON,'SMILODON 4x4':K_GAC.SMILODON,
+  }
+  const MODEL_DFSK_TO_KOMMO: Record<string, number> = {
+    'C31 (Pick up)':K_DFSK.PICK_UP,'C31 (Box)':K_DFSK.BOX_CAVA,'C31 (Refrig -18°)':K_DFSK.BOX_CAVA,
+    'C32 (Pick up)':K_DFSK.PICK_UP,'C35 (Panel)':K_DFSK.CARGA_PANEL,
+    'C37 (Pasajeros)':K_DFSK.VAN_PASAJEROS,'C37 (11 Pasajeros)':K_DFSK.VAN_PASAJEROS,
+    'D51 (Plataforma)':K_DFSK.PICK_UP,'D51 (Estacas)':K_DFSK.PICK_UP,
+    'D71 (Pick up)':K_DFSK.PICK_UP,'D71 (BOX)':K_DFSK.BOX_CAVA,
+    'D72 (Pick up)':K_DFSK.PICK_UP,'D1 Pick up (4X4)':K_DFSK.PICK_UP,'Z9 Pick Up':K_DFSK.PICK_UP,
+    'K01S Cava (Isotermica)':K_DFSK.BOX_CAVA,'K01S Cava (Refrig -5°)':K_DFSK.BOX_CAVA,
+    'K01S Cava (Refrig -18°)':K_DFSK.BOX_CAVA,'K01S (Estacas)':K_DFSK.PICK_UP,'K01S (Pick up)':K_DFSK.PICK_UP,
+    'K02S (Pick up)':K_DFSK.PICK_UP,'K05S (Panel)':K_DFSK.CARGA_PANEL,'K07S (Pasajeros)':K_DFSK.VAN_PASAJEROS,
+    'GLORY 500 (SUV)':K_DFSK.SUV_PASAJEROS,'GLORY 500 T (Dynamic)':K_DFSK.SUV_PASAJEROS,'GLORY E5 (Hybrid)':K_DFSK.SUV_PASAJEROS,
+  }
+  const MODEL_SHINEREY_TO_KOMMO: Record<string, number> = {
+    'X30 (Pasajeros)':K_SHINEREY.PASAJEROS,'X30 (Panel)':K_SHINEREY.PANEL,
+  }
   const CONCESIONARIO_KOMMO = [
     {id:7832490,kw:['harbin']},{id:7832492,kw:['garzas']},{id:7832494,kw:['hobby']},
     {id:7832496,kw:['meta car','zulia']},{id:7832498,kw:['palma']},
@@ -401,7 +473,7 @@ async function syncFieldsToKommo(
       newFields.push({ field_id: id, values: [{ value: val }] })
   }
   const addEnum = (id: number, enumId: number | null) => {
-    if (!hasField(id) && enumId) newFields.push({ field_id: id, values: [{ enum_id: enumId }] })
+    if (!hasField(id) && enumId !== null) newFields.push({ field_id: id, values: [{ enum_id: enumId }] })
   }
 
   addVal(CF.supabase_id, prospect.id)
@@ -415,7 +487,14 @@ async function syncFieldsToKommo(
   const parts = ((prospect.model_interest as string) || '').split(' ')
   const brand = parts[0]; const modelName = parts.slice(1).join(' ')
   addEnum(CF.marca, BRAND_TO_KOMMO[brand] ?? null)
-  if (brand === 'GAC' && modelName) addEnum(CF.modelo_gac, MODEL_GAC_TO_KOMMO[modelName] ?? null)
+  if (modelName) {
+    const fieldId = MODEL_FIELD_FOR_BRAND[brand] ?? null
+    let enumId: number | null = null
+    if (brand === 'GAC') enumId = MODEL_GAC_TO_KOMMO[modelName] ?? null
+    else if (brand === 'DFSK') enumId = MODEL_DFSK_TO_KOMMO[modelName] ?? null
+    else if (brand === 'SHINERAY') enumId = MODEL_SHINEREY_TO_KOMMO[modelName] ?? null
+    if (fieldId) addEnum(fieldId, enumId)
+  }
 
   const dealName = ((prospect.dealerships as { name: string })?.name || '').toLowerCase()
   const dealEnum = CONCESIONARIO_KOMMO.find(c => c.kw.some(k => dealName.includes(k)))?.id ?? null
