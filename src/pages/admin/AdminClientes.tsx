@@ -876,8 +876,11 @@ const AdminClientes = () => {
       )}
 
       {/* Client Dialog */}
-      <Dialog open={clientDialogOpen} onOpenChange={setClientDialogOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg">
+      <Dialog open={clientDialogOpen} onOpenChange={open => { if (open) setClientDialogOpen(true); }}>
+        <DialogContent
+          className="w-[calc(100vw-2rem)] max-w-lg"
+          onClose={() => setClientDialogOpen(false)}
+        >
           <DialogHeader>
             <DialogTitle className="font-display">
               {editingClient ? 'Editar Cliente' : 'Nuevo Cliente'}

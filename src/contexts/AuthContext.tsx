@@ -106,12 +106,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let currentUserId: string | null = null;
 
     // 1. Initialize from existing session
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!mounted) return;
       setSession(session);
       setUser(session?.user ?? null);
+      currentUserId = session?.user?.id ?? null;
 
       if (session?.user) {
         const data = await withTimeout(loadUserProfile(session.user.id), 8000);
@@ -124,20 +126,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         if (!mounted) return;
-        if (event === 'INITIAL_SESSION') return;
+        if (event === 'INITIAL_SESSION') {
+          currentUserId = session?.user?.id ?? null;
+          return;
+        }
 
         setSession(session);
         setUser(session?.user ?? null);
 
         if (event === 'SIGNED_OUT') {
+          currentUserId = null;
           clearProfile();
           setLoading(false);
           return;
         }
 
-        if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
-          // Use setTimeout to avoid blocking the auth state change callback
-          // This ensures the Supabase client has the new token before we make requests
+        // TOKEN_REFRESHED happens periodically (and on tab focus). Same user → no need to refetch profile.
+        if (event === 'TOKEN_REFRESHED') return;
+
+        // Only refetch profile when the user actually changes
+        if (session?.user && event === 'SIGNED_IN' && session.user.id !== currentUserId) {
+          currentUserId = session.user.id;
           setTimeout(async () => {
             if (!mounted) return;
             setLoading(true);
