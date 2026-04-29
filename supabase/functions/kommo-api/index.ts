@@ -56,19 +56,19 @@ const KOMMO_TO_BRAND: Record<number, string> = {
 }
 
 // ─── Kommo enum IDs para campos de modelo por marca ──────────────────────────
-// Los enum_id van desde 0 en orden según aparecen en la configuración del campo
+// IDs reales obtenidos de /api/v4/leads/custom_fields/{field_id}
 // Campo "Modelo Interes GAC" (3436641):
-const K_GAC = { EMPOW: 0, EMZOOM: 1, GS8: 2, SMILODON: 3 }
-// Campo "Modelo Interes DFSK" (3436639) — opciones por categoría de vehículo:
+const K_GAC = { EMPOW: 8148533, EMZOOM: 8148535, GS8: 8148537, SMILODON: 8148539 }
+// Campo "Modelo Interes DFSK" (3436639):
 const K_DFSK = {
-  PICK_UP:       0, // "Modelos Pick up"
-  BOX_CAVA:      1, // "Modelos Box / Cava"
-  CARGA_PANEL:   2, // "Modelos de Carga / Panel"
-  VAN_PASAJEROS: 3, // "Modelos Van Pasajeros"
-  SUV_PASAJEROS: 4, // "Modelos SUV / Pasajeros"
+  PICK_UP:       8148523, // "Modelos Pick up"
+  BOX_CAVA:      8148525, // "Modelos Box / Cava"
+  CARGA_PANEL:   8148527, // "Modelos de Carga / Panel"
+  VAN_PASAJEROS: 8148529, // "Modelos Van Pasajeros"
+  SUV_PASAJEROS: 8148531, // "Modelos SUV / Pasajeros"
 }
 // Campo "Modelo Interés Shinerey" (2988850):
-const K_SHINEREY = { PASAJEROS: 0, PANEL: 1 }
+const K_SHINEREY = { PASAJEROS: 7832388, PANEL: 7832390 }
 
 // ─── Central model name → Kommo enum_id ──────────────────────────────────────
 // Múltiples variantes del sistema central se agrupan en la categoría Kommo correspondiente
@@ -447,6 +447,7 @@ Deno.serve(async (req) => {
         custom_fields_values: customFields,
         _embedded: {
           contacts: [{ name: prospect.name, custom_fields_values: contactFields }],
+          tags: [{ name: 'Sistema Central' }],
         },
       }]
 
