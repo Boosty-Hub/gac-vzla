@@ -90,20 +90,8 @@ export default function CustomWidgetsSection({ dealerships }: Props) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
-          <BarChart2 className="w-4 h-4 text-primary" />
-          <h2 className="text-sm font-display font-semibold">Widgets personalizados</h2>
-        </div>
-        {canEdit && (
-          <Button size="sm" className="gac-gradient h-8 text-xs gap-1" onClick={() => { setEditingWidget(null); setEditorOpen(true); }}>
-            <Plus className="w-3.5 h-3.5" />Nuevo widget
-          </Button>
-        )}
-      </div>
-
-      {/* Global filters */}
-      <div className="flex flex-wrap gap-1.5 items-center">
+      <div className="flex flex-wrap gap-1.5 items-center justify-between">
+        <div className="flex flex-wrap gap-1.5 items-center">
         <Select value={dealershipId} onValueChange={setDealershipId}>
           <SelectTrigger className="h-8 text-xs w-[180px] shrink-0"><SelectValue placeholder="Concesionario" /></SelectTrigger>
           <SelectContent>
@@ -145,6 +133,12 @@ export default function CustomWidgetsSection({ dealerships }: Props) {
         {(fechaDesde || fechaHasta || dealershipId !== 'todos') && (
           <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setFechaDesde(''); setFechaHasta(''); setDealershipId('todos'); }}>
             <X className="w-3 h-3" />Limpiar
+          </Button>
+        )}
+        </div>
+        {canEdit && (
+          <Button size="sm" className="gac-gradient h-8 text-xs gap-1 shrink-0" onClick={() => { setEditingWidget(null); setEditorOpen(true); }}>
+            <Plus className="w-3.5 h-3.5" />Nuevo widget
           </Button>
         )}
       </div>

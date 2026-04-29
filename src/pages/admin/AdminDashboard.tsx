@@ -2,10 +2,13 @@ import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
   MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
-  Star, Wrench, Building2, BarChart2,
+  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -61,15 +64,46 @@ const AdminDashboard = () => {
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Date range filter — default últimos 30 días
+  const defaultDesde = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); })();
+  const defaultHasta = new Date().toISOString().slice(0, 10);
+  const [fechaDesde, setFechaDesde] = useState<string>(defaultDesde);
+  const [fechaHasta, setFechaHasta] = useState<string>(defaultHasta);
+  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
+
+  const isDefaultRange = fechaDesde === defaultDesde && fechaHasta === defaultHasta;
+
+  const applyLast30 = () => { setFechaDesde(defaultDesde); setFechaHasta(defaultHasta); };
+  const applyThisMonth = () => {
+    const t = new Date(); const y = t.getFullYear(), m = t.getMonth();
+    setFechaDesde(new Date(y, m, 1).toISOString().slice(0, 10));
+    setFechaHasta(new Date(y, m + 1, 0).toISOString().slice(0, 10));
+  };
+  const applyLastMonth = () => {
+    const t = new Date(); const y = t.getFullYear(), m = t.getMonth();
+    setFechaDesde(new Date(y, m - 1, 1).toISOString().slice(0, 10));
+    setFechaHasta(new Date(y, m, 0).toISOString().slice(0, 10));
+  };
+  const applyYTD = () => {
+    const y = new Date().getFullYear();
+    setFechaDesde(`${y}-01-01`);
+    setFechaHasta(defaultHasta);
+  };
+
   useEffect(() => {
     const load = async () => {
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const since = thirtyDaysAgo.toISOString();
+      setLoading(true);
+      const since = fechaDesde ? `${fechaDesde}T00:00:00` : undefined;
+      const until = fechaHasta ? `${fechaHasta}T23:59:59` : undefined;
+
+      let pq: any = supabase.from('prospects').select('id, status, source, salesperson, created_at, dealership_id, event_name');
+      let rq: any = supabase.from('reservations').select('id, status, reservation_date, service_type, dealership_id, created_at, satisfaction_rating');
+      if (since) { pq = pq.gte('created_at', since); rq = rq.gte('created_at', since); }
+      if (until) { pq = pq.lte('created_at', until); rq = rq.lte('created_at', until); }
 
       const [pRes, rRes, dRes] = await Promise.all([
-        supabase.from('prospects').select('id, status, source, salesperson, created_at, dealership_id, event_name').gte('created_at', since),
-        supabase.from('reservations').select('id, status, reservation_date, service_type, dealership_id, created_at, satisfaction_rating').gte('created_at', since),
+        pq,
+        rq,
         supabase.from('dealerships').select('id, name, is_service_center').eq('is_active', true),
       ]);
 
@@ -79,7 +113,7 @@ const AdminDashboard = () => {
       setLoading(false);
     };
     load();
-  }, []);
+  }, [fechaDesde, fechaHasta]);
 
   // ─── KPIs ───
   const totalProspects = prospects.length;
@@ -273,12 +307,56 @@ const AdminDashboard = () => {
     );
   }
 
+  const rangeLabel = isDefaultRange
+    ? 'Últimos 30 días'
+    : `${new Date(fechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(fechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
-        <p className="text-xs sm:text-sm text-muted-foreground">Últimos 30 días — Resumen general del sistema</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">{rangeLabel} — Resumen general del sistema</p>
+        </div>
+        <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className={cn("h-9 text-xs gap-1.5", !isDefaultRange && "border-primary text-primary")}>
+              <CalendarDays className="w-3.5 h-3.5" />
+              {isDefaultRange ? 'Últimos 30 días' : `${new Date(fechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })} – ${new Date(fechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })}`}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-72 p-3 space-y-3" align="end">
+            <div className="grid grid-cols-2 gap-1.5">
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyLast30}>Últimos 30 días</Button>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyThisMonth}>Este mes</Button>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyLastMonth}>Mes pasado</Button>
+              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyYTD}>Año actual</Button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <span className="text-[11px] text-muted-foreground">Desde</span>
+                <Input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="h-8 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <span className="text-[11px] text-muted-foreground">Hasta</span>
+                <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs" />
+              </div>
+            </div>
+            {!isDefaultRange && (
+              <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground gap-1" onClick={applyLast30}>
+                <X className="w-3 h-3" />Restablecer (30 días)
+              </Button>
+            )}
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {/* ╔════ SECCIÓN: VISTA GENERAL ════╗ */}
+      <div className="flex items-center gap-2 pb-1 border-b border-border/60">
+        <LayoutGrid className="w-4 h-4 text-primary" />
+        <h2 className="text-sm font-display font-semibold">Vista general</h2>
+        <span className="text-[10px] text-muted-foreground">indicadores y reportes estándar</span>
       </div>
 
       {/* KPI Cards */}
@@ -631,8 +709,13 @@ const AdminDashboard = () => {
         </CardContent>
       </Card>
 
-      {/* Widgets personalizados */}
-      <div className="pt-2 border-t">
+      {/* ╔════ SECCIÓN: WIDGETS PERSONALIZADOS ════╗ */}
+      <div className="pt-4 mt-4 border-t-2 border-dashed border-primary/30 space-y-4">
+        <div className="flex items-center gap-2 pb-1 border-b border-border/60">
+          <Sparkles className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-display font-semibold">Widgets personalizados</h2>
+          <span className="text-[10px] text-muted-foreground">indicadores configurables por administrador</span>
+        </div>
         <CustomWidgetsSection dealerships={dealerships.map(d => ({ id: d.id, name: d.name }))} />
       </div>
     </div>
