@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useIsMobile } from '@/hooks/use-mobile';
+import CustomWidgetsSection from '@/components/dashboard/CustomWidgetsSection';
 
 interface Prospect {
   id: string;
@@ -629,6 +630,11 @@ const AdminDashboard = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Widgets personalizados */}
+      <div className="pt-2 border-t">
+        <CustomWidgetsSection dealerships={dealerships.map(d => ({ id: d.id, name: d.name }))} />
+      </div>
     </div>
   );
 };
