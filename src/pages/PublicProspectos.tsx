@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Car, User, Phone, Mail, MessageSquare, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -44,6 +45,10 @@ const PublicProspectos = () => {
   const [dealershipId, setDealershipId] = useState('');
   const [eventName, setEventName] = useState('');
   const [notes, setNotes] = useState('');
+  const [testDrive, setTestDrive] = useState(false);
+  const [personType, setPersonType] = useState('');
+  const [gender, setGender] = useState('');
+  const [ageRange, setAgeRange] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -93,6 +98,10 @@ const PublicProspectos = () => {
       dealership_id: dealershipId,
       event_name: source === 'evento' ? eventName.trim() : null,
       notes: notes.trim() || null,
+      test_drive: testDrive,
+      person_type: personType || null,
+      gender: gender || null,
+      age_range: ageRange || null,
     } as any);
 
     setSaving(false);
@@ -117,7 +126,7 @@ const PublicProspectos = () => {
             <p className="text-muted-foreground text-sm">
               Gracias por tu interés. Un asesor se pondrá en contacto contigo pronto.
             </p>
-            <Button onClick={() => { setSubmitted(false); setName(''); setPhone(''); setEmail(''); setModelInterest(''); setSource('pagina_web'); setDealershipId(dealerships.length === 1 ? dealerships[0].id : ''); setEventName(''); setNotes(''); }} variant="outline">
+            <Button onClick={() => { setSubmitted(false); setName(''); setPhone(''); setEmail(''); setModelInterest(''); setSource('pagina_web'); setDealershipId(dealerships.length === 1 ? dealerships[0].id : ''); setEventName(''); setNotes(''); setTestDrive(false); setPersonType(''); setGender(''); setAgeRange(''); }} variant="outline">
               Registrar otro
             </Button>
           </CardContent>
@@ -213,6 +222,46 @@ const PublicProspectos = () => {
                 <Input value={eventName} onChange={e => setEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" />
               </div>
             )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Tipo de persona</Label>
+                <Select value={personType} onValueChange={setPersonType}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="natural">Natural</SelectItem>
+                    <SelectItem value="juridica">Jurídica</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Género</Label>
+                <Select value={gender} onValueChange={setGender}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="masculino">Masculino</SelectItem>
+                    <SelectItem value="femenino">Femenino</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Rango de edad</Label>
+                <Select value={ageRange} onValueChange={setAgeRange}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="20-30">20 a 30</SelectItem>
+                    <SelectItem value="30-40">30 a 40</SelectItem>
+                    <SelectItem value="40+">40 o más</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2 flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer h-10">
+                  <Checkbox checked={testDrive} onCheckedChange={v => setTestDrive(!!v)} />
+                  <span className="text-sm">Solicito Test Drive</span>
+                </label>
+              </div>
+            </div>
 
             <div className="space-y-2">
               <Label>Comentarios (opcional)</Label>

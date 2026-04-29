@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ResponsiveModal, ResponsiveModalHeader, ResponsiveModalTitle, ResponsiveModalFooter } from '@/components/ui/responsive-modal';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
 import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -53,10 +54,28 @@ interface Prospect {
   event_name: string | null;
   'Estado de Vnzla': string | null;
   kommo_lead_id: number | null;
+  test_drive: boolean | null;
+  person_type: string | null;
+  gender: string | null;
+  age_range: string | null;
   created_at: string;
   updated_at: string;
   dealerships: { name: string } | null;
 }
+
+const PERSON_TYPES: { value: string; label: string }[] = [
+  { value: 'natural', label: 'Natural' },
+  { value: 'juridica', label: 'Jurídica' },
+];
+const GENDERS: { value: string; label: string }[] = [
+  { value: 'masculino', label: 'Masculino' },
+  { value: 'femenino', label: 'Femenino' },
+];
+const AGE_RANGES: { value: string; label: string }[] = [
+  { value: '20-30', label: '20 a 30' },
+  { value: '30-40', label: '30 a 40' },
+  { value: '40+', label: '40 o más' },
+];
 
 
 const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 'bg-gray-100 text-gray-800', sort_order: 0, is_active: true };
@@ -88,6 +107,10 @@ const AdminProspectos = () => {
   const [sourceFilter, setSourceFilter] = useState('todos');
   const [salespersonFilter, setSalespersonFilter] = useState('todos');
   const [estadoVzlaFilter, setEstadoVzlaFilter] = useState('todos');
+  const [testDriveFilter, setTestDriveFilter] = useState('todos');
+  const [personTypeFilter, setPersonTypeFilter] = useState('todos');
+  const [genderFilter, setGenderFilter] = useState('todos');
+  const [ageRangeFilter, setAgeRangeFilter] = useState('todos');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
 
@@ -111,6 +134,10 @@ const AdminProspectos = () => {
   const [pSalesperson, setPSalesperson] = useState<string>(() => getSS().pSalesperson || '');
   const [pEventName, setPEventName] = useState<string>(() => getSS().pEventName || '');
   const [pEstadoVzla, setPEstadoVzla] = useState<string>(() => getSS().pEstadoVzla || '');
+  const [pTestDrive, setPTestDrive] = useState<boolean>(() => !!getSS().pTestDrive);
+  const [pPersonType, setPPersonType] = useState<string>(() => getSS().pPersonType || '');
+  const [pGender, setPGender] = useState<string>(() => getSS().pGender || '');
+  const [pAgeRange, setPAgeRange] = useState<string>(() => getSS().pAgeRange || '');
 
   const setDialogOpen = (open: boolean) => {
     setDialogOpenRaw(open);
@@ -120,9 +147,9 @@ const AdminProspectos = () => {
   useEffect(() => {
     if (!dialogOpen) return;
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pPersonType, pGender, pAgeRange }));
     } catch {}
-  }, [dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName]);
+  }, [dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pPersonType, pGender, pAgeRange]);
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -131,7 +158,7 @@ const AdminProspectos = () => {
   // Import XLSX
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; dealership: string; notes: string; salesperson: string; event_name: string; fecha: string; errors: string[] }>>([]);
+  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; dealership: string; notes: string; salesperson: string; event_name: string; fecha: string; test_drive: boolean; person_type: string; gender: string; age_range: string; errors: string[] }>>([]);
   const [importing, setImporting] = useState(false);
   const [importDealership, setImportDealership] = useState('');
 
@@ -212,6 +239,10 @@ const AdminProspectos = () => {
     if (sourceFilter !== 'todos' && p.source !== sourceFilter) return false;
     if (salespersonFilter !== 'todos' && (p.salesperson || '') !== salespersonFilter) return false;
     if (estadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== estadoVzlaFilter) return false;
+    if (testDriveFilter !== 'todos' && (testDriveFilter === 'si' ? !p.test_drive : !!p.test_drive)) return false;
+    if (personTypeFilter !== 'todos' && (p.person_type || '') !== personTypeFilter) return false;
+    if (genderFilter !== 'todos' && (p.gender || '') !== genderFilter) return false;
+    if (ageRangeFilter !== 'todos' && (p.age_range || '') !== ageRangeFilter) return false;
     if (fechaDesde && p.created_at.slice(0, 10) < fechaDesde) return false;
     if (fechaHasta && p.created_at.slice(0, 10) > fechaHasta) return false;
     if (search.trim()) {
@@ -246,6 +277,7 @@ const AdminProspectos = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPBrand(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setPEventName(''); setPEstadoVzla('');
+    setPTestDrive(false); setPPersonType(''); setPGender(''); setPAgeRange('');
   };
 
   const openCreate = () => {
@@ -274,6 +306,10 @@ const AdminProspectos = () => {
     setPSalesperson(p.salesperson || '');
     setPEventName(p.event_name || '');
     setPEstadoVzla(p['Estado de Vnzla'] || '');
+    setPTestDrive(!!p.test_drive);
+    setPPersonType(p.person_type || '');
+    setPGender(p.gender || '');
+    setPAgeRange(p.age_range || '');
     setDialogOpen(true);
   };
 
@@ -291,6 +327,10 @@ const AdminProspectos = () => {
     salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson : null,
     event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
     'Estado de Vnzla': pEstadoVzla.trim() || null,
+    test_drive: !!pTestDrive,
+    person_type: pPersonType || null,
+    gender: pGender || null,
+    age_range: pAgeRange || null,
   });
 
   const checkDuplicatePhone = async (phone: string, excludeId?: string): Promise<boolean> => {
@@ -473,12 +513,16 @@ const AdminProspectos = () => {
         vendedor: p.salesperson || '',
         concesionario: p.dealerships?.name || '',
         estado_vzla: p['Estado de Vnzla'] || '',
+        test_drive: p.test_drive ? 'si' : 'no',
+        tipo_persona: p.person_type || '',
+        genero: p.gender || '',
+        rango_edad: p.age_range || '',
         notas: p.notes || '',
         fecha: new Date(p.created_at).toLocaleDateString('es-VE'),
       };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:18},{wch:20},{wch:28},{wch:18},{wch:35},{wch:15}];
+    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:18},{wch:20},{wch:28},{wch:18},{wch:10},{wch:14},{wch:12},{wch:12},{wch:35},{wch:15}];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
     XLSX.writeFile(wb, `prospectos_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -490,12 +534,14 @@ const AdminProspectos = () => {
     const headers = [
       'nombre', 'telefono', 'email', 'marca', 'modelo',
       'fuente', 'estado', 'notas', 'vendedor', 'nombre_evento', 'fecha',
+      'test_drive', 'tipo_persona', 'genero', 'rango_edad',
     ];
     const example = [
       'Juan Pérez', '+58 412 1234567', 'juan@email.com', 'GAC', 'GS4',
       PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
       PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
       'Interesado en SUV', 'Carlos Gómez', '', '2026-04-07',
+      'si', 'natural', 'masculino', '30-40',
     ];
     const validSources = PROSPECT_SOURCES.map(s => `${s.value} = ${s.label}`).join('\n');
     const validStatuses = PROSPECT_STATUSES.map(s => `${s.name} = ${s.label}`).join('\n');
@@ -515,6 +561,10 @@ const AdminProspectos = () => {
       ['  IMPORTANTE: la fecha del Excel es la que quedará registrada en el sistema'],
       ['- fuente y estado deben coincidir exactamente con las claves listadas arriba'],
       ['- nombre_evento solo se usa cuando fuente = evento'],
+      ['- test_drive: si / no (vacío = no)'],
+      ['- tipo_persona: natural / juridica'],
+      ['- genero: masculino / femenino'],
+      ['- rango_edad: 20-30 / 30-40 / 40+'],
       ['- No modificar los encabezados de la primera hoja'],
     ];
 
@@ -534,6 +584,10 @@ const AdminProspectos = () => {
       { wch: 20 }, // vendedor
       { wch: 20 }, // nombre_evento
       { wch: 18 }, // fecha
+      { wch: 12 }, // test_drive
+      { wch: 14 }, // tipo_persona
+      { wch: 12 }, // genero
+      { wch: 12 }, // rango_edad
     ];
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
 
@@ -573,6 +627,21 @@ const AdminProspectos = () => {
           const notes = String(row['notas'] ?? '').trim();
           const salesperson = String(row['vendedor'] ?? '').trim();
           const event_name = String(row['nombre_evento'] ?? '').trim();
+          const tdRaw = String(row['test_drive'] ?? '').trim().toLowerCase();
+          const test_drive = ['si','sí','true','1','yes','y'].includes(tdRaw);
+          let person_type = String(row['tipo_persona'] ?? '').trim().toLowerCase();
+          if (person_type && !['natural','juridica','jurídica'].includes(person_type)) {
+            errors.push(`Tipo de persona inválido: "${person_type}"`); person_type = '';
+          }
+          if (person_type === 'jurídica') person_type = 'juridica';
+          let gender = String(row['genero'] ?? row['género'] ?? '').trim().toLowerCase();
+          if (gender && !['masculino','femenino'].includes(gender)) {
+            errors.push(`Género inválido: "${gender}"`); gender = '';
+          }
+          let age_range = String(row['rango_edad'] ?? '').trim();
+          if (age_range && !['20-30','30-40','40+'].includes(age_range)) {
+            errors.push(`Rango de edad inválido: "${age_range}"`); age_range = '';
+          }
 
           // Validar y formatear fecha
           if (fecha) {
@@ -610,7 +679,7 @@ const AdminProspectos = () => {
           if (!status) status = VALID_STATUSES[0] || 'nuevo';
           if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email inválido');
 
-          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, dealership: '', notes, salesperson, event_name, fecha, errors });
+          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, dealership: '', notes, salesperson, event_name, fecha, test_drive, person_type, gender, age_range, errors });
         });
         setImportRows(rows);
         setImportOpen(true);
@@ -650,6 +719,10 @@ const AdminProspectos = () => {
         notes: r.notes || null,
         salesperson: r.salesperson || null,
         event_name: r.event_name || null,
+        test_drive: r.test_drive,
+        person_type: r.person_type || null,
+        gender: r.gender || null,
+        age_range: r.age_range || null,
         created_at: r.fecha || undefined, // Usar fecha del Excel si existe
       };
     });
@@ -902,6 +975,35 @@ const AdminProspectos = () => {
               {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
+          <Select value={testDriveFilter} onValueChange={v => { setTestDriveFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Test Drive" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Test Drive</SelectItem>
+              <SelectItem value="si">Sí</SelectItem>
+              <SelectItem value="no">No</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={personTypeFilter} onValueChange={v => { setPersonTypeFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[120px] shrink-0"><SelectValue placeholder="Tipo persona" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Tipo persona</SelectItem>
+              {PERSON_TYPES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={genderFilter} onValueChange={v => { setGenderFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Género" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Género</SelectItem>
+              {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={ageRangeFilter} onValueChange={v => { setAgeRangeFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Edad" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Edad</SelectItem>
+              {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className={cn("h-8 text-xs shrink-0 gap-1.5", (fechaDesde || fechaHasta) && "border-primary text-primary")}>
@@ -933,8 +1035,8 @@ const AdminProspectos = () => {
               )}
             </PopoverContent>
           </Popover>
-          {(search || fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos') && (
-            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setSearch(''); setCurrentPage(1); }}>
+          {(search || fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos' || testDriveFilter !== 'todos' || personTypeFilter !== 'todos' || genderFilter !== 'todos' || ageRangeFilter !== 'todos') && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setTestDriveFilter('todos'); setPersonTypeFilter('todos'); setGenderFilter('todos'); setAgeRangeFilter('todos'); setSearch(''); setCurrentPage(1); }}>
               <X className="w-3 h-3" />Limpiar
             </Button>
           )}
@@ -980,6 +1082,10 @@ const AdminProspectos = () => {
                   <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>
                   <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>
                   <TableHead>Estado Vzla</TableHead>
+                  <TableHead className="text-center">TD</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Género</TableHead>
+                  <TableHead>Edad</TableHead>
                   <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('created_at')}>Fecha<SortIcon field="created_at" /></TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
@@ -1030,6 +1136,12 @@ const AdminProspectos = () => {
                       <TableCell className="text-muted-foreground">
                         {p['Estado de Vnzla'] || '-'}
                       </TableCell>
+                      <TableCell className="text-center">
+                        {p.test_drive ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 inline" /> : <span className="text-muted-foreground/40">-</span>}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground capitalize">{p.person_type || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground capitalize">{p.gender || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground">{p.age_range || '-'}</TableCell>
                       <TableCell className="text-muted-foreground">
                         {new Date(p.created_at).toLocaleDateString('es-VE')}
                       </TableCell>
@@ -1121,6 +1233,14 @@ const AdminProspectos = () => {
                   <Field label="Fuente" icon={Tag}>
                     <Badge variant="outline" className="text-xs capitalize">{src?.label || detailProspect.source}</Badge>
                   </Field>
+                  <Field label="Test Drive" icon={Car}>
+                    <Badge variant={detailProspect.test_drive ? 'default' : 'outline'} className="text-xs">
+                      {detailProspect.test_drive ? 'Sí' : 'No'}
+                    </Badge>
+                  </Field>
+                  {detailProspect.person_type && <Field label="Tipo persona" icon={User} value={PERSON_TYPES.find(p => p.value === detailProspect.person_type)?.label} />}
+                  {detailProspect.gender && <Field label="Género" icon={User} value={GENDERS.find(g => g.value === detailProspect.gender)?.label} />}
+                  {detailProspect.age_range && <Field label="Rango edad" icon={User} value={AGE_RANGES.find(a => a.value === detailProspect.age_range)?.label} />}
                   {detailProspect.source === 'evento' && (
                     <Field label="Evento" icon={CalendarDays} value={detailProspect.event_name} />
                   )}
@@ -1367,6 +1487,42 @@ const AdminProspectos = () => {
                     {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Tipo de persona</Label>
+                <Select value={pPersonType || '__none'} onValueChange={v => setPPersonType(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {PERSON_TYPES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Género</Label>
+                <Select value={pGender || '__none'} onValueChange={v => setPGender(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Rango de edad</Label>
+                <Select value={pAgeRange || '__none'} onValueChange={v => setPAgeRange(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer h-9">
+                  <Checkbox checked={pTestDrive} onCheckedChange={v => setPTestDrive(!!v)} />
+                  <span className="text-xs">Solicita Test Drive</span>
+                </label>
               </div>
               <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Estado</Label>

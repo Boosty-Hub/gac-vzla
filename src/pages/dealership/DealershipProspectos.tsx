@@ -15,6 +15,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { ResponsiveModal, ResponsiveModalHeader, ResponsiveModalTitle, ResponsiveModalFooter } from '@/components/ui/responsive-modal';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Plus, Search, Users, Phone, Mail, ExternalLink, MessageCircle, Activity, Pencil, Download, Upload, FileText, X, CheckCircle2, AlertTriangle, Tag, MapPin, Car, CalendarDays, User, Trash2, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -32,6 +33,20 @@ import { createKommoLead, updateKommoLeadStage } from '@/lib/kommo';
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
+const PERSON_TYPES: { value: string; label: string }[] = [
+  { value: 'natural', label: 'Natural' },
+  { value: 'juridica', label: 'Jurídica' },
+];
+const GENDERS: { value: string; label: string }[] = [
+  { value: 'masculino', label: 'Masculino' },
+  { value: 'femenino', label: 'Femenino' },
+];
+const AGE_RANGES: { value: string; label: string }[] = [
+  { value: '20-30', label: '20 a 30' },
+  { value: '30-40', label: '30 a 40' },
+  { value: '40+', label: '40 o más' },
+];
+
 interface Prospect {
   id: string;
   dealership_id: string;
@@ -46,6 +61,10 @@ interface Prospect {
   event_name: string | null;
   'Estado de Vnzla': string | null;
   kommo_lead_id: number | null;
+  test_drive: boolean | null;
+  person_type: string | null;
+  gender: string | null;
+  age_range: string | null;
   created_at: string;
 }
 
@@ -67,6 +86,10 @@ const DealershipProspectos = () => {
   const [prosStatusFilter, setProsStatusFilter] = useState('todos');
   const [prosSourceFilter, setProsSourceFilter] = useState('todos');
   const [prosEstadoVzlaFilter, setProsEstadoVzlaFilter] = useState('todos');
+  const [prosTestDriveFilter, setProsTestDriveFilter] = useState('todos');
+  const [prosPersonTypeFilter, setProsPersonTypeFilter] = useState('todos');
+  const [prosGenderFilter, setProsGenderFilter] = useState('todos');
+  const [prosAgeRangeFilter, setProsAgeRangeFilter] = useState('todos');
   const [prosFechaDesde, setProsFechaDesde] = useState('');
   const [prosFechaHasta, setProsFechaHasta] = useState('');
 
@@ -88,6 +111,10 @@ const DealershipProspectos = () => {
   const [pSalesperson, setPSalesperson] = useState<string>(() => getSS().pSalesperson || '');
   const [pEventName, setPEventName] = useState<string>(() => getSS().pEventName || '');
   const [pEstadoVzla, setPEstadoVzla] = useState<string>(() => getSS().pEstadoVzla || '');
+  const [pTestDrive, setPTestDrive] = useState<boolean>(() => !!getSS().pTestDrive);
+  const [pPersonType, setPPersonType] = useState<string>(() => getSS().pPersonType || '');
+  const [pGender, setPGender] = useState<string>(() => getSS().pGender || '');
+  const [pAgeRange, setPAgeRange] = useState<string>(() => getSS().pAgeRange || '');
 
   const setDialogOpen = (open: boolean) => {
     setDialogOpenRaw(open);
@@ -97,13 +124,13 @@ const DealershipProspectos = () => {
   useEffect(() => {
     if (!dialogOpen) return;
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pPersonType, pGender, pAgeRange }));
     } catch {}
-  }, [dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName]);
+  }, [dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pPersonType, pGender, pAgeRange]);
   // Import/Export
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; notes: string; salesperson: string; event_name: string; estado_vzla: string; fecha: string; errors: string[] }>>([]);
+  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; notes: string; salesperson: string; event_name: string; estado_vzla: string; fecha: string; test_drive: boolean; person_type: string; gender: string; age_range: string; errors: string[] }>>([]);
   const [importing, setImporting] = useState(false);
 
   const [greetingTemplate, setGreetingTemplate] = useState<string>('Hola {{prospecto}}, ¡es un gusto saludarte! Mi nombre es {{vendedor}}, seré el asesor de ventas encargado de brindarte información de nuestros vehículos. ¿En qué puedo ayudarte hoy? 🚗');
@@ -209,6 +236,10 @@ const DealershipProspectos = () => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
     if (prosSourceFilter !== 'todos' && p.source !== prosSourceFilter) return false;
     if (prosEstadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== prosEstadoVzlaFilter) return false;
+    if (prosTestDriveFilter !== 'todos' && (prosTestDriveFilter === 'si' ? !p.test_drive : !!p.test_drive)) return false;
+    if (prosPersonTypeFilter !== 'todos' && (p.person_type || '') !== prosPersonTypeFilter) return false;
+    if (prosGenderFilter !== 'todos' && (p.gender || '') !== prosGenderFilter) return false;
+    if (prosAgeRangeFilter !== 'todos' && (p.age_range || '') !== prosAgeRangeFilter) return false;
     if (prosFechaDesde && p.created_at.slice(0, 10) < prosFechaDesde) return false;
     if (prosFechaHasta && p.created_at.slice(0, 10) > prosFechaHasta) return false;
     if (prosSearch.trim()) {
@@ -301,12 +332,16 @@ const DealershipProspectos = () => {
         estado: PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
         vendedor: p.salesperson || '',
         estado_vzla: p['Estado de Vnzla'] || '',
+        test_drive: p.test_drive ? 'si' : 'no',
+        tipo_persona: p.person_type || '',
+        genero: p.gender || '',
+        rango_edad: p.age_range || '',
         notas: p.notes || '',
         fecha: new Date(p.created_at).toLocaleDateString('es-VE'),
       };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:18},{wch:20},{wch:18},{wch:35},{wch:15}];
+    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:18},{wch:20},{wch:18},{wch:10},{wch:14},{wch:12},{wch:12},{wch:35},{wch:15}];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
     XLSX.writeFile(wb, `prospectos_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -314,14 +349,15 @@ const DealershipProspectos = () => {
   };
 
   const downloadTemplate = () => {
-    const headers = ['nombre','telefono','email','marca','modelo','fuente','estado','notas','vendedor','nombre_evento','estado_vzla','fecha'];
+    const headers = ['nombre','telefono','email','marca','modelo','fuente','estado','notas','vendedor','nombre_evento','estado_vzla','fecha','test_drive','tipo_persona','genero','rango_edad'];
     const example = ['Juan Pérez','+58 412 1234567','juan@email.com','GAC','GS4',
       PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
       PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
-      'Interesado en SUV', autoSalesperson || 'Carlos Gómez', '', '', '2026-04-07'];
+      'Interesado en SUV', autoSalesperson || 'Carlos Gómez', '', '', '2026-04-07',
+      'si','natural','masculino','30-40'];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:25},{wch:20},{wch:30},{wch:20},{wch:20},{wch:18},{wch:18}];
+    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:25},{wch:20},{wch:30},{wch:20},{wch:20},{wch:18},{wch:18},{wch:12},{wch:14},{wch:12},{wch:12}];
     const wsNotes = XLSX.utils.aoa_to_sheet([
       ['INSTRUCCIONES:'],
       ['- nombre y telefono son obligatorios'],
@@ -329,6 +365,10 @@ const DealershipProspectos = () => {
       ['- FECHA: usa la fecha real del prospecto (YYYY-MM-DD o DD/MM/YYYY)'],
       ['  Si se deja vacía se usa la fecha de hoy'],
       ['- estado_vzla: nombre del estado venezolano (ej: Distrito Capital, Miranda)'],
+      ['- test_drive: si / no (vacío = no)'],
+      ['- tipo_persona: natural / juridica'],
+      ['- genero: masculino / femenino'],
+      ['- rango_edad: 20-30 / 30-40 / 40+'],
     ]);
     wsNotes['!cols'] = [{wch:65}];
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
@@ -359,6 +399,21 @@ const DealershipProspectos = () => {
           const salesperson = String(row['vendedor'] ?? '').trim();
           const event_name = String(row['nombre_evento'] ?? '').trim();
           const estado_vzla = String(row['estado_vzla'] ?? '').trim();
+          const tdRaw = String(row['test_drive'] ?? '').trim().toLowerCase();
+          const test_drive = ['si','sí','true','1','yes','y'].includes(tdRaw);
+          let person_type = String(row['tipo_persona'] ?? '').trim().toLowerCase();
+          if (person_type === 'jurídica') person_type = 'juridica';
+          if (person_type && !['natural','juridica'].includes(person_type)) {
+            errors.push(`Tipo de persona inválido: "${person_type}"`); person_type = '';
+          }
+          let gender = String(row['genero'] ?? row['género'] ?? '').trim().toLowerCase();
+          if (gender && !['masculino','femenino'].includes(gender)) {
+            errors.push(`Género inválido: "${gender}"`); gender = '';
+          }
+          let age_range = String(row['rango_edad'] ?? '').trim();
+          if (age_range && !['20-30','30-40','40+'].includes(age_range)) {
+            errors.push(`Rango de edad inválido: "${age_range}"`); age_range = '';
+          }
           let source = String(row['fuente'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
           let status = String(row['estado'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
           let fecha = String(row['fecha'] ?? '').trim();
@@ -376,7 +431,7 @@ const DealershipProspectos = () => {
           if (!source) source = VALID_SOURCES[0] || 'concesionario';
           if (status && !VALID_STATUSES.includes(status)) { errors.push(`Estado inválido: "${status}"`); status = VALID_STATUSES[0] || 'nuevo'; }
           if (!status) status = VALID_STATUSES[0] || 'nuevo';
-          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, notes, salesperson, event_name, estado_vzla, fecha, errors });
+          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, notes, salesperson, event_name, estado_vzla, fecha, test_drive, person_type, gender, age_range, errors });
         });
         setImportRows(rows);
         setImportOpen(true);
@@ -405,6 +460,10 @@ const DealershipProspectos = () => {
       salesperson: r.salesperson || autoSalesperson || null,
       event_name: r.event_name || null,
       'Estado de Vnzla': r.estado_vzla || null,
+      test_drive: r.test_drive,
+      person_type: r.person_type || null,
+      gender: r.gender || null,
+      age_range: r.age_range || null,
       created_at: r.fecha || undefined,
     }));
     const { error } = await supabase.from('prospects').insert(payload);
@@ -418,6 +477,7 @@ const DealershipProspectos = () => {
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
     setPSalesperson(autoSalesperson);
     setPEventName(''); setPEstadoVzla('');
+    setPTestDrive(false); setPPersonType(''); setPGender(''); setPAgeRange('');
   };
 
   const openDialog = () => {
@@ -437,6 +497,10 @@ const DealershipProspectos = () => {
     setPSalesperson(p.salesperson || autoSalesperson);
     setPEventName(p.event_name || '');
     setPEstadoVzla(p['Estado de Vnzla'] || '');
+    setPTestDrive(!!p.test_drive);
+    setPPersonType(p.person_type || '');
+    setPGender(p.gender || '');
+    setPAgeRange(p.age_range || '');
     setDialogOpenRaw(true);
   };
 
@@ -467,6 +531,10 @@ const DealershipProspectos = () => {
         salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
         event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
         'Estado de Vnzla': pEstadoVzla.trim() || null,
+        test_drive: !!pTestDrive,
+        person_type: pPersonType || null,
+        gender: pGender || null,
+        age_range: pAgeRange || null,
       }).eq('id', editingProspect.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
       else { toast.success('Prospecto actualizado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
@@ -487,6 +555,10 @@ const DealershipProspectos = () => {
         salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
         event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
         'Estado de Vnzla': pEstadoVzla.trim() || null,
+        test_drive: !!pTestDrive,
+        person_type: pPersonType || null,
+        gender: pGender || null,
+        age_range: pAgeRange || null,
       }).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
       else {
@@ -655,6 +727,35 @@ const DealershipProspectos = () => {
               {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
+          <Select value={prosTestDriveFilter} onValueChange={v => { setProsTestDriveFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Test Drive" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Test Drive</SelectItem>
+              <SelectItem value="si">Sí</SelectItem>
+              <SelectItem value="no">No</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={prosPersonTypeFilter} onValueChange={v => { setProsPersonTypeFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[120px] shrink-0"><SelectValue placeholder="Tipo persona" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Tipo persona</SelectItem>
+              {PERSON_TYPES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={prosGenderFilter} onValueChange={v => { setProsGenderFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Género" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Género</SelectItem>
+              {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={prosAgeRangeFilter} onValueChange={v => { setProsAgeRangeFilter(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Edad" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Edad</SelectItem>
+              {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
           <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm" className={cn("h-8 text-xs shrink-0 gap-1.5", (prosFechaDesde || prosFechaHasta) && "border-primary text-primary")}>
@@ -686,8 +787,8 @@ const DealershipProspectos = () => {
               )}
             </PopoverContent>
           </Popover>
-          {(prosSearch || prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos' || prosEstadoVzlaFilter !== 'todos') && (
-            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setProsEstadoVzlaFilter('todos'); setProsSearch(''); setCurrentPage(1); }}>
+          {(prosSearch || prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos' || prosEstadoVzlaFilter !== 'todos' || prosTestDriveFilter !== 'todos' || prosPersonTypeFilter !== 'todos' || prosGenderFilter !== 'todos' || prosAgeRangeFilter !== 'todos') && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setProsEstadoVzlaFilter('todos'); setProsTestDriveFilter('todos'); setProsPersonTypeFilter('todos'); setProsGenderFilter('todos'); setProsAgeRangeFilter('todos'); setProsSearch(''); setCurrentPage(1); }}>
               <X className="w-3 h-3" />Limpiar
             </Button>
           )}
@@ -731,6 +832,10 @@ const DealershipProspectos = () => {
                   {!isSalesperson && !isVendedor && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('salesperson')}>Vendedor<SortIcon field="salesperson" /></TableHead>}
                   <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>
                   <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>
+                  <TableHead className="text-center">TD</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Género</TableHead>
+                  <TableHead>Edad</TableHead>
                   <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('created_at')}>Fecha<SortIcon field="created_at" /></TableHead>
                 </TableRow>
               </TableHeader>
@@ -769,6 +874,12 @@ const DealershipProspectos = () => {
                           </SelectContent>
                         </Select>
                       </TableCell>
+                      <TableCell className="text-center">
+                        {p.test_drive ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 inline" /> : <span className="text-muted-foreground/40">-</span>}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground capitalize">{p.person_type || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground capitalize">{p.gender || '-'}</TableCell>
+                      <TableCell className="text-muted-foreground">{p.age_range || '-'}</TableCell>
                       <TableCell className="text-muted-foreground">
                         <div className="flex items-center gap-1.5">
                           <span>{new Date(p.created_at).toLocaleDateString('es-VE')}</span>
@@ -892,6 +1003,42 @@ const DealershipProspectos = () => {
                     {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Tipo de persona</Label>
+                <Select value={pPersonType || '__none'} onValueChange={v => setPPersonType(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {PERSON_TYPES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Género</Label>
+                <Select value={pGender || '__none'} onValueChange={v => setPGender(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Rango de edad</Label>
+                <Select value={pAgeRange || '__none'} onValueChange={v => setPAgeRange(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer h-9">
+                  <Checkbox checked={pTestDrive} onCheckedChange={v => setPTestDrive(!!v)} />
+                  <span className="text-xs">Solicita Test Drive</span>
+                </label>
               </div>
               <div className="space-y-1 sm:col-span-2">
                 <Label className="text-xs">Estado</Label>
