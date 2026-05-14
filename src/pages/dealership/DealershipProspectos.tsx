@@ -28,7 +28,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useProspectModels } from '@/hooks/useProspectModels';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
-import { createKommoLead, updateKommoLeadStage } from '@/lib/kommo';
+import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
@@ -537,7 +537,13 @@ const DealershipProspectos = () => {
         age_range: pAgeRange || null,
       }).eq('id', editingProspect.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
-      else { toast.success('Prospecto actualizado'); setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects(); }
+      else {
+        toast.success('Prospecto actualizado');
+        setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
+        if (editingProspect.kommo_lead_id) {
+          updateKommoLeadFields(editingProspect.id, editingProspect.kommo_lead_id).catch(console.error);
+        }
+      }
     } else {
       if (phone) {
         const isDuplicate = await checkDuplicatePhone(phone);

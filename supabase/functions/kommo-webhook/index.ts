@@ -1,5 +1,175 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+// ─── Shared constants (mirrored from kommo-api) ───────────────────────────────
+const CF = {
+  supabase_id:             3192400,
+  dealership_id:           3192486,
+  salesperson:             3193866,
+  notes:                   3192402,
+  estado_vzla:             3204218,
+  event_name:              3448828,
+  fuente:                  2988728,
+  marca:                   2988724,
+  concesionario:           2988984,
+  modelo_interes_gac:      3436641,
+  modelo_interes_dfsk:     3436639,
+  modelo_interes_shinerey: 2988850,
+}
+
+const CONTACT_CF = {
+  tipo_persona: 2988986,
+  genero:       3451546,
+  rango_edad:   3451548,
+}
+
+const KOMMO_TO_SOURCE: Record<string, string> = {
+  '7832218': 'redes_sociales',
+  '7832220': 'redes_sociales',
+  '7832222': 'redes_sociales',
+  '7832224': 'redes_sociales',
+  '7832226': 'pagina_web',
+  '7832228': 'evento',
+  '7832230': 'concesionario',
+  '7832232': 'referido',
+  '7893992': 'redes_sociales',
+  '7893994': 'redes_sociales',
+  '8158236': 'redes_sociales',
+}
+
+const KOMMO_TO_BRAND: Record<number, string> = {
+  7832208: 'GAC',
+  7832206: 'DFSK',
+  7857650: 'SHINERAY',
+}
+
+const KOMMO_EVENT_ID_TO_NAME: Record<number, string> = {
+  8158302: 'Cerro Verde 2026',
+  8161259: 'Exhibición Acarigua Mango Center 2026',
+  8161682: 'Plastic Show Valencia',
+}
+
+const KOMMO_TO_PERSON_TYPE: Record<number, string> = {
+  7832512: 'natural',
+  7832514: 'juridica',
+}
+
+const K_GAC = { EMPOW: 8148533, EMZOOM: 8148535, GS8: 8148537, SMILODON: 8148539 }
+const K_DFSK = {
+  PICK_UP: 8148523, BOX_CAVA: 8148525, CARGA_PANEL: 8148527,
+  VAN_PASAJEROS: 8148529, SUV_PASAJEROS: 8148531,
+}
+const K_SHINEREY = { PASAJEROS: 7832388, PANEL: 7832390 }
+
+const SOURCE_TO_KOMMO: Record<string, number> = {
+  concesionario: 7832230, evento: 7832228, pagina_web: 7832226,
+  redes_sociales: 7893992, referido: 7832232, visita: 7832230,
+}
+const BRAND_TO_KOMMO: Record<string, number> = { GAC: 7832208, DFSK: 7832206, SHINERAY: 7857650 }
+
+const EVENT_NAME_ENUMS = [
+  { id: 8158302, keywords: ['cerro verde'] },
+  { id: 8161259, keywords: ['acarigua', 'mango center'] },
+  { id: 8161682, keywords: ['plastic show'] },
+]
+
+function eventNameToKommoEnumId(eventName: string): number | null {
+  if (!eventName) return null
+  const lower = eventName.toLowerCase()
+  return EVENT_NAME_ENUMS.find(e => e.keywords.some(k => lower.includes(k)))?.id ?? null
+}
+
+const PERSON_TYPE_TO_KOMMO: Record<string, number> = {
+  natural: 7832512, juridica: 7832514,
+}
+
+const VALID_AGE_RANGES = new Set(['20-30', '30-40', '40+'])
+function sanitizeAgeRange(val: string | null): string | null {
+  return val && VALID_AGE_RANGES.has(val) ? val : null
+}
+
+const MODEL_GAC_TO_KOMMO: Record<string, number> = {
+  'EMPOW GS': K_GAC.EMPOW, 'EMPOW GE': K_GAC.EMPOW, 'EMPOW GE 2.0': K_GAC.EMPOW, 'EMPOW GL': K_GAC.EMPOW,
+  'EMZOOM GB': K_GAC.EMZOOM, 'EMZOOM GS': K_GAC.EMZOOM, 'EMZOOM GB RSTYLE': K_GAC.EMZOOM,
+  'GS8 GT': K_GAC.GS8, 'GS8 4WD GT': K_GAC.GS8, 'GS8 FACELIFT': K_GAC.GS8,
+  'SMILODON 4x2': K_GAC.SMILODON, 'SMILODON 4x4': K_GAC.SMILODON,
+}
+const MODEL_DFSK_TO_KOMMO: Record<string, number> = {
+  'C31 (Pick up)': K_DFSK.PICK_UP, 'C31 (Box)': K_DFSK.BOX_CAVA, 'C31 (Refrig -18°)': K_DFSK.BOX_CAVA,
+  'C32 (Pick up)': K_DFSK.PICK_UP, 'C35 (Panel)': K_DFSK.CARGA_PANEL,
+  'C37 (Pasajeros)': K_DFSK.VAN_PASAJEROS, 'C37 (11 Pasajeros)': K_DFSK.VAN_PASAJEROS,
+  'D51 (Plataforma)': K_DFSK.PICK_UP, 'D51 (Estacas)': K_DFSK.PICK_UP,
+  'D71 (Pick up)': K_DFSK.PICK_UP, 'D71 (BOX)': K_DFSK.BOX_CAVA,
+  'D72 (Pick up)': K_DFSK.PICK_UP, 'D1 Pick up (4X4)': K_DFSK.PICK_UP, 'Z9 Pick Up': K_DFSK.PICK_UP,
+  'K01S Cava (Isotermica)': K_DFSK.BOX_CAVA, 'K01S Cava (Refrig -5°)': K_DFSK.BOX_CAVA,
+  'K01S Cava (Refrig -18°)': K_DFSK.BOX_CAVA, 'K01S (Estacas)': K_DFSK.PICK_UP,
+  'K01S (Pick up)': K_DFSK.PICK_UP, 'K02S (Pick up)': K_DFSK.PICK_UP,
+  'K05S (Panel)': K_DFSK.CARGA_PANEL, 'K07S (Pasajeros)': K_DFSK.VAN_PASAJEROS,
+  'GLORY 500 (SUV)': K_DFSK.SUV_PASAJEROS, 'GLORY 500 T (Dynamic)': K_DFSK.SUV_PASAJEROS,
+  'GLORY E5 (Hybrid)': K_DFSK.SUV_PASAJEROS,
+}
+const MODEL_SHINEREY_TO_KOMMO: Record<string, number> = {
+  'X30 (Pasajeros)': K_SHINEREY.PASAJEROS, 'X30 (Panel)': K_SHINEREY.PANEL,
+}
+
+const KOMMO_GAC_LABEL_TO_MODEL: Record<string, string> = {
+  'EMPOW': 'EMPOW GS', 'EMZOOM': 'EMZOOM GB', 'GS8': 'GS8 GT', 'SMILODON': 'SMILODON 4x2',
+}
+const KOMMO_DFSK_LABEL_TO_MODEL: Record<string, string> = {
+  'MODELOS PICK UP': 'C31 (Pick up)', 'MODELOS  PICK UP': 'C31 (Pick up)',
+  'MODELOS BOX / CAVA': 'C31 (Box)', 'MODELOS DE CARGA / PANEL': 'C35 (Panel)',
+  'MODELOS VAN PASAJEROS': 'C37 (Pasajeros)', 'MODELOS SUV / PASAJEROS': 'GLORY 500 (SUV)',
+}
+const KOMMO_SHINEREY_LABEL_TO_MODEL: Record<string, string> = {
+  'X30 (PASAJEROS)': 'X30 (Pasajeros)', 'X30 (PANEL)': 'X30 (Panel)', 'X30 (PANEL': 'X30 (Panel)',
+}
+
+const CONCESIONARIO_KOMMO = [
+  { id: 7832490, kw: ['harbin'] }, { id: 7832492, kw: ['garzas'] }, { id: 7832494, kw: ['hobby'] },
+  { id: 7832496, kw: ['meta car', 'zulia'] }, { id: 7832498, kw: ['palma'] },
+  { id: 7832502, kw: ['rosal', 'street boutique'] }, { id: 7832504, kw: ['valencia'] },
+  { id: 7832506, kw: ['barquisimeto'] }, { id: 7832508, kw: ['florida'] },
+  { id: 7832510, kw: ['castellana'] }, { id: 8039476, kw: ['guarenas'] },
+  { id: 8134449, kw: ['lecher'] }, { id: 8159325, kw: ['cerro verde'] },
+]
+
+const CONCESIONARIO_KEYWORD: Record<number, string> = {
+  7832490: 'harbin', 7832492: 'garzas', 7832494: 'hobby', 7832496: 'meta car',
+  7832498: 'palma', 7832502: 'rosal', 7832504: 'valencia', 7832506: 'barquisimeto',
+  7832508: 'florida', 7832510: 'castellana', 8039476: 'guarenas', 8134449: 'lecher',
+  8159325: 'cerro verde',
+}
+
+type CFValue = { field_id: number; values: Array<{ value?: unknown; enum_id?: number }> }
+
+function getCFText(cfValues: CFValue[], id: number): string | null {
+  const f = cfValues.find(x => x.field_id === id)
+  return f?.values?.[0]?.value ? String(f.values[0].value).trim() : null
+}
+function getCFEnum(cfValues: CFValue[], id: number): number | null {
+  return cfValues.find(x => x.field_id === id)?.values?.[0]?.enum_id ?? null
+}
+
+function modelFieldForBrand(brand: string): number | null {
+  if (brand === 'GAC') return CF.modelo_interes_gac
+  if (brand === 'DFSK') return CF.modelo_interes_dfsk
+  if (brand === 'SHINERAY') return CF.modelo_interes_shinerey
+  return null
+}
+
+function extractModelFromCFs(cfValues: CFValue[], brand: string): string {
+  const fieldId = modelFieldForBrand(brand)
+  if (!fieldId) return ''
+  const cf = cfValues.find(x => x.field_id === fieldId)
+  if (!cf?.values?.[0]) return ''
+  const label = String(cf.values[0].value ?? '').trim().replace(/\s+/g, ' ').toUpperCase()
+  if (!label) return ''
+  const map = brand === 'GAC' ? KOMMO_GAC_LABEL_TO_MODEL
+    : brand === 'DFSK' ? KOMMO_DFSK_LABEL_TO_MODEL
+    : KOMMO_SHINEREY_LABEL_TO_MODEL
+  return map[label] ?? label
+}
+
+// ─── Main webhook handler ─────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
@@ -28,15 +198,12 @@ Deno.serve(async (req) => {
       'Content-Type': 'application/json',
     }
 
-    // ── Detect event type ─────────────────────────────────────────────────────
+    // ── Status change event ───────────────────────────────────────────────────
     const statusLeadId = params.get('leads[status][0][id]')
     const statusId     = params.get('leads[status][0][status_id]')
     const pipelineId   = params.get('leads[status][0][pipeline_id]')
-    const updateLeadId = params.get('leads[update][0][id]')
 
-    // Handle status change event
     if (statusLeadId && statusId) {
-      // Only handle Ventas pipeline
       if (pipelineId && String(pipelineId) !== String(config.pipeline_id)) {
         return new Response('OK', { status: 200 })
       }
@@ -51,15 +218,14 @@ Deno.serve(async (req) => {
         .single()
 
       if (!prospect) {
+        // Auto-create only when reaching "Demostracion" stage
         const DEMOSTRACION_STAGE_ID = '101392719'
         if (statusId === DEMOSTRACION_STAGE_ID) {
           await autoCreateProspectFromKommo(supabase, parseInt(statusLeadId), authHeaders, baseUrl)
         } else {
           await supabase.from('integration_logs').insert({
-            integration_name: 'kommo',
-            event_type: 'webhook_lead_not_found',
-            kommo_lead_id: parseInt(statusLeadId),
-            status: 'warning',
+            integration_name: 'kommo', event_type: 'webhook_lead_not_found',
+            kommo_lead_id: parseInt(statusLeadId), status: 'warning',
             details: { kommo_status_id: statusId, pipeline_id: pipelineId },
           })
         }
@@ -69,22 +235,22 @@ Deno.serve(async (req) => {
       if (ourStatus && prospect.status !== ourStatus) {
         await supabase.from('prospects').update({ status: ourStatus }).eq('id', prospect.id)
         await supabase.from('integration_logs').insert({
-          integration_name: 'kommo',
-          event_type: 'webhook_status_update',
-          prospect_id: prospect.id,
-          kommo_lead_id: parseInt(statusLeadId),
+          integration_name: 'kommo', event_type: 'webhook_status_update',
+          prospect_id: prospect.id, kommo_lead_id: parseInt(statusLeadId),
           status: 'success',
           details: { old_status: prospect.status, new_status: ourStatus, kommo_status_id: statusId },
         })
       }
 
-      // Also sync fields from Kommo (fill empty fields in our system)
+      // Sync all fields from Kommo → GAC (overwrite if different)
       await syncFieldsFromKommo(supabase, prospect.id, parseInt(statusLeadId), authHeaders, baseUrl)
 
       return new Response('OK', { status: 200 })
     }
 
-    // Handle lead update event (field changes)
+    // ── Lead updated event ────────────────────────────────────────────────────
+    const updateLeadId = params.get('leads[update][0][id]')
+
     if (updateLeadId) {
       const { data: prospect } = await supabase
         .from('prospects')
@@ -93,8 +259,8 @@ Deno.serve(async (req) => {
         .single()
 
       if (prospect) {
+        // Sync Kommo → GAC (overwrite if different) then push any GAC-only fields back
         await syncFieldsFromKommo(supabase, prospect.id, parseInt(updateLeadId), authHeaders, baseUrl)
-        // Also push our empty fields to Kommo
         await syncFieldsToKommo(supabase, prospect.id, parseInt(updateLeadId), authHeaders, baseUrl)
       }
 
@@ -108,206 +274,7 @@ Deno.serve(async (req) => {
   }
 })
 
-// ─── Auto-create prospect when an unknown Kommo lead reaches "Demostracion" ───
-async function autoCreateProspectFromKommo(
-  supabase: ReturnType<typeof createClient>,
-  kommoLeadId: number,
-  authHeaders: Record<string, string>,
-  baseUrl: string
-) {
-  const CF_IDS = {
-    supabase_id: 3192400, salesperson: 3193866, notes: 3192402,
-    estado_vzla: 3204218, event_name: 3415147, fuente: 2988728,
-    marca: 2988724, concesionario: 2988984,
-    modelo_interes_gac: 3436641, modelo_interes_dfsk: 3436639, modelo_interes_shinerey: 2988850,
-  }
-  const KOMMO_TO_SOURCE: Record<string, string> = {
-    '7832218':'redes_sociales','7832220':'redes_sociales','7832222':'redes_sociales',
-    '7832224':'redes_sociales','7832226':'pagina_web','7832228':'evento',
-    '7832230':'concesionario','7832232':'referido','7893992':'redes_sociales','7893994':'redes_sociales',
-  }
-  const KOMMO_TO_BRAND: Record<number, string> = { 7832208:'GAC', 7832206:'DFSK', 7857650:'SHINERAY' }
-  const MODEL_FIELD_FOR_BRAND: Record<string, number> = {
-    GAC: 3436641, DFSK: 3436639, SHINERAY: 2988850,
-  }
-  const KOMMO_GAC_LABEL_TO_MODEL: Record<string, string> = {
-    'EMPOW':'EMPOW GS','EMZOOM':'EMZOOM GB','GS8':'GS8 GT','SMILODON':'SMILODON 4x2',
-  }
-  const KOMMO_DFSK_LABEL_TO_MODEL: Record<string, string> = {
-    'MODELOS PICK UP':          'C31 (Pick up)',
-    'MODELOS BOX / CAVA':       'C31 (Box)',
-    'MODELOS DE CARGA / PANEL': 'C35 (Panel)',
-    'MODELOS VAN PASAJEROS':    'C37 (Pasajeros)',
-    'MODELOS SUV / PASAJEROS':  'GLORY 500 (SUV)',
-  }
-  const KOMMO_SHINEREY_LABEL_TO_MODEL: Record<string, string> = {
-    'X30 (PASAJEROS)':'X30 (Pasajeros)','X30 (PANEL)':'X30 (Panel)',
-  }
-  // Maps Kommo concesionario enum_id → search keyword for dealerships table
-  const CONCESIONARIO_KEYWORD: Record<number, string> = {
-    7832490:'harbin', 7832492:'garzas', 7832494:'hobby', 7832496:'meta car',
-    7832498:'palma', 7832502:'rosal', 7832504:'valencia', 7832506:'barquisimeto',
-    7832508:'florida', 7832510:'castellana', 8039476:'guarenas', 8134449:'lecher',
-  }
-
-  const leadRes = await fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields`, { headers: authHeaders })
-  if (!leadRes.ok || leadRes.status === 204) {
-    await supabase.from('integration_logs').insert({
-      integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
-      kommo_lead_id: kommoLeadId, status: 'error',
-      details: { reason: 'kommo_fetch_failed', http_status: leadRes.status },
-    })
-    return
-  }
-
-  let lead: Record<string, unknown>
-  try {
-    lead = await leadRes.json() as Record<string, unknown>
-  } catch {
-    await supabase.from('integration_logs').insert({
-      integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
-      kommo_lead_id: kommoLeadId, status: 'error',
-      details: { reason: 'json_parse_failed', http_status: leadRes.status },
-    })
-    return
-  }
-  const cfValues = (lead.custom_fields_values as Array<{ field_id: number; values: Array<{ value?: unknown; enum_id?: number }> }>) || []
-
-  const getCF = (id: number): string | null => {
-    const f = cfValues.find(x => x.field_id === id)
-    return f?.values?.[0]?.value ? String(f.values[0].value).trim() : null
-  }
-  const getEnum = (id: number): number | null =>
-    cfValues.find(x => x.field_id === id)?.values?.[0]?.enum_id ?? null
-
-  // If supabase_id CF is already set, try to re-link the existing prospect
-  const existingSupabaseId = getCF(CF_IDS.supabase_id)
-  if (existingSupabaseId) {
-    const { data: existing } = await supabase
-      .from('prospects')
-      .select('id, kommo_lead_id')
-      .eq('id', existingSupabaseId)
-      .single()
-    if (existing && !existing.kommo_lead_id) {
-      await supabase.from('prospects')
-        .update({ kommo_lead_id: kommoLeadId, status: 'demostracion' })
-        .eq('id', existingSupabaseId)
-      await supabase.from('integration_logs').insert({
-        integration_name: 'kommo', event_type: 'webhook_auto_linked',
-        prospect_id: existingSupabaseId, kommo_lead_id: kommoLeadId,
-        status: 'success', details: { method: 'supabase_id_cf_match' },
-      })
-      return
-    }
-  }
-
-  // Extract contact info — fetch contact separately to get phone/email
-  const contacts = ((lead as Record<string, unknown>)._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }> || []
-  const leadName = (lead.name as string) || 'Sin nombre'
-
-  let phone: string | null = null
-  let email: string | null = null
-  if (contacts[0]?.id) {
-    const contactRes = await fetch(`${baseUrl}/contacts/${contacts[0].id}?with=custom_fields`, { headers: authHeaders })
-    if (contactRes.ok && contactRes.status !== 204) {
-      try {
-        const contactData = await contactRes.json() as Record<string, unknown>
-        const cfs = (contactData.custom_fields_values as Array<{ field_code?: string; values: Array<{ value?: string }> }>) || []
-        phone = cfs.find(f => f.field_code === 'PHONE')?.values?.[0]?.value ?? null
-        email = cfs.find(f => f.field_code === 'EMAIL')?.values?.[0]?.value ?? null
-      } catch { /* ignore */ }
-    }
-  }
-
-  // Build prospect fields from Kommo custom fields
-  // CF 3193866 = text salesperson field; CF 2988736 = "Vendedor Asignado" select (value = display name)
-  const salesperson = getCF(CF_IDS.salesperson) || getCF(2988736)
-  const notes = getCF(CF_IDS.notes)
-  const estadoVzla = getCF(CF_IDS.estado_vzla)
-  const eventName = getCF(CF_IDS.event_name)
-
-  const sourceEnumId = getEnum(CF_IDS.fuente)
-  const source = sourceEnumId ? (KOMMO_TO_SOURCE[String(sourceEnumId)] || 'concesionario') : 'concesionario'
-
-  const brandEnumId = getEnum(CF_IDS.marca)
-  let modelInterest: string | null = null
-  if (brandEnumId && KOMMO_TO_BRAND[brandEnumId]) {
-    const brandName = KOMMO_TO_BRAND[brandEnumId]
-    const modelFieldId = MODEL_FIELD_FOR_BRAND[brandName]
-    let modelName = ''
-    if (modelFieldId) {
-      const modelCF = cfValues.find(x => x.field_id === modelFieldId)
-      const rawLabel = modelCF?.values?.[0]?.value ? String(modelCF.values[0].value).trim().replace(/\s+/g, ' ').toUpperCase() : ''
-      const labelMap = brandName === 'GAC' ? KOMMO_GAC_LABEL_TO_MODEL
-        : brandName === 'DFSK' ? KOMMO_DFSK_LABEL_TO_MODEL
-        : KOMMO_SHINEREY_LABEL_TO_MODEL
-      modelName = rawLabel ? (labelMap[rawLabel] ?? rawLabel) : ''
-    }
-    modelInterest = modelName ? `${brandName} ${modelName}` : brandName
-  }
-
-  // Resolve dealership_id from concesionario enum
-  let dealershipId: string | null = null
-  const concEnumId = getEnum(CF_IDS.concesionario)
-  if (concEnumId && CONCESIONARIO_KEYWORD[concEnumId]) {
-    const keyword = CONCESIONARIO_KEYWORD[concEnumId]
-    const { data: dealership } = await supabase
-      .from('dealerships')
-      .select('id')
-      .ilike('name', `%${keyword}%`)
-      .limit(1)
-      .single()
-    if (dealership) dealershipId = dealership.id
-  }
-
-  // Create the prospect
-  const newProspect: Record<string, unknown> = {
-    name: leadName,
-    status: 'demostracion',
-    kommo_lead_id: kommoLeadId,
-    source,
-    ...(phone && { phone }),
-    ...(email && { email }),
-    ...(salesperson && { salesperson }),
-    ...(notes && { notes }),
-    ...(estadoVzla && { 'Estado de Vnzla': estadoVzla }),
-    ...(eventName && { event_name: eventName }),
-    ...(modelInterest && { model_interest: modelInterest }),
-    ...(dealershipId && { dealership_id: dealershipId }),
-  }
-
-  const { data: created, error } = await supabase
-    .from('prospects')
-    .insert(newProspect)
-    .select('id')
-    .single()
-
-  if (error || !created) {
-    await supabase.from('integration_logs').insert({
-      integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
-      kommo_lead_id: kommoLeadId, status: 'error',
-      details: { reason: 'insert_failed', error: error?.message },
-    })
-    return
-  }
-
-  // Write supabase_id back to Kommo to close the bidirectional link
-  await fetch(`${baseUrl}/leads/${kommoLeadId}`, {
-    method: 'PATCH', headers: authHeaders,
-    body: JSON.stringify({
-      custom_fields_values: [{ field_id: CF_IDS.supabase_id, values: [{ value: created.id }] }],
-    }),
-  })
-
-  await supabase.from('integration_logs').insert({
-    integration_name: 'kommo', event_type: 'webhook_auto_created',
-    prospect_id: created.id, kommo_lead_id: kommoLeadId,
-    status: 'success',
-    details: { lead_name: leadName, dealership_id: dealershipId, fields_extracted: Object.keys(newProspect) },
-  })
-}
-
-// ─── Sync Kommo → our system (fill empty only) ────────────────────────────────
+// ─── syncFieldsFromKommo: overwrite GAC fields from Kommo (if different) ──────
 async function syncFieldsFromKommo(
   supabase: ReturnType<typeof createClient>,
   prospectId: string,
@@ -315,78 +282,96 @@ async function syncFieldsFromKommo(
   authHeaders: Record<string, string>,
   baseUrl: string
 ) {
-  const CF = {
-    salesperson: 3193866, notes: 3192402, estado_vzla: 3204218,
-    event_name: 3415147, fuente: 2988728, marca: 2988724,
-    modelo_interes_gac: 3436641, modelo_interes_dfsk: 3436639, modelo_interes_shinerey: 2988850,
-  }
-  const KOMMO_TO_SOURCE: Record<string, string> = {
-    '7832218':'redes_sociales','7832220':'redes_sociales','7832222':'redes_sociales',
-    '7832224':'redes_sociales','7832226':'pagina_web','7832228':'evento',
-    '7832230':'concesionario','7832232':'referido','7893992':'redes_sociales','7893994':'redes_sociales',
-  }
-  const KOMMO_TO_BRAND: Record<number, string> = { 7832208:'GAC', 7832206:'DFSK', 7857650:'SHINERAY' }
-  const MODEL_FIELD_FOR_BRAND: Record<string, number> = {
-    GAC: 3436641, DFSK: 3436639, SHINERAY: 2988850,
-  }
-  const KOMMO_GAC_LABEL_TO_MODEL: Record<string, string> = {
-    'EMPOW':'EMPOW GS','EMZOOM':'EMZOOM GB','GS8':'GS8 GT','SMILODON':'SMILODON 4x2',
-  }
-  const KOMMO_DFSK_LABEL_TO_MODEL: Record<string, string> = {
-    'MODELOS PICK UP':          'C31 (Pick up)',
-    'MODELOS BOX / CAVA':       'C31 (Box)',
-    'MODELOS DE CARGA / PANEL': 'C35 (Panel)',
-    'MODELOS VAN PASAJEROS':    'C37 (Pasajeros)',
-    'MODELOS SUV / PASAJEROS':  'GLORY 500 (SUV)',
-  }
-  const KOMMO_SHINEREY_LABEL_TO_MODEL: Record<string, string> = {
-    'X30 (PASAJEROS)':'X30 (Pasajeros)','X30 (PANEL)':'X30 (Panel)',
-  }
-
   const [prospectRes, leadRes] = await Promise.all([
     supabase.from('prospects').select('*').eq('id', prospectId).single(),
-    fetch(`${baseUrl}/leads/${kommoLeadId}?with=custom_fields`, { headers: authHeaders }),
+    fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields`, { headers: authHeaders }),
   ])
 
   const prospect = prospectRes.data
   if (!prospect || !leadRes.ok) return
 
   const lead = await leadRes.json() as Record<string, unknown>
-  const cfValues = (lead.custom_fields_values as Array<{ field_id: number; values: Array<{ value?: unknown; enum_id?: number }> }>) || []
-
-  const getCF = (id: number) => {
-    const f = cfValues.find(x => x.field_id === id)
-    return f?.values?.[0]?.value ? String(f.values[0].value).trim() : null
-  }
-  const getEnum = (id: number) => cfValues.find(x => x.field_id === id)?.values?.[0]?.enum_id ?? null
-
+  const cfValues = (lead.custom_fields_values as CFValue[]) || []
   const updates: Record<string, unknown> = {}
 
-  if (!prospect.salesperson) { const v = getCF(CF.salesperson); if (v) updates.salesperson = v }
-  if (!prospect.notes) { const v = getCF(CF.notes); if (v) updates.notes = v }
-  if (!prospect['Estado de Vnzla']) { const v = getCF(CF.estado_vzla); if (v) updates['Estado de Vnzla'] = v }
-  if (!prospect.event_name) { const v = getCF(CF.event_name); if (v) updates.event_name = v }
+  // Lead title → name
+  const kommoName = String(lead.name ?? '').trim()
+  if (kommoName && kommoName !== prospect.name) updates.name = kommoName
 
-  if (!prospect.source || prospect.source === 'concesionario') {
-    const e = getEnum(CF.fuente)
-    if (e && KOMMO_TO_SOURCE[String(e)]) updates.source = KOMMO_TO_SOURCE[String(e)]
+  // Text fields: overwrite if Kommo has a value and it differs
+  const salesperson = getCFText(cfValues, CF.salesperson)
+  if (salesperson !== null && salesperson !== prospect.salesperson) updates.salesperson = salesperson
+
+  const notes = getCFText(cfValues, CF.notes)
+  if (notes !== null && notes !== prospect.notes) updates.notes = notes
+
+  const estadoVzla = getCFText(cfValues, CF.estado_vzla)
+  if (estadoVzla !== null && estadoVzla !== prospect['Estado de Vnzla']) updates['Estado de Vnzla'] = estadoVzla
+
+  // Event name (select → text)
+  const eventEnumId = getCFEnum(cfValues, CF.event_name)
+  if (eventEnumId !== null) {
+    const eventName = KOMMO_EVENT_ID_TO_NAME[eventEnumId] ?? null
+    if (eventName && eventName !== prospect.event_name) updates.event_name = eventName
   }
 
-  if (!prospect.model_interest) {
-    const brandEnumId = getEnum(CF.marca)
-    if (brandEnumId && KOMMO_TO_BRAND[brandEnumId]) {
-      const brandName = KOMMO_TO_BRAND[brandEnumId]
-      const modelFieldId = MODEL_FIELD_FOR_BRAND[brandName]
-      let modelName = ''
-      if (modelFieldId) {
-        const modelCF = cfValues.find(x => x.field_id === modelFieldId)
-        const rawLabel = modelCF?.values?.[0]?.value ? String(modelCF.values[0].value).trim().replace(/\s+/g, ' ').toUpperCase() : ''
-        const labelMap = brandName === 'GAC' ? KOMMO_GAC_LABEL_TO_MODEL
-          : brandName === 'DFSK' ? KOMMO_DFSK_LABEL_TO_MODEL
-          : KOMMO_SHINEREY_LABEL_TO_MODEL
-        modelName = rawLabel ? (labelMap[rawLabel] ?? rawLabel) : ''
+  // Source (select → text)
+  const sourceEnumId = getCFEnum(cfValues, CF.fuente)
+  if (sourceEnumId !== null) {
+    const source = KOMMO_TO_SOURCE[String(sourceEnumId)] ?? null
+    if (source && source !== prospect.source) updates.source = source
+  }
+
+  // Brand + model
+  const brandEnumId = getCFEnum(cfValues, CF.marca)
+  if (brandEnumId !== null && KOMMO_TO_BRAND[brandEnumId]) {
+    const brandName = KOMMO_TO_BRAND[brandEnumId]
+    const modelName = extractModelFromCFs(cfValues, brandName)
+    const modelInterest = modelName ? `${brandName} ${modelName}` : brandName
+    if (modelInterest !== prospect.model_interest) updates.model_interest = modelInterest
+  }
+
+  // Contact fields: name, phone, email, person_type, gender, age_range
+  const contacts = ((lead._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
+  if (contacts[0]?.id) {
+    const contactRes = await fetch(`${baseUrl}/contacts/${contacts[0].id}?with=custom_fields`, { headers: authHeaders })
+    if (contactRes.ok) {
+      const contactData = await contactRes.json() as Record<string, unknown>
+      const contactCFs = (contactData.custom_fields_values as CFValue[]) || []
+
+      // Contact name → prospect name (only if not already updated from lead.name)
+      if (!updates.name) {
+        const contactName = String(contactData.name ?? '').trim()
+        if (contactName && contactName !== prospect.name) updates.name = contactName
       }
-      updates.model_interest = modelName ? `${brandName} ${modelName}` : brandName
+
+      // Phone
+      const phoneCF = contactCFs.find(f => (f as unknown as { field_code?: string }).field_code === 'PHONE' || f.field_id === 2988356)
+      const phone = phoneCF?.values?.[0]?.value ? String(phoneCF.values[0].value).trim() : null
+      if (phone && phone !== prospect.phone) updates.phone = phone
+
+      // Email
+      const emailCF = contactCFs.find(f => (f as unknown as { field_code?: string }).field_code === 'EMAIL' || f.field_id === 2988358)
+      const email = emailCF?.values?.[0]?.value ? String(emailCF.values[0].value).trim() : null
+      if (email && email !== prospect.email) updates.email = email
+
+      // Tipo de Persona (enum → 'natural'/'juridica')
+      const personTypeEnumId = getCFEnum(contactCFs, CONTACT_CF.tipo_persona)
+      if (personTypeEnumId !== null) {
+        const personType = KOMMO_TO_PERSON_TYPE[personTypeEnumId] ?? null
+        if (personType && personType !== prospect.person_type) updates.person_type = personType
+      }
+
+      // Género (text, lowercase to match GAC values)
+      const genero = getCFText(contactCFs, CONTACT_CF.genero)
+      if (genero !== null) {
+        const generoLower = genero.toLowerCase()
+        if (generoLower !== prospect.gender) updates.gender = generoLower
+      }
+
+      // Rango de edad (text — must match constraint values)
+      const rangoEdad = sanitizeAgeRange(getCFText(contactCFs, CONTACT_CF.rango_edad))
+      if (rangoEdad !== null && rangoEdad !== prospect.age_range) updates.age_range = rangoEdad
     }
   }
 
@@ -400,7 +385,7 @@ async function syncFieldsFromKommo(
   }
 }
 
-// ─── Sync our system → Kommo (fill empty only) ────────────────────────────────
+// ─── syncFieldsToKommo: fill empty fields in Kommo from GAC ──────────────────
 async function syncFieldsToKommo(
   supabase: ReturnType<typeof createClient>,
   prospectId: string,
@@ -408,53 +393,6 @@ async function syncFieldsToKommo(
   authHeaders: Record<string, string>,
   baseUrl: string
 ) {
-  const CF = {
-    supabase_id:3192400, dealership_id:3192486, salesperson:3193866, notes:3192402,
-    estado_vzla:3204218, event_name:3415147, fuente:2988728, marca:2988724,
-    concesionario:2988984,
-    modelo_interes_gac:3436641, modelo_interes_dfsk:3436639, modelo_interes_shinerey:2988850,
-  }
-  const SOURCE_TO_KOMMO: Record<string, number> = {
-    concesionario:7832230,evento:7832228,pagina_web:7832226,
-    redes_sociales:7893992,referido:7832232,visita:7832230,
-  }
-  const BRAND_TO_KOMMO: Record<string, number> = { GAC:7832208, DFSK:7832206, SHINERAY:7857650 }
-  const MODEL_FIELD_FOR_BRAND: Record<string, number> = {
-    GAC:3436641, DFSK:3436639, SHINERAY:2988850,
-  }
-  // TODO: Reemplazar 0 con los enum_id reales de Kommo para cada opción de modelo
-  const K_GAC = { EMPOW:0, EMZOOM:1, GS8:2, SMILODON:3 }
-  const K_DFSK = { PICK_UP:0, BOX_CAVA:1, CARGA_PANEL:2, VAN_PASAJEROS:3, SUV_PASAJEROS:4 }
-  const K_SHINEREY = { PASAJEROS:0, PANEL:1 }
-  const MODEL_GAC_TO_KOMMO: Record<string, number> = {
-    'EMPOW GS':K_GAC.EMPOW,'EMPOW GE':K_GAC.EMPOW,'EMPOW GE 2.0':K_GAC.EMPOW,'EMPOW GL':K_GAC.EMPOW,
-    'EMZOOM GB':K_GAC.EMZOOM,'EMZOOM GS':K_GAC.EMZOOM,'EMZOOM GB RSTYLE':K_GAC.EMZOOM,
-    'GS8 GT':K_GAC.GS8,'GS8 4WD GT':K_GAC.GS8,'GS8 FACELIFT':K_GAC.GS8,
-    'SMILODON 4x2':K_GAC.SMILODON,'SMILODON 4x4':K_GAC.SMILODON,
-  }
-  const MODEL_DFSK_TO_KOMMO: Record<string, number> = {
-    'C31 (Pick up)':K_DFSK.PICK_UP,'C31 (Box)':K_DFSK.BOX_CAVA,'C31 (Refrig -18°)':K_DFSK.BOX_CAVA,
-    'C32 (Pick up)':K_DFSK.PICK_UP,'C35 (Panel)':K_DFSK.CARGA_PANEL,
-    'C37 (Pasajeros)':K_DFSK.VAN_PASAJEROS,'C37 (11 Pasajeros)':K_DFSK.VAN_PASAJEROS,
-    'D51 (Plataforma)':K_DFSK.PICK_UP,'D51 (Estacas)':K_DFSK.PICK_UP,
-    'D71 (Pick up)':K_DFSK.PICK_UP,'D71 (BOX)':K_DFSK.BOX_CAVA,
-    'D72 (Pick up)':K_DFSK.PICK_UP,'D1 Pick up (4X4)':K_DFSK.PICK_UP,'Z9 Pick Up':K_DFSK.PICK_UP,
-    'K01S Cava (Isotermica)':K_DFSK.BOX_CAVA,'K01S Cava (Refrig -5°)':K_DFSK.BOX_CAVA,
-    'K01S Cava (Refrig -18°)':K_DFSK.BOX_CAVA,'K01S (Estacas)':K_DFSK.PICK_UP,'K01S (Pick up)':K_DFSK.PICK_UP,
-    'K02S (Pick up)':K_DFSK.PICK_UP,'K05S (Panel)':K_DFSK.CARGA_PANEL,'K07S (Pasajeros)':K_DFSK.VAN_PASAJEROS,
-    'GLORY 500 (SUV)':K_DFSK.SUV_PASAJEROS,'GLORY 500 T (Dynamic)':K_DFSK.SUV_PASAJEROS,'GLORY E5 (Hybrid)':K_DFSK.SUV_PASAJEROS,
-  }
-  const MODEL_SHINEREY_TO_KOMMO: Record<string, number> = {
-    'X30 (Pasajeros)':K_SHINEREY.PASAJEROS,'X30 (Panel)':K_SHINEREY.PANEL,
-  }
-  const CONCESIONARIO_KOMMO = [
-    {id:7832490,kw:['harbin']},{id:7832492,kw:['garzas']},{id:7832494,kw:['hobby']},
-    {id:7832496,kw:['meta car','zulia']},{id:7832498,kw:['palma']},
-    {id:7832502,kw:['rosal','street boutique']},{id:7832504,kw:['valencia']},
-    {id:7832506,kw:['barquisimeto']},{id:7832508,kw:['florida']},
-    {id:7832510,kw:['castellana']},{id:8039476,kw:['guarenas']},{id:8134449,kw:['lecher']},
-  ]
-
   const [prospectRes, leadRes] = await Promise.all([
     supabase.from('prospects').select('*, dealerships(name)').eq('id', prospectId).single(),
     fetch(`${baseUrl}/leads/${kommoLeadId}?with=custom_fields`, { headers: authHeaders }),
@@ -481,14 +419,14 @@ async function syncFieldsToKommo(
   addVal(CF.salesperson, prospect.salesperson)
   addVal(CF.notes, prospect.notes)
   addVal(CF.estado_vzla, prospect['Estado de Vnzla'])
-  addVal(CF.event_name, prospect.event_name)
+  addEnum(CF.event_name, eventNameToKommoEnumId(String(prospect.event_name || '')))
   addEnum(CF.fuente, SOURCE_TO_KOMMO[prospect.source] ?? null)
 
   const parts = ((prospect.model_interest as string) || '').split(' ')
   const brand = parts[0]; const modelName = parts.slice(1).join(' ')
   addEnum(CF.marca, BRAND_TO_KOMMO[brand] ?? null)
   if (modelName) {
-    const fieldId = MODEL_FIELD_FOR_BRAND[brand] ?? null
+    const fieldId = modelFieldForBrand(brand)
     let enumId: number | null = null
     if (brand === 'GAC') enumId = MODEL_GAC_TO_KOMMO[modelName] ?? null
     else if (brand === 'DFSK') enumId = MODEL_DFSK_TO_KOMMO[modelName] ?? null
@@ -506,4 +444,172 @@ async function syncFieldsToKommo(
       body: JSON.stringify({ custom_fields_values: newFields }),
     })
   }
+}
+
+// ─── autoCreateProspectFromKommo: create GAC prospect from Kommo lead ─────────
+async function autoCreateProspectFromKommo(
+  supabase: ReturnType<typeof createClient>,
+  kommoLeadId: number,
+  authHeaders: Record<string, string>,
+  baseUrl: string
+) {
+  const leadRes = await fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields`, { headers: authHeaders })
+  if (!leadRes.ok || leadRes.status === 204) {
+    await supabase.from('integration_logs').insert({
+      integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
+      kommo_lead_id: kommoLeadId, status: 'error',
+      details: { reason: 'kommo_fetch_failed', http_status: leadRes.status },
+    })
+    return
+  }
+
+  let lead: Record<string, unknown>
+  try {
+    lead = await leadRes.json() as Record<string, unknown>
+  } catch {
+    await supabase.from('integration_logs').insert({
+      integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
+      kommo_lead_id: kommoLeadId, status: 'error',
+      details: { reason: 'json_parse_failed' },
+    })
+    return
+  }
+
+  const cfValues = (lead.custom_fields_values as CFValue[]) || []
+
+  // If supabase_id CF already set → re-link existing prospect
+  const existingSupabaseId = getCFText(cfValues, CF.supabase_id)
+  if (existingSupabaseId) {
+    const { data: existing } = await supabase
+      .from('prospects')
+      .select('id, kommo_lead_id')
+      .eq('id', existingSupabaseId)
+      .single()
+    if (existing && !existing.kommo_lead_id) {
+      await supabase.from('prospects')
+        .update({ kommo_lead_id: kommoLeadId, status: 'demostracion' })
+        .eq('id', existingSupabaseId)
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'webhook_auto_linked',
+        prospect_id: existingSupabaseId, kommo_lead_id: kommoLeadId,
+        status: 'success', details: { method: 'supabase_id_cf_match' },
+      })
+      return
+    }
+  }
+
+  const leadName = (lead.name as string) || 'Sin nombre'
+  const contacts = ((lead._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
+
+  // Fetch contact for phone, email, and contact CFs
+  let phone: string | null = null
+  let email: string | null = null
+  let personType: string | null = null
+  let gender: string | null = null
+  let ageRange: string | null = null
+
+  if (contacts[0]?.id) {
+    const contactRes = await fetch(`${baseUrl}/contacts/${contacts[0].id}?with=custom_fields`, { headers: authHeaders })
+    if (contactRes.ok && contactRes.status !== 204) {
+      try {
+        const contactData = await contactRes.json() as Record<string, unknown>
+        const cfs = (contactData.custom_fields_values as CFValue[]) || []
+
+        const phoneCF = cfs.find(f => (f as unknown as { field_code?: string }).field_code === 'PHONE')
+        phone = phoneCF?.values?.[0]?.value ? String(phoneCF.values[0].value) : null
+
+        const emailCF = cfs.find(f => (f as unknown as { field_code?: string }).field_code === 'EMAIL')
+        email = emailCF?.values?.[0]?.value ? String(emailCF.values[0].value) : null
+
+        const ptEnumId = getCFEnum(cfs, CONTACT_CF.tipo_persona)
+        if (ptEnumId) personType = KOMMO_TO_PERSON_TYPE[ptEnumId] ?? null
+
+        const generoVal = getCFText(cfs, CONTACT_CF.genero)
+        if (generoVal) gender = generoVal.toLowerCase()
+
+        ageRange = sanitizeAgeRange(getCFText(cfs, CONTACT_CF.rango_edad))
+      } catch { /* ignore */ }
+    }
+  }
+
+  // Extract lead fields
+  const salesperson = getCFText(cfValues, CF.salesperson) || getCFText(cfValues, 2988736)
+  const notes = getCFText(cfValues, CF.notes)
+  const estadoVzla = getCFText(cfValues, CF.estado_vzla)
+
+  const eventEnumId = getCFEnum(cfValues, CF.event_name)
+  const eventName = eventEnumId ? (KOMMO_EVENT_ID_TO_NAME[eventEnumId] ?? null) : null
+
+  const sourceEnumId = getCFEnum(cfValues, CF.fuente)
+  const source = sourceEnumId ? (KOMMO_TO_SOURCE[String(sourceEnumId)] || 'concesionario') : 'concesionario'
+
+  const brandEnumId = getCFEnum(cfValues, CF.marca)
+  let modelInterest: string | null = null
+  if (brandEnumId && KOMMO_TO_BRAND[brandEnumId]) {
+    const brandName = KOMMO_TO_BRAND[brandEnumId]
+    const modelName = extractModelFromCFs(cfValues, brandName)
+    modelInterest = modelName ? `${brandName} ${modelName}` : brandName
+  }
+
+  // Resolve dealership_id from concesionario enum
+  let dealershipId: string | null = null
+  const concEnumId = getCFEnum(cfValues, CF.concesionario)
+  if (concEnumId && CONCESIONARIO_KEYWORD[concEnumId]) {
+    const keyword = CONCESIONARIO_KEYWORD[concEnumId]
+    const { data: dealership } = await supabase
+      .from('dealerships')
+      .select('id')
+      .ilike('name', `%${keyword}%`)
+      .limit(1)
+      .single()
+    if (dealership) dealershipId = dealership.id
+  }
+
+  const newProspect: Record<string, unknown> = {
+    name: leadName,
+    status: 'demostracion',
+    kommo_lead_id: kommoLeadId,
+    source,
+    ...(phone && { phone }),
+    ...(email && { email }),
+    ...(salesperson && { salesperson }),
+    ...(notes && { notes }),
+    ...(estadoVzla && { 'Estado de Vnzla': estadoVzla }),
+    ...(eventName && { event_name: eventName }),
+    ...(modelInterest && { model_interest: modelInterest }),
+    ...(dealershipId && { dealership_id: dealershipId }),
+    ...(personType && { person_type: personType }),
+    ...(gender && { gender }),
+    ...(ageRange && { age_range: ageRange }),
+  }
+
+  const { data: created, error } = await supabase
+    .from('prospects')
+    .insert(newProspect)
+    .select('id')
+    .single()
+
+  if (error || !created) {
+    await supabase.from('integration_logs').insert({
+      integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
+      kommo_lead_id: kommoLeadId, status: 'error',
+      details: { reason: 'insert_failed', error: error?.message },
+    })
+    return
+  }
+
+  // Write supabase_id back to Kommo
+  await fetch(`${baseUrl}/leads/${kommoLeadId}`, {
+    method: 'PATCH', headers: authHeaders,
+    body: JSON.stringify({
+      custom_fields_values: [{ field_id: CF.supabase_id, values: [{ value: created.id }] }],
+    }),
+  })
+
+  await supabase.from('integration_logs').insert({
+    integration_name: 'kommo', event_type: 'webhook_auto_created',
+    prospect_id: created.id, kommo_lead_id: kommoLeadId,
+    status: 'success',
+    details: { lead_name: leadName, dealership_id: dealershipId, fields: Object.keys(newProspect) },
+  })
 }

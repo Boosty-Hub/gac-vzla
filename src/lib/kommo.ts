@@ -22,3 +22,18 @@ export async function updateKommoLeadStage(
   })
   if (error) console.error('[Kommo] Error actualizando etapa:', error)
 }
+
+// Overwrite all matching fields in Kommo with current GAC values (true bidirectional sync)
+export async function updateKommoLeadFields(
+  prospectId: string,
+  kommoLeadId: number
+): Promise<void> {
+  const { error } = await supabase.functions.invoke('kommo-api', {
+    body: {
+      action: 'update_fields',
+      prospect_id: prospectId,
+      kommo_lead_id: kommoLeadId,
+    },
+  })
+  if (error) console.error('[Kommo] Error actualizando campos:', error)
+}

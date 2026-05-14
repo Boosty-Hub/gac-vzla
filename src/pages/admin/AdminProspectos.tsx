@@ -31,7 +31,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import ProspectSourceManager from '@/components/ProspectSourceManager';
 import { useProspectSources } from '@/hooks/useProspectSources';
-import { createKommoLead, updateKommoLeadStage } from '@/lib/kommo';
+import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 
 
 interface Dealership {
@@ -361,9 +361,13 @@ const AdminProspectos = () => {
       else {
         toast.success('Prospecto actualizado');
         setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
-        // Sync stage to Kommo if status changed and lead exists in Kommo
-        if (editing.kommo_lead_id && payload.status !== editing.status) {
-          updateKommoLeadStage(editing.id, editing.kommo_lead_id, payload.status).catch(console.error);
+        if (editing.kommo_lead_id) {
+          // Always push all fields to Kommo on edit
+          updateKommoLeadFields(editing.id, editing.kommo_lead_id).catch(console.error);
+          // Also update stage if it changed
+          if (payload.status !== editing.status) {
+            updateKommoLeadStage(editing.id, editing.kommo_lead_id, payload.status).catch(console.error);
+          }
         }
       }
     } else {
