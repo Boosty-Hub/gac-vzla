@@ -1512,15 +1512,8 @@ const AdminReservas = () => {
               {/* Technical report */}
               {detailRes.technical_report_url && (
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Informe Técnico</p>
-                  <a
-                    href={detailRes.technical_report_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                  >
-                    <FileText className="w-3.5 h-3.5" /> Ver informe PDF
-                  </a>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Archivos Adjuntos</p>
+                  <TechnicalReportUploader value={detailRes.technical_report_url} onChange={() => {}} readonly />
                 </div>
               )}
             </div>
