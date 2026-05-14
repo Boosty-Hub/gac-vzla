@@ -173,6 +173,7 @@ const AdminReservas = () => {
   const [fMileage, setFMileage] = useState<string>(() => getArLS().fMileage || '0');
   const [fStatus, setFStatus] = useState<string>(() => getArLS().fStatus || 'pendiente');
   const [fNotes, setFNotes] = useState<string>(() => getArLS().fNotes || '');
+  const [fObs, setFObs] = useState<string>('');
 
   // Client/vehicle lookup
   const [clientResults, setClientResults] = useState<ClientOption[]>([]);
@@ -355,7 +356,7 @@ const AdminReservas = () => {
     setEditingRes(null);
     setFDealership(''); setFClientSearch(''); setFClientId(''); setFVehicleId('');
     setFDate(new Date().toISOString().split('T')[0]); setFTime('08:00');
-    setFService(''); setFMileage('0'); setFStatus('pendiente'); setFNotes('');
+    setFService(''); setFMileage('0'); setFStatus('pendiente'); setFNotes(''); setFObs('');
     setClientResults([]); setClientVehicles([]);
     setCapacityWarning('');
     setTechnicalReportUrl(null);
@@ -432,7 +433,7 @@ const AdminReservas = () => {
     setFService(r.service_type);
     setFMileage(String(r.current_mileage));
     setFStatus(r.status);
-    setFNotes(r.notes || '');
+    setFNotes(r.notes || ''); setFObs('');
     setTechnicalReportUrl(r.technical_report_url || null);
     setClientResults([]);
     // Trigger vehicle fetch
@@ -474,7 +475,7 @@ const AdminReservas = () => {
       service_type: fService,
       current_mileage: parseInt(fMileage) || 0,
       status: fStatus,
-      notes: fNotes.trim() || null,
+      notes: [fNotes.trim(), fObs.trim()].filter(Boolean).join('\n') || null,
       technical_report_url: technicalReportUrl || null,
     };
 
@@ -1247,6 +1248,12 @@ const AdminReservas = () => {
             <div className="space-y-2">
               <Label>Descripción de la incidencia</Label>
               <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." rows={3} />
+            </div>
+
+            {/* Notas */}
+            <div className="space-y-2">
+              <Label>Notas</Label>
+              <Textarea value={fObs} onChange={e => setFObs(e.target.value)} placeholder="Observaciones adicionales..." rows={2} />
             </div>
 
             {/* Archivo adjunto */}

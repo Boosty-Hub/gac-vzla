@@ -141,6 +141,7 @@ const DealershipReservas = () => {
   const [fService, setFService] = useState<string>(() => getDrLS().fService || '');
   const [fMileage, setFMileage] = useState<string>(() => getDrLS().fMileage || '0');
   const [fNotes, setFNotes] = useState<string>(() => getDrLS().fNotes || '');
+  const [fObs, setFObs] = useState<string>('');
   const [fWalkinName, setFWalkinName] = useState<string>(() => getDrLS().fWalkinName || '');
   const [fWalkinPhone, setFWalkinPhone] = useState<string>(() => getDrLS().fWalkinPhone || '');
 
@@ -219,7 +220,7 @@ const DealershipReservas = () => {
 
   const openCreate = () => {
     setPlateSearch(''); setPlateResult(null); setPlateSearched(false);
-    setFDate(hoy); setFTime('09:00'); setFService(''); setFMileage('0'); setFNotes('');
+    setFDate(hoy); setFTime('09:00'); setFService(''); setFMileage('0'); setFNotes(''); setFObs('');
     setFWalkinName(''); setFWalkinPhone('');
     setCreateTechReportUrl(null);
     setCreateOpen(true);
@@ -232,7 +233,9 @@ const DealershipReservas = () => {
     const payload: any = {
       dealership_id: selectedDealership,
       reservation_date: fDate, reservation_time: fTime, service_type: fService,
-      current_mileage: parseInt(fMileage) || 0, status: 'pendiente', notes: fNotes.trim() || null,
+      current_mileage: parseInt(fMileage) || 0,
+      notes: [fNotes.trim(), fObs.trim()].filter(Boolean).join('\n') || null,
+      status: 'pendiente',
       technical_report_url: createTechReportUrl || null,
     };
     if (plateResult) { payload.vehicle_id = plateResult.id; payload.client_id = plateResult.client_id; }
@@ -738,6 +741,10 @@ const DealershipReservas = () => {
             <div className="space-y-1">
               <Label className="text-xs">Descripción de la incidencia</Label>
               <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Notas</Label>
+              <Textarea value={fObs} onChange={e => setFObs(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones adicionales..." />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Archivo adjunto</Label>
