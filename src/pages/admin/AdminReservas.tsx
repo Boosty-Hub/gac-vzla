@@ -358,6 +358,7 @@ const AdminReservas = () => {
     setFService(''); setFMileage('0'); setFStatus('pendiente'); setFNotes('');
     setClientResults([]); setClientVehicles([]);
     setCapacityWarning('');
+    setTechnicalReportUrl(null);
     setDialogOpen(true);
   };
 
@@ -432,6 +433,7 @@ const AdminReservas = () => {
     setFMileage(String(r.current_mileage));
     setFStatus(r.status);
     setFNotes(r.notes || '');
+    setTechnicalReportUrl(r.technical_report_url || null);
     setClientResults([]);
     // Trigger vehicle fetch
     supabase
@@ -473,6 +475,7 @@ const AdminReservas = () => {
       current_mileage: parseInt(fMileage) || 0,
       status: fStatus,
       notes: fNotes.trim() || null,
+      technical_report_url: technicalReportUrl || null,
     };
 
     if (editingRes) {
@@ -1211,18 +1214,6 @@ const AdminReservas = () => {
                   ))}
                 </SelectContent>
               </Select>
-              {fService && serviceTypes.find(s => s.name === fService)?.requires_description && (
-                <div className="mt-2">
-                  <Label className="text-xs text-muted-foreground">Descripción de la incidencia *</Label>
-                  <Textarea
-                    value={fNotes}
-                    onChange={e => setFNotes(e.target.value)}
-                    rows={3}
-                    className="mt-1 text-sm"
-                    placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..."
-                  />
-                </div>
-              )}
             </div>
 
             {/* Capacity warning */}
@@ -1252,10 +1243,20 @@ const AdminReservas = () => {
               </div>
             </div>
 
-            {/* Notas */}
+            {/* Descripción de la incidencia */}
             <div className="space-y-2">
-              <Label>Notas</Label>
-              <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} placeholder="Observaciones adicionales..." rows={2} />
+              <Label>Descripción de la incidencia</Label>
+              <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." rows={3} />
+            </div>
+
+            {/* Archivo adjunto */}
+            <div className="space-y-2">
+              <Label>Archivo adjunto</Label>
+              <TechnicalReportUploader
+                reservationId={editingRes?.id}
+                value={technicalReportUrl}
+                onChange={setTechnicalReportUrl}
+              />
             </div>
           </div>
           <DialogFooter>

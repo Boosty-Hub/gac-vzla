@@ -126,6 +126,7 @@ const DealershipReservas = () => {
   const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
   const [serviceNotes, setServiceNotes] = useState('');
   const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
+  const [createTechReportUrl, setCreateTechReportUrl] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
 
   // Create dialog (initialized from localStorage to survive page refresh)
@@ -220,6 +221,7 @@ const DealershipReservas = () => {
     setPlateSearch(''); setPlateResult(null); setPlateSearched(false);
     setFDate(hoy); setFTime('09:00'); setFService(''); setFMileage('0'); setFNotes('');
     setFWalkinName(''); setFWalkinPhone('');
+    setCreateTechReportUrl(null);
     setCreateOpen(true);
   };
 
@@ -231,6 +233,7 @@ const DealershipReservas = () => {
       dealership_id: selectedDealership,
       reservation_date: fDate, reservation_time: fTime, service_type: fService,
       current_mileage: parseInt(fMileage) || 0, status: 'pendiente', notes: fNotes.trim() || null,
+      technical_report_url: createTechReportUrl || null,
     };
     if (plateResult) { payload.vehicle_id = plateResult.id; payload.client_id = plateResult.client_id; }
     else { payload.walkin_client_name = fWalkinName.trim(); payload.walkin_client_phone = fWalkinPhone.trim() || null; payload.walkin_plate = plateSearch.trim().toUpperCase() || null; }
@@ -729,16 +732,17 @@ const DealershipReservas = () => {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1"><Label className="text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" /></div>
               <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-1 col-span-2"><Label className="text-xs">Servicio *</Label><Select value={fService} onValueChange={v => { setFService(v); setFNotes(''); }}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger><SelectContent>{serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}</SelectContent></Select>
-              {fService && serviceTypes.find(s => s.name === fService)?.requires_description && (
-                <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="mt-2 text-xs" placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." />
-              )}
-              </div>
+              <div className="space-y-1 col-span-2"><Label className="text-xs">Servicio *</Label><Select value={fService} onValueChange={v => { setFService(v); setFNotes(''); }}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger><SelectContent>{serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}</SelectContent></Select></div>
               <div className="space-y-1"><Label className="text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-8 text-xs" /></div>
             </div>
-            {fService && !serviceTypes.find(s => s.name === fService)?.requires_description && (
-              <div className="space-y-1"><Label className="text-xs">Notas</Label><Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones adicionales..." /></div>
-            )}
+            <div className="space-y-1">
+              <Label className="text-xs">Descripción de la incidencia</Label>
+              <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Archivo adjunto</Label>
+              <TechnicalReportUploader value={createTechReportUrl} onChange={setCreateTechReportUrl} />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancelar</Button>
