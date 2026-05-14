@@ -169,11 +169,11 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
 
   const PreviewModal = (
     <Dialog open={!!previewUrl} onOpenChange={open => { if (!open) setPreviewUrl(null); }}>
-      <DialogContent className="max-w-3xl flex flex-col max-h-[90vh]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-sm font-medium min-w-0">
+      <DialogContent className="max-w-3xl w-full flex flex-col max-h-[90vh]">
+        <DialogHeader className="min-w-0 overflow-hidden">
+          <DialogTitle className="flex items-center gap-2 text-sm font-medium min-w-0 overflow-hidden">
             {previewUrl && <FileTypeIcon url={previewUrl} className="w-4 h-4 shrink-0" />}
-            <span className="truncate">{previewFileName}</span>
+            <span className="truncate min-w-0 flex-1">{previewFileName}</span>
             {previewUrl && <span className="text-muted-foreground font-normal shrink-0">({fileLabel(previewUrl)})</span>}
           </DialogTitle>
         </DialogHeader>
