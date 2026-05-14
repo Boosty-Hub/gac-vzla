@@ -13,6 +13,7 @@ import DealershipLayout from "./components/layouts/DealershipLayout";
 import DealershipDashboard from "./pages/dealership/DealershipDashboard";
 import DealershipReservas from "./pages/dealership/DealershipReservas";
 import DealershipProspectos from "./pages/dealership/DealershipProspectos";
+import DealershipIncidencias from "./pages/dealership/DealershipIncidencias";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminReservas from "./pages/admin/AdminReservas";
 import AdminGarantias from "./pages/admin/AdminGarantias";
@@ -73,6 +74,7 @@ const App = () => (
             <Route path="/concesionario" element={<DealershipRoute><DealershipDashboard /></DealershipRoute>} />
             <Route path="/concesionario/reservas" element={<DealershipRoute><DealershipReservas /></DealershipRoute>} />
             <Route path="/concesionario/prospectos" element={<DealershipRoute><DealershipProspectos /></DealershipRoute>} />
+            <Route path="/concesionario/incidencias" element={<DealershipRoute><DealershipIncidencias /></DealershipRoute>} />
 
             {/* Admin routes with sidebar layout */}
             <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />

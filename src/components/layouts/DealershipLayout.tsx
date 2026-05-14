@@ -25,6 +25,7 @@ import {
   LogOut,
   Users,
   LayoutDashboard,
+  AlertTriangle,
 } from 'lucide-react';
 import imbLogo from '@/assets/imb-logo.png';
 
@@ -44,6 +45,7 @@ const menuItems = [
     items: [
       { label: 'Reservas / Servicios', icon: CalendarDays, path: '/concesionario/reservas' },
       { label: 'Prospectos', icon: Users, path: '/concesionario/prospectos' },
+      { label: 'Incidencias', icon: AlertTriangle, path: '/concesionario/incidencias' },
     ],
   },
 ];
@@ -55,9 +57,9 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
 
   const isVendedor = role?.name?.toLowerCase() === 'vendedor';
 
-  // Vendedor only sees Prospectos
+  // Vendedor sees Prospectos and Incidencias
   const filteredMenuItems = isVendedor
-    ? menuItems.map(g => ({ ...g, items: g.items.filter(i => i.path === '/concesionario/prospectos') })).filter(g => g.items.length > 0)
+    ? menuItems.map(g => ({ ...g, items: g.items.filter(i => i.path === '/concesionario/prospectos' || i.path === '/concesionario/incidencias') })).filter(g => g.items.length > 0)
     : menuItems;
 
   // Redirect vendedor from dashboard to prospectos

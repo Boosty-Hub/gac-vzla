@@ -154,6 +154,7 @@ const DealershipReservas = () => {
       .eq('dealership_id', selectedDealership)
       .order('reservation_date', { ascending: false })
       .order('reservation_time', { ascending: false })
+      .neq('service_type', 'Incidencia')
       .limit(200);
     setReservations((data || []) as Reservation[]);
     setLoading(false);
@@ -684,7 +685,7 @@ const DealershipReservas = () => {
 
       {/* CREATE RESERVATION DIALOG */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">Nueva Reserva</DialogTitle>
           </DialogHeader>

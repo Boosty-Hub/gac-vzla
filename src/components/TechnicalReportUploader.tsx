@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Upload, FileText, Download, Eye, Trash2, Loader2, Image, FileSpreadsheet, File } from 'lucide-react';
+import { Upload, FileText, Download, Eye, Trash2, Loader2, Image, FileSpreadsheet, File, Film } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -15,8 +15,9 @@ const ACCEPTED_MIME = new Set([
   'application/vnd.ms-excel',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'video/mp4', 'video/webm', 'video/ogg', 'video/quicktime', 'video/x-msvideo',
 ]);
-const ACCEPTED_EXT = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.gif', '.webp'];
+const ACCEPTED_EXT = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.webm', '.mov', '.avi', '.ogv'];
 const ACCEPT_ATTR = ACCEPTED_EXT.join(',');
 
 function sanitizeFileName(name: string): string {
@@ -31,10 +32,11 @@ function sanitizeFileName(name: string): string {
 function getExt(url: string) {
   return (url.split('?')[0].split('.').pop() || '').toLowerCase();
 }
-function detectType(url: string): 'pdf' | 'image' | 'other' {
+function detectType(url: string): 'pdf' | 'image' | 'video' | 'other' {
   const ext = getExt(url);
   if (ext === 'pdf') return 'pdf';
   if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'image';
+  if (['mp4', 'webm', 'mov', 'avi', 'ogv'].includes(ext)) return 'video';
   return 'other';
 }
 function fileLabel(url: string) {
@@ -43,6 +45,7 @@ function fileLabel(url: string) {
   if (['doc', 'docx'].includes(ext)) return 'Word';
   if (['xls', 'xlsx'].includes(ext)) return 'Excel';
   if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'Imagen';
+  if (['mp4', 'webm', 'mov', 'avi', 'ogv'].includes(ext)) return 'Video';
   return 'Archivo';
 }
 function getFileName(url: string) {
@@ -54,6 +57,7 @@ function FileTypeIcon({ url, className }: { url: string; className?: string }) {
   if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return <Image className={className} />;
   if (['xls', 'xlsx'].includes(ext)) return <FileSpreadsheet className={className} />;
   if (ext === 'pdf') return <FileText className={className} />;
+  if (['mp4', 'webm', 'mov', 'avi', 'ogv'].includes(ext)) return <Film className={className} />;
   return <File className={className} />;
 }
 
@@ -67,8 +71,8 @@ interface FileChipProps {
 function FileChip({ url, onPreview, onRemove, readonly }: FileChipProps) {
   const name = getFileName(url);
   return (
-    <div className="flex items-center justify-between gap-2 bg-blue-50 border border-blue-200 rounded-md px-3 py-2">
-      <div className="flex items-center gap-2 min-w-0">
+    <div className="flex items-center justify-between gap-2 bg-blue-50 border border-blue-200 rounded-md px-3 py-2 overflow-hidden min-w-0">
+      <div className="flex items-center gap-2 min-w-0 overflow-hidden">
         <FileTypeIcon url={url} className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="text-xs font-medium text-blue-800 truncate">{name}</span>
         <span className="text-xs text-blue-500 shrink-0">({fileLabel(url)})</span>
@@ -98,9 +102,10 @@ interface Props {
   value: string | null;
   onChange: (value: string | null) => void;
   readonly?: boolean;
+  maxSizeMB?: number;
 }
 
-export function TechnicalReportUploader({ reservationId, value, onChange, readonly = false }: Props) {
+export function TechnicalReportUploader({ reservationId, value, onChange, readonly = false, maxSizeMB = 20 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -130,8 +135,8 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
         toast.error(`"${file.name}": formato no soportado`);
         continue;
       }
-      if (file.size > 20 * 1024 * 1024) {
-        toast.error(`"${file.name}": supera el límite de 20 MB`);
+      if (file.size > maxSizeMB * 1024 * 1024) {
+        toast.error(`"${file.name}": supera el límite de ${maxSizeMB} MB`);
         continue;
       }
 
@@ -185,6 +190,9 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
             <div className="flex items-center justify-center h-[60vh] bg-muted/20 rounded border overflow-hidden">
               <img src={previewUrl} alt={previewFileName} className="max-h-full max-w-full object-contain" />
             </div>
+          )}
+          {previewUrl && detectType(previewUrl) === 'video' && (
+            <video controls src={previewUrl} className="w-full max-h-[60vh] rounded border" />
           )}
           {previewUrl && detectType(previewUrl) === 'other' && (
             <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
@@ -263,7 +271,7 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
                 <p className="text-xs font-medium">
                   {urls.length === 0 ? 'Adjuntar archivos' : `Agregar más (${urls.length}/${MAX_FILES})`}
                 </p>
-                <p className="text-[10px] text-muted-foreground">PDF · Word · Excel · Imágenes · Arrastra o haz clic · Máx. 20 MB</p>
+                <p className="text-[10px] text-muted-foreground">PDF · Word · Excel · Imágenes · Videos · Arrastra o haz clic · Máx. {maxSizeMB} MB</p>
               </div>
             )}
           </div>

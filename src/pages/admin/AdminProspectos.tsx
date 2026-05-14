@@ -16,7 +16,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag, ChevronUp, ChevronDown, ChevronsUpDown, SlidersHorizontal } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -82,6 +82,26 @@ const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
+type ColKey = 'concesionario' | 'nombre' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'estado' | 'fecha';
+const COL_LABELS: Record<ColKey, string> = {
+  concesionario: 'Concesionario',
+  nombre: 'Nombre',
+  telefono: 'Teléfono',
+  email: 'Email',
+  marca: 'Marca',
+  modelo: 'Modelo',
+  fuente: 'Tipo de Contacto',
+  vendedor: 'Vendedor',
+  estadovzla: 'Estado Vzla',
+  tipopersona: 'Tipo Persona',
+  genero: 'Género',
+  edad: 'Edad',
+  testdrive: 'Test Drive',
+  estado: 'Estado',
+  fecha: 'Fecha',
+};
+const ALL_COLS = Object.keys(COL_LABELS) as ColKey[];
+
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
   const { sources: PROSPECT_SOURCES, fetchSources: refetchSources } = useProspectSources();
@@ -113,6 +133,11 @@ const AdminProspectos = () => {
   const [ageRangeFilter, setAgeRangeFilter] = useState('todos');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
+  const [eventNameFilter, setEventNameFilter] = useState('todos');
+
+  // Column visibility
+  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(new Set(ALL_COLS));
+  const toggleCol = (col: ColKey) => setVisibleCols(prev => { const s = new Set(prev); s.has(col) ? s.delete(col) : s.add(col); return s; });
 
   // Create/Edit dialog — persisted in sessionStorage to survive navigation
   const SS_KEY = 'admin_prospectos_dialog';
@@ -237,6 +262,7 @@ const AdminProspectos = () => {
     if (dealershipFilter !== 'todos' && p.dealership_id !== dealershipFilter) return false;
     if (statusFilter !== 'todos' && p.status !== statusFilter) return false;
     if (sourceFilter !== 'todos' && p.source !== sourceFilter) return false;
+    if (eventNameFilter !== 'todos' && (p.event_name || '') !== eventNameFilter) return false;
     if (salespersonFilter !== 'todos' && (p.salesperson || '') !== salespersonFilter) return false;
     if (estadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== estadoVzlaFilter) return false;
     if (testDriveFilter !== 'todos' && (testDriveFilter === 'si' ? !p.test_drive : !!p.test_drive)) return false;
@@ -507,26 +533,27 @@ const AdminProspectos = () => {
       const brand = (parts.length > 1 && BRANDS_LIST.includes(parts[0])) ? parts[0] : '';
       const model = brand ? parts.slice(1).join(' ') : (p.model_interest || '');
       return {
+        concesionario: p.dealerships?.name || '',
         nombre: p.name,
         telefono: p.phone || '',
         email: p.email || '',
         marca: brand,
         modelo: model,
-        fuente: PROSPECT_SOURCES.find(s => s.value === p.source)?.label || p.source,
-        estado: PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
+        tipo_contacto: PROSPECT_SOURCES.find(s => s.value === p.source)?.label || p.source,
+        nombre_evento: p.source === 'evento' ? (p.event_name || '') : '',
         vendedor: p.salesperson || '',
-        concesionario: p.dealerships?.name || '',
         estado_vzla: p['Estado de Vnzla'] || '',
-        test_drive: p.test_drive ? 'si' : 'no',
         tipo_persona: p.person_type || '',
         genero: p.gender || '',
         rango_edad: p.age_range || '',
+        test_drive: p.test_drive ? 'si' : 'no',
+        estado: PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
         notas: p.notes || '',
         fecha: new Date(p.created_at).toLocaleDateString('es-VE'),
       };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:18},{wch:20},{wch:28},{wch:18},{wch:10},{wch:14},{wch:12},{wch:12},{wch:35},{wch:15}];
+    ws['!cols'] = [{wch:28},{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:22},{wch:20},{wch:18},{wch:14},{wch:12},{wch:12},{wch:10},{wch:18},{wch:35},{wch:15}];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
     XLSX.writeFile(wb, `prospectos_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -958,13 +985,24 @@ const AdminProspectos = () => {
               {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={sourceFilter} onValueChange={v => { setSourceFilter(v); setCurrentPage(1); }}>
+          <Select value={sourceFilter} onValueChange={v => { setSourceFilter(v); setEventNameFilter('todos'); setCurrentPage(1); }}>
             <SelectTrigger className="h-8 text-xs w-[120px] shrink-0"><SelectValue placeholder="Fuente" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="todos">Todas las fuentes</SelectItem>
               {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
             </SelectContent>
           </Select>
+          {sourceFilter === 'evento' && (
+            <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
+              <SelectTrigger className="w-[180px] h-8 text-xs shrink-0"><SelectValue placeholder="Nombre de evento" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los eventos</SelectItem>
+                {[...new Set(prospects.filter(p => p.source === 'evento' && p.event_name).map(p => p.event_name!))].map(en => (
+                  <SelectItem key={en} value={en}>{en}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <Select value={salespersonFilter} onValueChange={v => { setSalespersonFilter(v); setCurrentPage(1); }}>
             <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Vendedor" /></SelectTrigger>
             <SelectContent>
@@ -1039,8 +1077,30 @@ const AdminProspectos = () => {
               )}
             </PopoverContent>
           </Popover>
-          {(search || fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos' || testDriveFilter !== 'todos' || personTypeFilter !== 'todos' || genderFilter !== 'todos' || ageRangeFilter !== 'todos') && (
-            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setTestDriveFilter('todos'); setPersonTypeFilter('todos'); setGenderFilter('todos'); setAgeRangeFilter('todos'); setSearch(''); setCurrentPage(1); }}>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 shrink-0">
+                <SlidersHorizontal className="w-3.5 h-3.5" /> Columnas
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 p-3" align="end">
+              <p className="text-xs font-semibold mb-2">Columnas visibles</p>
+              <div className="space-y-1.5">
+                {ALL_COLS.map(col => (
+                  <div key={col} className="flex items-center gap-2">
+                    <Checkbox
+                      id={`col-${col}`}
+                      checked={visibleCols.has(col)}
+                      onCheckedChange={() => toggleCol(col)}
+                    />
+                    <label htmlFor={`col-${col}`} className="text-xs cursor-pointer">{COL_LABELS[col]}</label>
+                  </div>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+          {(search || fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || eventNameFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos' || testDriveFilter !== 'todos' || personTypeFilter !== 'todos' || genderFilter !== 'todos' || ageRangeFilter !== 'todos') && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setEventNameFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setTestDriveFilter('todos'); setPersonTypeFilter('todos'); setGenderFilter('todos'); setAgeRangeFilter('todos'); setSearch(''); setCurrentPage(1); }}>
               <X className="w-3 h-3" />Limpiar
             </Button>
           )}
@@ -1077,20 +1137,20 @@ const AdminProspectos = () => {
                       checked={paginatedProspects.length > 0 && paginatedProspects.every(p => selectedIds.has(p.id))}
                       onChange={toggleSelectAll} />
                   </TableHead>
-                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('name')}>Nombre<SortIcon field="name" /></TableHead>
-                  <TableHead>Contacto</TableHead>
-                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('model_interest')}>Marca<SortIcon field="model_interest" /></TableHead>
-                  <TableHead>Modelo</TableHead>
-                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('salesperson')}>Vendedor<SortIcon field="salesperson" /></TableHead>
-                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('dealership')}>Concesionario<SortIcon field="dealership" /></TableHead>
-                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>
-                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>
-                  <TableHead>Estado Vzla</TableHead>
-                  <TableHead className="text-center">TD</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead>Género</TableHead>
-                  <TableHead>Edad</TableHead>
-                  <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('created_at')}>Fecha<SortIcon field="created_at" /></TableHead>
+                  {visibleCols.has('nombre') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('name')}>Nombre<SortIcon field="name" /></TableHead>}
+                  {(visibleCols.has('telefono') || visibleCols.has('email')) && <TableHead>Contacto</TableHead>}
+                  {visibleCols.has('marca') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('model_interest')}>Marca<SortIcon field="model_interest" /></TableHead>}
+                  {visibleCols.has('modelo') && <TableHead>Modelo</TableHead>}
+                  {visibleCols.has('vendedor') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('salesperson')}>Vendedor<SortIcon field="salesperson" /></TableHead>}
+                  {visibleCols.has('concesionario') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('dealership')}>Concesionario<SortIcon field="dealership" /></TableHead>}
+                  {visibleCols.has('fuente') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>}
+                  {visibleCols.has('estado') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>}
+                  {visibleCols.has('estadovzla') && <TableHead>Estado Vzla</TableHead>}
+                  {visibleCols.has('testdrive') && <TableHead className="text-center">TD</TableHead>}
+                  {visibleCols.has('tipopersona') && <TableHead>Tipo</TableHead>}
+                  {visibleCols.has('genero') && <TableHead>Género</TableHead>}
+                  {visibleCols.has('edad') && <TableHead>Edad</TableHead>}
+                  {visibleCols.has('fecha') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('created_at')}>Fecha<SortIcon field="created_at" /></TableHead>}
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -1104,51 +1164,74 @@ const AdminProspectos = () => {
                         <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
                           checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} />
                       </TableCell>
-                      <TableCell className="font-medium">{p.name}</TableCell>
-                      <TableCell>
-                        {p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
-                        {p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
-                      </TableCell>
-                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{parts[0]}</Badge> : '-'; })()}</TableCell>
-                      <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? (parts.slice(1).join(' ') || '-') : (p.model_interest || '-'); })()}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {salespersons.find(sp => sp.name === (p as any).salesperson)?.name || (p as any).salesperson || '-'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <MapPin className="w-2.5 h-2.5 text-muted-foreground" />
-                          <span>{p.dealerships?.name || '-'}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 capitalize">{src?.label || p.source}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Select value={p.status} onValueChange={v => { updateStatus(p.id, v); }}>
-                          <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent" onClick={e => e.stopPropagation()}>
-                            <Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge>
-                          </SelectTrigger>
-                          <SelectContent>
-                            {PROSPECT_STATUSES.map(s => (
-                              <SelectItem key={s.name} value={s.name}>
-                                <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {p['Estado de Vnzla'] || '-'}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        {p.test_drive ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 inline" /> : <span className="text-muted-foreground/40">-</span>}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground capitalize">{p.person_type || '-'}</TableCell>
-                      <TableCell className="text-muted-foreground capitalize">{p.gender || '-'}</TableCell>
-                      <TableCell className="text-muted-foreground">{p.age_range || '-'}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {new Date(p.created_at).toLocaleDateString('es-VE')}
-                      </TableCell>
+                      {visibleCols.has('nombre') && <TableCell className="font-medium">{p.name}</TableCell>}
+                      {(visibleCols.has('telefono') || visibleCols.has('email')) && (
+                        <TableCell>
+                          {visibleCols.has('telefono') && p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
+                          {visibleCols.has('email') && p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
+                        </TableCell>
+                      )}
+                      {visibleCols.has('marca') && <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{parts[0]}</Badge> : '-'; })()}</TableCell>}
+                      {visibleCols.has('modelo') && <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? (parts.slice(1).join(' ') || '-') : (p.model_interest || '-'); })()}</TableCell>}
+                      {visibleCols.has('vendedor') && (
+                        <TableCell className="text-muted-foreground">
+                          {salespersons.find(sp => sp.name === (p as any).salesperson)?.name || (p as any).salesperson || '-'}
+                        </TableCell>
+                      )}
+                      {visibleCols.has('concesionario') && (
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <MapPin className="w-2.5 h-2.5 text-muted-foreground" />
+                            <span>{p.dealerships?.name || '-'}</span>
+                          </div>
+                        </TableCell>
+                      )}
+                      {visibleCols.has('fuente') && (
+                        <TableCell>
+                          <div className="flex flex-col gap-0.5">
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 w-fit capitalize">
+                              {src?.label || p.source}
+                            </Badge>
+                            {p.source === 'evento' && p.event_name && (
+                              <span className="text-[10px] text-muted-foreground">{p.event_name}</span>
+                            )}
+                          </div>
+                        </TableCell>
+                      )}
+                      {visibleCols.has('estado') && (
+                        <TableCell>
+                          <Select value={p.status} onValueChange={v => { updateStatus(p.id, v); }}>
+                            <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent" onClick={e => e.stopPropagation()}>
+                              <Badge className={cn("text-[10px] px-1.5 py-0", st.color)}>{st.label}</Badge>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {PROSPECT_STATUSES.map(s => (
+                                <SelectItem key={s.name} value={s.name}>
+                                  <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                      )}
+                      {visibleCols.has('estadovzla') && (
+                        <TableCell className="text-muted-foreground">
+                          {p['Estado de Vnzla'] || '-'}
+                        </TableCell>
+                      )}
+                      {visibleCols.has('testdrive') && (
+                        <TableCell className="text-center">
+                          {p.test_drive ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 inline" /> : <span className="text-muted-foreground/40">-</span>}
+                        </TableCell>
+                      )}
+                      {visibleCols.has('tipopersona') && <TableCell className="text-muted-foreground capitalize">{p.person_type || '-'}</TableCell>}
+                      {visibleCols.has('genero') && <TableCell className="text-muted-foreground capitalize">{p.gender || '-'}</TableCell>}
+                      {visibleCols.has('edad') && <TableCell className="text-muted-foreground">{p.age_range || '-'}</TableCell>}
+                      {visibleCols.has('fecha') && (
+                        <TableCell className="text-muted-foreground">
+                          {new Date(p.created_at).toLocaleDateString('es-VE')}
+                        </TableCell>
+                      )}
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           {(p as any).salesperson && (
