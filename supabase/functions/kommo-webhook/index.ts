@@ -498,10 +498,11 @@ async function autoCreateProspectFromKommo(
     }
   }
 
-  const leadName = (lead.name as string) || 'Sin nombre'
+  const leadName = (lead.name as string) || ''
   const contacts = ((lead._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
 
-  // Fetch contact for phone, email, and contact CFs
+  // Fetch contact for name, phone, email, and contact CFs
+  let contactName: string | null = null
   let phone: string | null = null
   let email: string | null = null
   let personType: string | null = null
@@ -514,6 +515,10 @@ async function autoCreateProspectFromKommo(
       try {
         const contactData = await contactRes.json() as Record<string, unknown>
         const cfs = (contactData.custom_fields_values as CFValue[]) || []
+
+        // Prefer contact name over lead name (lead name can be "Lead #XXXXXXX")
+        const rawContactName = String(contactData.name ?? '').trim()
+        if (rawContactName) contactName = rawContactName
 
         const phoneCF = cfs.find(f => (f as unknown as { field_code?: string }).field_code === 'PHONE')
         phone = phoneCF?.values?.[0]?.value ? String(phoneCF.values[0].value) : null
@@ -531,6 +536,9 @@ async function autoCreateProspectFromKommo(
       } catch { /* ignore */ }
     }
   }
+
+  // Use contact name first, fall back to lead name, then generic placeholder
+  const finalName = contactName || leadName || 'Sin nombre'
 
   // Extract lead fields
   const salesperson = getCFText(cfValues, CF.salesperson) || getCFText(cfValues, 2988736)
@@ -566,7 +574,7 @@ async function autoCreateProspectFromKommo(
   }
 
   const newProspect: Record<string, unknown> = {
-    name: leadName,
+    name: finalName,
     status: 'demostracion',
     kommo_lead_id: kommoLeadId,
     source,
@@ -610,6 +618,6 @@ async function autoCreateProspectFromKommo(
     integration_name: 'kommo', event_type: 'webhook_auto_created',
     prospect_id: created.id, kommo_lead_id: kommoLeadId,
     status: 'success',
-    details: { lead_name: leadName, dealership_id: dealershipId, fields: Object.keys(newProspect) },
+    details: { lead_name: finalName, dealership_id: dealershipId, fields: Object.keys(newProspect) },
   })
 }
