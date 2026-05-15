@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X, Building2 } from 'lucide-react';
+import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
 import { cn } from '@/lib/utils';
@@ -156,7 +156,7 @@ const DealershipReservas = () => {
   const [saving, setSaving] = useState(false);
 
   // Normal reservation — search mode
-  const [searchMode, setSearchMode] = useState<'placa' | 'nombre'>('placa');
+  const [searchMode, setSearchMode] = useState<'placa' | 'nombre'>('nombre');
 
   // Normal reservation — plate search
   const [plateSearch, setPlateSearch] = useState<string>(() => getDrLS().plateSearch || '');
@@ -198,7 +198,6 @@ const DealershipReservas = () => {
 
   const hoy = new Date().toISOString().split('T')[0];
   const isIncidencia = INCIDENCIA_TYPES.has(fService);
-  const dealershipName = dealerships.find(d => d.id === selectedDealership)?.name || '';
 
   const fetchReservations = async () => {
     if (!selectedDealership) return;
@@ -370,7 +369,7 @@ const DealershipReservas = () => {
     setPlateSearch(''); setPlateResult(null); setPlateSearched(false);
     setFWalkinName(''); setFWalkinPhone('');
     resetNameSearch();
-    setSearchMode('placa');
+    setSearchMode('nombre');
   };
 
   const openCreate = () => {
@@ -833,7 +832,7 @@ const DealershipReservas = () => {
                 <p><span className="font-semibold">Km:</span> {completingRes.current_mileage.toLocaleString()}</p>
               </div>
               <div className="space-y-2"><Label>¿Qué se realizó? *</Label><Textarea value={serviceNotes} onChange={e => setServiceNotes(e.target.value)} rows={4} placeholder="Trabajos realizados, repuestos, observaciones..." /></div>
-              <div className="space-y-2"><Label>Informe Técnico</Label><TechnicalReportUploader reservationId={completingRes.id} value={technicalReportUrl} onChange={setTechnicalReportUrl} /></div>
+              <div className="space-y-2"><Label>Informe Técnico</Label><TechnicalReportUploader maxSizeMB={40} reservationId={completingRes.id} value={technicalReportUrl} onChange={setTechnicalReportUrl} /></div>
             </div>
           )}
           <DialogFooter>
@@ -854,21 +853,17 @@ const DealershipReservas = () => {
             </DialogTitle>
           </DialogHeader>
 
-          {/* Concesionario — siempre visible */}
-          <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-2 text-xs">
-            <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-            {showSelector ? (
-              <Select value={selectedDealership} onValueChange={setSelectedDealership}>
-                <SelectTrigger className="h-6 text-xs border-0 p-0 shadow-none bg-transparent flex-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            ) : (
-              <span className="font-medium">{dealershipName}</span>
-            )}
+          {/* Concesionario — siempre visible como dropdown */}
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold">Concesionario</Label>
+            <Select value={selectedDealership} onValueChange={showSelector ? setSelectedDealership : undefined} disabled={!showSelector}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Tipo de servicio — siempre visible primero */}
@@ -966,7 +961,7 @@ const DealershipReservas = () => {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Fotos / Videos</Label>
-                <TechnicalReportUploader maxSizeMB={100} value={fIncMediaUrls} onChange={setFIncMediaUrls} />
+                <TechnicalReportUploader maxSizeMB={40} value={fIncMediaUrls} onChange={setFIncMediaUrls} />
               </div>
             </div>
           )}
@@ -1111,7 +1106,7 @@ const DealershipReservas = () => {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Archivo adjunto</Label>
-                  <TechnicalReportUploader value={createTechReportUrl} onChange={setCreateTechReportUrl} />
+                  <TechnicalReportUploader maxSizeMB={40} value={createTechReportUrl} onChange={setCreateTechReportUrl} />
                 </div>
               </div>
             </>

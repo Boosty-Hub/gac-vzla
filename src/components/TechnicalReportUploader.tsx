@@ -105,7 +105,7 @@ interface Props {
   maxSizeMB?: number;
 }
 
-export function TechnicalReportUploader({ reservationId, value, onChange, readonly = false, maxSizeMB = 20 }: Props) {
+export function TechnicalReportUploader({ reservationId, value, onChange, readonly = false, maxSizeMB = 40 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
