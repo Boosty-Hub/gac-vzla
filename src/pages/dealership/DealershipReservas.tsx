@@ -11,13 +11,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X } from 'lucide-react';
+import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X, Building2 } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
+
+// Service types that trigger the incidencia form
+const INCIDENCIA_TYPES = new Set(['Incidencia', 'Falla o Desperfecto']);
 
 interface Reservation {
   id: string;
@@ -152,11 +155,27 @@ const DealershipReservas = () => {
   const [createOpen, setCreateOpenRaw] = useState<boolean>(() => getDrLS().createOpen === true);
   const [saving, setSaving] = useState(false);
 
-  // Normal reservation form fields
+  // Normal reservation — search mode
+  const [searchMode, setSearchMode] = useState<'placa' | 'nombre'>('placa');
+
+  // Normal reservation — plate search
   const [plateSearch, setPlateSearch] = useState<string>(() => getDrLS().plateSearch || '');
   const [plateResult, setPlateResult] = useState<PlateResult | null>(() => getDrLS().plateResult || null);
   const [plateSearched, setPlateSearched] = useState<boolean>(() => getDrLS().plateSearched === true);
   const [searchingPlate, setSearchingPlate] = useState(false);
+
+  // Normal reservation — client name search
+  const [normalNameSearch, setNormalNameSearch] = useState('');
+  const [normalNameResults, setNormalNameResults] = useState<ClientResult[]>([]);
+  const [normalNameClientId, setNormalNameClientId] = useState('');
+  const [normalNameClientName, setNormalNameClientName] = useState('');
+  const [normalNameDropdown, setNormalNameDropdown] = useState(false);
+  const [normalNameVehicles, setNormalNameVehicles] = useState<VehicleResult[]>([]);
+  const [normalNameVehicleId, setNormalNameVehicleId] = useState('');
+  const [loadingNormalVehicle, setLoadingNormalVehicle] = useState(false);
+  const normalNameRef = useRef<HTMLDivElement>(null);
+
+  // Normal reservation — common fields
   const [fDate, setFDate] = useState<string>(() => getDrLS().fDate || '');
   const [fTime, setFTime] = useState<string>(() => getDrLS().fTime || '');
   const [fService, setFService] = useState<string>(() => getDrLS().fService || '');
@@ -178,7 +197,8 @@ const DealershipReservas = () => {
   const clientSearchRef = useRef<HTMLDivElement>(null);
 
   const hoy = new Date().toISOString().split('T')[0];
-  const isIncidencia = fService === 'Incidencia';
+  const isIncidencia = INCIDENCIA_TYPES.has(fService);
+  const dealershipName = dealerships.find(d => d.id === selectedDealership)?.name || '';
 
   const fetchReservations = async () => {
     if (!selectedDealership) return;
@@ -211,7 +231,38 @@ const DealershipReservas = () => {
     })();
   }, []);
 
-  // Client name autocomplete for incidencia form
+  // Normal form: client name autocomplete
+  useEffect(() => {
+    if (!normalNameSearch.trim() || normalNameClientId) {
+      setNormalNameResults([]);
+      setNormalNameDropdown(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('clients')
+        .select('id, full_name')
+        .ilike('full_name', `%${normalNameSearch.trim()}%`)
+        .limit(8);
+      setNormalNameResults((data || []) as ClientResult[]);
+      setNormalNameDropdown(true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [normalNameSearch, normalNameClientId]);
+
+  // Normal form: fetch client vehicles after client selected by name
+  useEffect(() => {
+    if (!normalNameClientId) { setNormalNameVehicles([]); setNormalNameVehicleId(''); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('vehicles')
+        .select('id, plate, year, vehicle_models(name, brand)')
+        .eq('client_id', normalNameClientId);
+      setNormalNameVehicles((data || []) as unknown as VehicleResult[]);
+    })();
+  }, [normalNameClientId]);
+
+  // Incidencia form: client name autocomplete
   useEffect(() => {
     if (!fClientSearch.trim() || fClientId) {
       setFClientResults([]);
@@ -230,7 +281,7 @@ const DealershipReservas = () => {
     return () => clearTimeout(timer);
   }, [fClientSearch, fClientId]);
 
-  // Fetch vehicles when client selected in incidencia form
+  // Incidencia form: fetch vehicles when client selected
   useEffect(() => {
     if (!fClientId) { setFIncVehicles([]); setFIncVehicleId(''); return; }
     (async () => {
@@ -242,24 +293,21 @@ const DealershipReservas = () => {
     })();
   }, [fClientId]);
 
-  // Close client dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (clientSearchRef.current && !clientSearchRef.current.contains(e.target as Node)) {
-        setFClientDropdown(false);
-      }
+      if (clientSearchRef.current && !clientSearchRef.current.contains(e.target as Node)) setFClientDropdown(false);
+      if (normalNameRef.current && !normalNameRef.current.contains(e.target as Node)) setNormalNameDropdown(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Wrapper clears LS when dialog closes
   const setCreateOpen = (open: boolean) => {
     setCreateOpenRaw(open);
     if (!open) { try { localStorage.removeItem(DR_LS_KEY); } catch {} }
   };
 
-  // Persist create-form to localStorage
   useEffect(() => {
     if (!createOpen) return;
     try {
@@ -269,9 +317,7 @@ const DealershipReservas = () => {
 
   const filteredReservations = reservations.filter(r => {
     if (resStatusFilter !== 'todos' && r.status !== resStatusFilter) return false;
-    if (resServiceFilter !== 'todos') {
-      if (resServiceFilter === 'Incidencia' ? r.service_type !== 'Incidencia' : r.service_type !== resServiceFilter) return false;
-    }
+    if (resServiceFilter !== 'todos' && r.service_type !== resServiceFilter) return false;
     if (resFechaDesde && r.reservation_date < resFechaDesde) return false;
     if (resFechaHasta && r.reservation_date > resFechaHasta) return false;
     if (resSearch.trim()) {
@@ -295,6 +341,26 @@ const DealershipReservas = () => {
     setSearchingPlate(false);
   };
 
+  // When vehicle is chosen in name-search mode, populate plateResult for reuse in save logic
+  const handleNormalNameVehicleSelect = async (vehicleId: string) => {
+    setLoadingNormalVehicle(true);
+    setNormalNameVehicleId(vehicleId);
+    const { data } = await supabase
+      .from('vehicles')
+      .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
+      .eq('id', vehicleId)
+      .single();
+    if (data) { setPlateResult(data as any); setPlateSearched(true); }
+    setLoadingNormalVehicle(false);
+  };
+
+  const resetNameSearch = () => {
+    setNormalNameSearch(''); setNormalNameResults([]); setNormalNameClientId('');
+    setNormalNameClientName(''); setNormalNameDropdown(false);
+    setNormalNameVehicles([]); setNormalNameVehicleId('');
+    setPlateResult(null); setPlateSearched(false);
+  };
+
   const resetIncidenciaFields = () => {
     setFClientSearch(''); setFClientResults([]); setFClientId(''); setFClientName('');
     setFClientDropdown(false); setFIncVehicleId(''); setFIncVehicles([]); setFIncMediaUrls(null);
@@ -303,6 +369,8 @@ const DealershipReservas = () => {
   const resetNormalFields = () => {
     setPlateSearch(''); setPlateResult(null); setPlateSearched(false);
     setFWalkinName(''); setFWalkinPhone('');
+    resetNameSearch();
+    setSearchMode('placa');
   };
 
   const openCreate = () => {
@@ -314,17 +382,21 @@ const DealershipReservas = () => {
   };
 
   const selectClient = (client: ClientResult) => {
-    setFClientId(client.id);
-    setFClientName(client.full_name);
-    setFClientSearch(client.full_name);
-    setFClientDropdown(false);
-    setFClientResults([]);
+    setFClientId(client.id); setFClientName(client.full_name);
+    setFClientSearch(client.full_name); setFClientDropdown(false); setFClientResults([]);
   };
 
   const clearClient = () => {
     setFClientId(''); setFClientName(''); setFClientSearch('');
     setFClientResults([]); setFClientDropdown(false);
     setFIncVehicleId(''); setFIncVehicles([]);
+  };
+
+  const clearNormalNameClient = () => {
+    setNormalNameClientId(''); setNormalNameClientName(''); setNormalNameSearch('');
+    setNormalNameResults([]); setNormalNameDropdown(false);
+    setNormalNameVehicles([]); setNormalNameVehicleId('');
+    setPlateResult(null); setPlateSearched(false);
   };
 
   const handleSave = async () => {
@@ -338,7 +410,7 @@ const DealershipReservas = () => {
         vehicle_id: fIncVehicleId || null,
         reservation_date: fDate,
         reservation_time: '08:00',
-        service_type: 'Incidencia',
+        service_type: fService,
         notes: fNotes.trim(),
         current_mileage: parseInt(fMileage) || 0,
         status: 'pendiente',
@@ -352,7 +424,14 @@ const DealershipReservas = () => {
     }
 
     if (!fDate || !fTime || !fService) { toast.error('Fecha, hora y servicio son requeridos'); return; }
-    if (!plateResult && !fWalkinName.trim()) { toast.error('Ingrese el nombre del cliente'); return; }
+
+    // Validate client/vehicle presence based on search mode
+    if (searchMode === 'nombre') {
+      if (!normalNameClientId) { toast.error('Busque y seleccione un cliente'); return; }
+    } else {
+      if (!plateResult && !fWalkinName.trim()) { toast.error('Ingrese el nombre del cliente'); return; }
+    }
+
     setSaving(true);
     const payload: any = {
       dealership_id: selectedDealership,
@@ -362,8 +441,21 @@ const DealershipReservas = () => {
       status: 'pendiente',
       technical_report_url: createTechReportUrl || null,
     };
-    if (plateResult) { payload.vehicle_id = plateResult.id; payload.client_id = plateResult.client_id; }
-    else { payload.walkin_client_name = fWalkinName.trim(); payload.walkin_client_phone = fWalkinPhone.trim() || null; payload.walkin_plate = plateSearch.trim().toUpperCase() || null; }
+
+    if (searchMode === 'nombre') {
+      if (plateResult) {
+        // Vehicle selected from name search
+        payload.vehicle_id = plateResult.id;
+        payload.client_id = plateResult.client_id;
+      } else {
+        // Only client selected, no vehicle
+        payload.client_id = normalNameClientId;
+      }
+    } else {
+      // Plate mode
+      if (plateResult) { payload.vehicle_id = plateResult.id; payload.client_id = plateResult.client_id; }
+      else { payload.walkin_client_name = fWalkinName.trim(); payload.walkin_client_phone = fWalkinPhone.trim() || null; payload.walkin_plate = plateSearch.trim().toUpperCase() || null; }
+    }
 
     const { error } = await supabase.from('reservations').insert(payload);
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
@@ -378,38 +470,27 @@ const DealershipReservas = () => {
   };
 
   const openDetail = async (r: Reservation) => {
-    setDetailRes(r);
-    setVehicleDetail(null);
-    setVehicleHistory([]);
-    setDetailOpen(true);
-
+    setDetailRes(r); setVehicleDetail(null); setVehicleHistory([]); setDetailOpen(true);
     if (r.vehicle_id) {
       setLoadingDetail(true);
       const { data: veh } = await supabase
         .from('vehicles')
         .select('id, plate, year, color, vin, mileage, warranty_active, vehicle_models(name, brand), clients(full_name, cedula, phone)')
-        .eq('id', r.vehicle_id)
-        .single();
+        .eq('id', r.vehicle_id).single();
       if (veh) setVehicleDetail(veh as unknown as VehicleDetail);
-
       const { data: history } = await supabase
         .from('reservations')
         .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name)')
-        .eq('vehicle_id', r.vehicle_id)
-        .neq('id', r.id)
-        .order('reservation_date', { ascending: false })
-        .order('reservation_time', { ascending: false })
-        .limit(50);
+        .eq('vehicle_id', r.vehicle_id).neq('id', r.id)
+        .order('reservation_date', { ascending: false }).order('reservation_time', { ascending: false }).limit(50);
       setVehicleHistory((history || []) as unknown as HistoryRecord[]);
       setLoadingDetail(false);
     }
   };
 
   const openComplete = (r: Reservation) => {
-    setCompletingRes(r);
-    setServiceNotes(r.service_notes || '');
-    setTechnicalReportUrl(r.technical_report_url || null);
-    setCompleteOpen(true);
+    setCompletingRes(r); setServiceNotes(r.service_notes || '');
+    setTechnicalReportUrl(r.technical_report_url || null); setCompleteOpen(true);
   };
 
   const handleComplete = async () => {
@@ -417,10 +498,8 @@ const DealershipReservas = () => {
     if (!serviceNotes.trim()) { toast.error('Describe lo que se realizó en el servicio'); return; }
     setCompleting(true);
     const { error } = await supabase.from('reservations').update({
-      status: 'completada',
-      service_notes: serviceNotes.trim(),
-      technical_report_url: technicalReportUrl || null,
-      completed_at: new Date().toISOString(),
+      status: 'completada', service_notes: serviceNotes.trim(),
+      technical_report_url: technicalReportUrl || null, completed_at: new Date().toISOString(),
     }).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
     else { toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations(); }
@@ -472,8 +551,6 @@ const DealershipReservas = () => {
             <SelectContent>
               <SelectItem value="todos">Todos los servicios</SelectItem>
               {serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
-              <SelectSeparator />
-              <SelectItem value="Incidencia">Incidencia / Falla</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -525,7 +602,7 @@ const DealershipReservas = () => {
                   ? `${r.vehicles.vehicle_models?.brand || ''} ${r.vehicles.vehicle_models?.name || ''} ${r.vehicles.year}`
                   : r.walkin_plate || '-';
                 const plate = r.vehicles?.plate || r.walkin_plate || '-';
-                const isInc = r.service_type === 'Incidencia';
+                const isInc = INCIDENCIA_TYPES.has(r.service_type);
                 const statusMap = isInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
                 const st = statusMap[r.status] || (isInc ? INCIDENCIA_STATUSES.pendiente : STATUS_CONFIG.pendiente);
                 return (
@@ -596,14 +673,13 @@ const DealershipReservas = () => {
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              {detailRes?.service_type === 'Incidencia'
+              {detailRes && INCIDENCIA_TYPES.has(detailRes.service_type)
                 ? <><AlertTriangle className="w-4 h-4 text-amber-500" /> Detalle de Incidencia</>
-                : <><CalendarDays className="w-4 h-4" /> Detalle de Cita</>
-              }
+                : <><CalendarDays className="w-4 h-4" /> Detalle de Cita</>}
             </DialogTitle>
           </DialogHeader>
           {detailRes && (() => {
-            const isInc = detailRes.service_type === 'Incidencia';
+            const isInc = INCIDENCIA_TYPES.has(detailRes.service_type);
             const statusMap = isInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
             const st = statusMap[detailRes.status] || (isInc ? INCIDENCIA_STATUSES.pendiente : STATUS_CONFIG.pendiente);
             const clientName = detailRes.clients?.full_name || detailRes.walkin_client_name || '-';
@@ -614,8 +690,6 @@ const DealershipReservas = () => {
                   <TabsTrigger value="vehiculo" className="text-xs">Vehículo</TabsTrigger>
                   <TabsTrigger value="historial" className="text-xs">Historial ({vehicleHistory.length})</TabsTrigger>
                 </TabsList>
-
-                {/* TAB: CITA / INCIDENCIA */}
                 <TabsContent value="cita" className="space-y-3 mt-3">
                   <div className="flex items-center justify-between">
                     <Badge className={cn("text-xs px-2 py-0.5", st.color)}>{st.label}</Badge>
@@ -626,9 +700,7 @@ const DealershipReservas = () => {
                       {detailRes.clients?.cedula && <span className="text-muted-foreground">· {detailRes.clients.cedula}</span>}
                       {detailRes.clients?.phone && <span className="text-muted-foreground">· {detailRes.clients.phone}</span>}
                     </div>
-                    {!detailRes.clients && detailRes.walkin_client_phone && (
-                      <div className="flex items-center gap-2 text-muted-foreground"><span>Tel: {detailRes.walkin_client_phone}</span></div>
-                    )}
+                    {!detailRes.clients && detailRes.walkin_client_phone && <div className="flex items-center gap-2 text-muted-foreground"><span>Tel: {detailRes.walkin_client_phone}</span></div>}
                     <div className="flex items-center gap-2"><Car className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                       <span>{detailRes.vehicles ? `${detailRes.vehicles.vehicle_models?.brand} ${detailRes.vehicles.vehicle_models?.name} ${detailRes.vehicles.year}` : detailRes.walkin_plate || '-'}</span>
                       <span className="text-muted-foreground">{detailRes.vehicles?.plate || detailRes.walkin_plate || ''}</span>
@@ -667,14 +739,9 @@ const DealershipReservas = () => {
                     </div>
                   )}
                 </TabsContent>
-
-                {/* TAB: VEHICULO */}
                 <TabsContent value="vehiculo" className="space-y-3 mt-3">
                   {loadingDetail ? (
-                    <div className="text-center py-6">
-                      <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                      <p className="text-xs text-muted-foreground">Cargando datos del vehículo...</p>
-                    </div>
+                    <div className="text-center py-6"><div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" /><p className="text-xs text-muted-foreground">Cargando...</p></div>
                   ) : vehicleDetail ? (
                     <div className="space-y-3">
                       <div className="text-center pb-2">
@@ -688,15 +755,13 @@ const DealershipReservas = () => {
                         <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Clock className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Kilometraje</p><p className="font-medium">{vehicleDetail.mileage.toLocaleString()} km</p></div></div>
                         <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Shield className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Garantía</p><p className={cn("font-medium", vehicleDetail.warranty_active ? "text-green-700" : "text-red-600")}>{vehicleDetail.warranty_active ? 'Activa' : 'Vencida'}</p></div></div>
                       </div>
-                      {vehicleDetail.vin && (
-                        <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2 text-xs"><FileText className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">VIN</p><p className="font-mono font-medium text-[11px]">{vehicleDetail.vin}</p></div></div>
-                      )}
+                      {vehicleDetail.vin && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2 text-xs"><FileText className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">VIN</p><p className="font-mono font-medium text-[11px]">{vehicleDetail.vin}</p></div></div>}
                       <Separator />
                       <div className="text-xs">
                         <p className="font-semibold mb-1">Propietario</p>
                         <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-muted-foreground" /><span>{vehicleDetail.clients?.full_name || '-'}</span></div>
-                        {vehicleDetail.clients?.cedula && <p className="text-muted-foreground ml-5.5">CI: {vehicleDetail.clients.cedula}</p>}
-                        {vehicleDetail.clients?.phone && <p className="text-muted-foreground ml-5.5">Tel: {vehicleDetail.clients.phone}</p>}
+                        {vehicleDetail.clients?.cedula && <p className="text-muted-foreground ml-5">CI: {vehicleDetail.clients.cedula}</p>}
+                        {vehicleDetail.clients?.phone && <p className="text-muted-foreground ml-5">Tel: {vehicleDetail.clients.phone}</p>}
                       </div>
                     </div>
                   ) : (
@@ -707,37 +772,25 @@ const DealershipReservas = () => {
                     </div>
                   )}
                 </TabsContent>
-
-                {/* TAB: HISTORIAL */}
                 <TabsContent value="historial" className="space-y-3 mt-3">
                   {loadingDetail ? (
-                    <div className="text-center py-6">
-                      <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
-                      <p className="text-xs text-muted-foreground">Cargando historial...</p>
-                    </div>
+                    <div className="text-center py-6"><div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" /></div>
                   ) : !detailRes.vehicle_id ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground">
-                      <FileText className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                      <p>Sin historial (cliente walk-in)</p>
-                    </div>
+                    <div className="text-center py-6 text-xs text-muted-foreground"><FileText className="w-10 h-10 mx-auto mb-2 opacity-30" /><p>Sin historial (cliente walk-in)</p></div>
                   ) : vehicleHistory.length === 0 ? (
-                    <div className="text-center py-6 text-xs text-muted-foreground">
-                      <FileText className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                      <p>Este vehículo no tiene servicios previos</p>
-                    </div>
+                    <div className="text-center py-6 text-xs text-muted-foreground"><FileText className="w-10 h-10 mx-auto mb-2 opacity-30" /><p>Sin servicios previos</p></div>
                   ) : (
                     <div className="space-y-2">
                       <p className="text-xs text-muted-foreground">{vehicleHistory.length} servicio(s) previo(s)</p>
                       {vehicleHistory.map(h => {
-                        const hIsInc = h.service_type === 'Incidencia';
-                        const hStatusMap = hIsInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
-                        const hst = hStatusMap[h.status] || hStatusMap.pendiente;
+                        const hIsInc = INCIDENCIA_TYPES.has(h.service_type);
+                        const hMap = hIsInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
+                        const hst = hMap[h.status] || hMap.pendiente;
                         return (
                           <div key={h.id} className="border rounded-md p-2.5 text-xs space-y-1.5">
                             <div className="flex items-center justify-between">
                               <span className="font-semibold flex items-center gap-1">
-                                {hIsInc && <AlertTriangle className="w-3 h-3 text-amber-500" />}
-                                {h.service_type}
+                                {hIsInc && <AlertTriangle className="w-3 h-3 text-amber-500" />}{h.service_type}
                               </span>
                               <Badge className={cn("text-[10px] px-1.5 py-0", hst.color)}>{hst.label}</Badge>
                             </div>
@@ -746,20 +799,15 @@ const DealershipReservas = () => {
                               {!hIsInc && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{h.reservation_time?.slice(0, 5)}</span>}
                               <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
                             </div>
-                            {h.dealerships && (
-                              <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>
-                            )}
+                            {h.dealerships && <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>}
                             {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">{hIsInc ? 'Falla:' : 'Notas:'}</span> {h.notes}</p>}
                             {h.service_notes && (
                               <div className="bg-green-50 border border-green-200 rounded p-1.5">
-                                <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo realizado:</p>
+                                <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo:</p>
                                 <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
-                                {h.completed_at && <p className="text-green-600 text-[10px] mt-1">Completado: {new Date(h.completed_at).toLocaleString('es-VE')}</p>}
                               </div>
                             )}
-                            {h.technical_report_url && (
-                              <TechnicalReportUploader reservationId={h.id} value={h.technical_report_url} onChange={() => {}} readonly />
-                            )}
+                            {h.technical_report_url && <TechnicalReportUploader reservationId={h.id} value={h.technical_report_url} onChange={() => {}} readonly />}
                           </div>
                         );
                       })}
@@ -775,28 +823,17 @@ const DealershipReservas = () => {
       {/* COMPLETE SERVICE DIALOG */}
       <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
         <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-display flex items-center gap-2">
-              <ClipboardCheck className="w-4 h-4" /> Completar Servicio
-            </DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ClipboardCheck className="w-4 h-4" /> Completar Servicio</DialogTitle></DialogHeader>
           {completingRes && (
             <div className="space-y-4 py-2">
               <div className="rounded-md border p-3 bg-muted/30 text-xs space-y-1">
                 <p><span className="font-semibold">Cliente:</span> {completingRes.clients?.full_name || completingRes.walkin_client_name || '-'}</p>
                 <p><span className="font-semibold">Vehículo:</span> {completingRes.vehicles ? `${completingRes.vehicles.vehicle_models?.brand} ${completingRes.vehicles.vehicle_models?.name} ${completingRes.vehicles.year}` : completingRes.walkin_plate || '-'}</p>
-                <p><span className="font-semibold">Placa:</span> {completingRes.vehicles?.plate || completingRes.walkin_plate || '-'}</p>
                 <p><span className="font-semibold">Servicio:</span> {completingRes.service_type}</p>
                 <p><span className="font-semibold">Km:</span> {completingRes.current_mileage.toLocaleString()}</p>
               </div>
-              <div className="space-y-2">
-                <Label>¿Qué se realizó en el servicio? *</Label>
-                <Textarea value={serviceNotes} onChange={e => setServiceNotes(e.target.value)} rows={4} placeholder="Describa los trabajos realizados, repuestos cambiados, observaciones..." />
-              </div>
-              <div className="space-y-2">
-                <Label>Informe Técnico</Label>
-                <TechnicalReportUploader reservationId={completingRes.id} value={technicalReportUrl} onChange={setTechnicalReportUrl} />
-              </div>
+              <div className="space-y-2"><Label>¿Qué se realizó? *</Label><Textarea value={serviceNotes} onChange={e => setServiceNotes(e.target.value)} rows={4} placeholder="Trabajos realizados, repuestos, observaciones..." /></div>
+              <div className="space-y-2"><Label>Informe Técnico</Label><TechnicalReportUploader reservationId={completingRes.id} value={technicalReportUrl} onChange={setTechnicalReportUrl} /></div>
             </div>
           )}
           <DialogFooter>
@@ -813,12 +850,26 @@ const DealershipReservas = () => {
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              {isIncidencia
-                ? <><AlertTriangle className="w-4 h-4 text-amber-500" /> Nueva Incidencia</>
-                : 'Nueva Reserva'
-              }
+              {isIncidencia ? <><AlertTriangle className="w-4 h-4 text-amber-500" /> Nueva Incidencia</> : 'Nueva Reserva'}
             </DialogTitle>
           </DialogHeader>
+
+          {/* Concesionario — siempre visible */}
+          <div className="flex items-center gap-2 bg-muted/50 rounded-md px-3 py-2 text-xs">
+            <Building2 className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            {showSelector ? (
+              <Select value={selectedDealership} onValueChange={setSelectedDealership}>
+                <SelectTrigger className="h-6 text-xs border-0 p-0 shadow-none bg-transparent flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            ) : (
+              <span className="font-medium">{dealershipName}</span>
+            )}
+          </div>
 
           {/* Tipo de servicio — siempre visible primero */}
           <div className="space-y-1">
@@ -826,20 +877,24 @@ const DealershipReservas = () => {
             <Select
               value={fService}
               onValueChange={v => {
-                const prev = fService;
+                const wasInc = INCIDENCIA_TYPES.has(fService);
+                const nowInc = INCIDENCIA_TYPES.has(v);
                 setFService(v);
                 setFNotes('');
-                if (v === 'Incidencia' && prev !== 'Incidencia') { resetNormalFields(); setFDate(hoy); }
-                if (v !== 'Incidencia' && prev === 'Incidencia') { resetIncidenciaFields(); setFDate(hoy); setFTime('09:00'); }
+                if (nowInc && !wasInc) { resetNormalFields(); setFDate(hoy); }
+                if (!nowInc && wasInc) { resetIncidenciaFields(); setFDate(hoy); setFTime('09:00'); }
               }}
             >
               <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar tipo..." /></SelectTrigger>
               <SelectContent>
-                {serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
-                <SelectSeparator />
-                <SelectItem value="Incidencia">
-                  <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> Incidencia / Falla</span>
-                </SelectItem>
+                {serviceTypes.map(s => (
+                  <SelectItem key={s.id} value={s.name}>
+                    <span className="flex items-center gap-1.5">
+                      {INCIDENCIA_TYPES.has(s.name) && <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+                      {s.name}
+                    </span>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -849,14 +904,13 @@ const DealershipReservas = () => {
           {/* FORMA INCIDENCIA */}
           {isIncidencia && (
             <div className="space-y-3">
-              {/* Cliente */}
               <div className="space-y-1" ref={clientSearchRef}>
                 <Label className="text-xs">Cliente</Label>
                 <div className="relative">
                   <div className="flex items-center gap-1">
                     <Input
                       value={fClientSearch}
-                      onChange={e => { setFClientSearch(e.target.value); if (fClientId) clearClient(); }}
+                      onChange={e => { setFClientSearch(e.target.value); if (fClientId) { setFClientId(''); setFClientName(''); } }}
                       placeholder="Buscar por nombre..."
                       className="h-8 text-xs"
                       disabled={!!fClientId}
@@ -870,26 +924,19 @@ const DealershipReservas = () => {
                   {fClientDropdown && fClientResults.length > 0 && (
                     <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-48 overflow-y-auto">
                       {fClientResults.map(c => (
-                        <div key={c.id} className="px-3 py-2 text-xs cursor-pointer hover:bg-accent" onMouseDown={() => selectClient(c)}>
-                          {c.full_name}
-                        </div>
+                        <div key={c.id} className="px-3 py-2 text-xs cursor-pointer hover:bg-accent" onMouseDown={() => selectClient(c)}>{c.full_name}</div>
                       ))}
                     </div>
                   )}
                 </div>
-                {fClientId && (
-                  <p className="text-[10px] text-green-700 flex items-center gap-1 mt-0.5">
-                    <User className="w-3 h-3" /> {fClientName} seleccionado
-                  </p>
-                )}
+                {fClientId && <p className="text-[10px] text-green-700 flex items-center gap-1 mt-0.5"><User className="w-3 h-3" /> {fClientName} seleccionado</p>}
               </div>
 
-              {/* Vehículo */}
               {fClientId && (
                 <div className="space-y-1">
                   <Label className="text-xs">Vehículo</Label>
                   {fIncVehicles.length === 0 ? (
-                    <p className="text-[10px] text-muted-foreground">Este cliente no tiene vehículos registrados</p>
+                    <p className="text-[10px] text-muted-foreground">Sin vehículos registrados</p>
                   ) : (
                     <Select value={fIncVehicleId} onValueChange={setFIncVehicleId}>
                       <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vehículo" /></SelectTrigger>
@@ -905,25 +952,18 @@ const DealershipReservas = () => {
                 </div>
               )}
 
-              {/* Fecha */}
               <div className="space-y-1">
                 <Label className="text-xs">Fecha del reporte *</Label>
                 <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" />
               </div>
-
-              {/* Descripción */}
               <div className="space-y-1">
                 <Label className="text-xs">Descripción de la falla *</Label>
                 <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={4} placeholder="Describa la falla, desperfecto o problema observado..." className="text-xs resize-none" />
               </div>
-
-              {/* Kilometraje */}
               <div className="space-y-1">
                 <Label className="text-xs">Kilometraje actual</Label>
                 <Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} placeholder="Ej: 25000" className="h-8 text-xs" />
               </div>
-
-              {/* Archivos */}
               <div className="space-y-1">
                 <Label className="text-xs">Fotos / Videos</Label>
                 <TechnicalReportUploader maxSizeMB={100} value={fIncMediaUrls} onChange={setFIncMediaUrls} />
@@ -934,48 +974,126 @@ const DealershipReservas = () => {
           {/* FORMA RESERVA NORMAL */}
           {!isIncidencia && (
             <>
-              <div className="space-y-3">
-                <Label className="text-xs font-semibold">Buscar por placa</Label>
-                <div className="flex gap-2">
-                  <Input value={plateSearch} onChange={e => { setPlateSearch(e.target.value.toUpperCase()); setPlateSearched(false); setPlateResult(null); }} placeholder="Ej: ABC123" className="h-8 text-xs uppercase" onKeyDown={e => e.key === 'Enter' && handlePlateSearch()} />
-                  <Button size="sm" variant="outline" onClick={handlePlateSearch} disabled={searchingPlate || !plateSearch.trim()}>
-                    <Search className="w-3.5 h-3.5 mr-1" /> Buscar
-                  </Button>
-                </div>
-                {plateSearched && (
-                  <div className={cn("rounded-md border p-3", plateResult ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200")}>
-                    {plateResult ? (
-                      <div className="flex items-start gap-2">
-                        <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
-                        <div className="text-xs space-y-1 flex-1 min-w-0">
-                          <p className="font-semibold text-green-800">Vehículo encontrado</p>
-                          <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span>{plateResult.color && <span className="text-muted-foreground">· {plateResult.color}</span>}</div>
-                          <div className="flex items-center gap-2"><User className="w-3 h-3" /><span>{plateResult.clients?.full_name}</span>{plateResult.clients?.cedula && <span className="text-muted-foreground">· {plateResult.clients.cedula}</span>}</div>
-                          <div className="pt-1"><WarrantyChip vehicleId={plateResult.id} /></div>
-                        </div>
+              {/* Cliente: tabs Placa / Nombre */}
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold">Buscar cliente</Label>
+                <Tabs value={searchMode} onValueChange={v => { setSearchMode(v as 'placa' | 'nombre'); if (v === 'placa') resetNameSearch(); else { setPlateSearch(''); setPlateResult(null); setPlateSearched(false); } }}>
+                  <TabsList className="h-7 text-xs">
+                    <TabsTrigger value="placa" className="text-xs h-6 px-3">Por placa</TabsTrigger>
+                    <TabsTrigger value="nombre" className="text-xs h-6 px-3">Por nombre</TabsTrigger>
+                  </TabsList>
+
+                  {/* PLACA */}
+                  <TabsContent value="placa" className="mt-2 space-y-2">
+                    <div className="flex gap-2">
+                      <Input value={plateSearch} onChange={e => { setPlateSearch(e.target.value.toUpperCase()); setPlateSearched(false); setPlateResult(null); }} placeholder="Ej: ABC123" className="h-8 text-xs uppercase" onKeyDown={e => e.key === 'Enter' && handlePlateSearch()} />
+                      <Button size="sm" variant="outline" onClick={handlePlateSearch} disabled={searchingPlate || !plateSearch.trim()}>
+                        <Search className="w-3.5 h-3.5 mr-1" /> Buscar
+                      </Button>
+                    </div>
+                    {plateSearched && (
+                      <div className={cn("rounded-md border p-3", plateResult ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200")}>
+                        {plateResult ? (
+                          <div className="flex items-start gap-2">
+                            <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+                            <div className="text-xs space-y-1 flex-1 min-w-0">
+                              <p className="font-semibold text-green-800">Vehículo encontrado</p>
+                              <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span>{plateResult.color && <span className="text-muted-foreground">· {plateResult.color}</span>}</div>
+                              <div className="flex items-center gap-2"><User className="w-3 h-3" /><span>{plateResult.clients?.full_name}</span>{plateResult.clients?.cedula && <span className="text-muted-foreground">· {plateResult.clients.cedula}</span>}</div>
+                              <div className="pt-1"><WarrantyChip vehicleId={plateResult.id} /></div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-start gap-2">
+                            <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                            <div className="text-xs">
+                              <p className="font-semibold text-amber-800">Placa no encontrada</p>
+                              <p className="text-amber-700">Ingrese los datos del cliente manualmente abajo.</p>
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                        <div className="text-xs">
-                          <p className="font-semibold text-amber-800">Placa no encontrada</p>
-                          <p className="text-amber-700">Puede crear la reserva ingresando los datos del cliente manualmente.</p>
+                    )}
+                    {plateSearched && !plateResult && (
+                      <div className="space-y-2 pt-1">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1"><Label className="text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-8 text-xs" /></div>
+                          <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412..." className="h-8 text-xs" /></div>
                         </div>
                       </div>
                     )}
-                  </div>
-                )}
+                  </TabsContent>
+
+                  {/* NOMBRE */}
+                  <TabsContent value="nombre" className="mt-2 space-y-2" ref={normalNameRef}>
+                    <div className="relative">
+                      <div className="flex items-center gap-1">
+                        <Input
+                          value={normalNameSearch}
+                          onChange={e => { setNormalNameSearch(e.target.value); if (normalNameClientId) clearNormalNameClient(); }}
+                          placeholder="Escriba el nombre del cliente..."
+                          className="h-8 text-xs"
+                          disabled={!!normalNameClientId}
+                        />
+                        {normalNameClientId && (
+                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 shrink-0" onClick={clearNormalNameClient}>
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                      {normalNameDropdown && normalNameResults.length > 0 && (
+                        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-48 overflow-y-auto">
+                          {normalNameResults.map(c => (
+                            <div
+                              key={c.id}
+                              className="px-3 py-2 text-xs cursor-pointer hover:bg-accent"
+                              onMouseDown={() => {
+                                setNormalNameClientId(c.id);
+                                setNormalNameClientName(c.full_name);
+                                setNormalNameSearch(c.full_name);
+                                setNormalNameDropdown(false);
+                                setNormalNameResults([]);
+                              }}
+                            >{c.full_name}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    {normalNameClientId && (
+                      <p className="text-[10px] text-green-700 flex items-center gap-1"><User className="w-3 h-3" /> {normalNameClientName} seleccionado</p>
+                    )}
+                    {normalNameClientId && normalNameVehicles.length > 0 && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Vehículo del cliente</Label>
+                        <Select value={normalNameVehicleId} onValueChange={handleNormalNameVehicleSelect} disabled={loadingNormalVehicle}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vehículo (opcional)" /></SelectTrigger>
+                          <SelectContent>
+                            {normalNameVehicles.map(v => (
+                              <SelectItem key={v.id} value={v.id} className="text-xs">
+                                {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}{v.plate ? ` · ${v.plate}` : ''}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {normalNameClientId && normalNameVehicles.length === 0 && (
+                      <p className="text-[10px] text-muted-foreground">Este cliente no tiene vehículos registrados</p>
+                    )}
+                    {plateResult && normalNameVehicleId && (
+                      <div className="rounded-md bg-green-50 border border-green-200 p-2.5 text-xs space-y-1">
+                        <p className="font-semibold text-green-800 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Vehículo seleccionado</p>
+                        <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span></div>
+                        <WarrantyChip vehicleId={plateResult.id} />
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
               </div>
+
               <Separator />
-              {plateSearched && !plateResult && (
-                <div className="space-y-3">
-                  <Label className="text-xs font-semibold">Datos del cliente</Label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1"><Label className="text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-8 text-xs" /></div>
-                    <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412 1234567" className="h-8 text-xs" /></div>
-                  </div>
-                </div>
-              )}
+
+              {/* Detalles de la cita */}
               <div className="space-y-3">
                 <Label className="text-xs font-semibold">Detalles de la cita</Label>
                 <div className="grid grid-cols-2 gap-3">
@@ -985,7 +1103,7 @@ const DealershipReservas = () => {
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Descripción / Motivo</Label>
-                  <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." />
+                  <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa el tipo de servicio solicitado..." />
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Notas</Label>
