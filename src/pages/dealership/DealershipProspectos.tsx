@@ -35,7 +35,7 @@ import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
-type ColKey = 'nombre' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'estado' | 'fecha';
+type ColKey = 'nombre' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'estado' | 'fecha';
 const COL_LABELS: Record<ColKey, string> = {
   nombre: 'Nombre',
   telefono: 'Teléfono',
@@ -43,6 +43,7 @@ const COL_LABELS: Record<ColKey, string> = {
   marca: 'Marca',
   modelo: 'Modelo',
   fuente: 'Tipo de Contacto',
+  evento: 'Evento',
   vendedor: 'Vendedor',
   estadovzla: 'Estado Vzla',
   tipopersona: 'Tipo Persona',
@@ -812,68 +813,79 @@ const DealershipProspectos = () => {
         {/* ── Filtros ── */}
         <div className="space-y-2">
           {/* Fila principal */}
-          <div className="flex flex-wrap gap-1.5 items-center">
+          <div className="flex flex-wrap gap-1.5 items-end">
             <div className="relative min-w-[160px] flex-1 max-w-xs">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => { setProsSearch(e.target.value); setCurrentPage(1); }} />
             </div>
-            <Select value={prosStatusFilter} onValueChange={v => { setProsStatusFilter(v); setCurrentPage(1); }}>
-              <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los estados</SelectItem>
-                {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={prosSourceFilter} onValueChange={v => { setProsSourceFilter(v); setEventNameFilter('todos'); setCurrentPage(1); }}>
-              <SelectTrigger className="h-8 text-xs w-[120px] shrink-0"><SelectValue placeholder="Canal" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los canales</SelectItem>
-                {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {(prosSourceFilter === 'evento' || eventNameFilter !== 'todos') && (
-              <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
-                <SelectTrigger className="w-[180px] h-8 text-xs shrink-0"><SelectValue placeholder="Nombre de evento" /></SelectTrigger>
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Estado</span>
+              <Select value={prosStatusFilter} onValueChange={v => { setProsStatusFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[130px]"><SelectValue placeholder="Todos" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="todos">Todos los eventos</SelectItem>
-                  {[...new Set(prospects.filter(p => p.event_name).map(p => p.event_name!))].map(en => (
-                    <SelectItem key={en} value={en}>{en}</SelectItem>
-                  ))}
+                  <SelectItem value="todos">Todos los estados</SelectItem>
+                  {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Canal</span>
+              <Select value={prosSourceFilter} onValueChange={v => { setProsSourceFilter(v); setEventNameFilter('todos'); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[120px]"><SelectValue placeholder="Todos" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los canales</SelectItem>
+                  {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {(prosSourceFilter === 'evento' || eventNameFilter !== 'todos') && (
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Evento</span>
+                <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="w-[180px] h-8 text-xs"><SelectValue placeholder="Todos los eventos" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos los eventos</SelectItem>
+                    {[...new Set(prospects.filter(p => p.event_name).map(p => p.event_name!))].map(en => (
+                      <SelectItem key={en} value={en}>{en}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
-
-            <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className={cn("h-8 text-xs shrink-0 gap-1.5", (prosFechaDesde || prosFechaHasta) && "border-primary text-primary")}>
-                  <CalendarDays className="w-3.5 h-3.5" />
-                  {prosFechaDesde || prosFechaHasta
-                    ? `${prosFechaDesde ? new Date(prosFechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'} – ${prosFechaHasta ? new Date(prosFechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'}`
-                    : 'Fecha'}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-72 p-3 space-y-3" align="start">
-                <div className="flex gap-1.5">
-                  <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyThisMonth}>Este mes</Button>
-                  <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyLastMonth}>Mes pasado</Button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Desde</span>
-                    <Input type="date" value={prosFechaDesde} onChange={e => { setProsFechaDesde(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[11px] text-muted-foreground">Hasta</span>
-                    <Input type="date" value={prosFechaHasta} onChange={e => { setProsFechaHasta(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
-                  </div>
-                </div>
-                {(prosFechaDesde || prosFechaHasta) && (
-                  <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setCurrentPage(1); }}>
-                    Quitar rango
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Registro</span>
+              <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="sm" className={cn("h-8 text-xs gap-1.5", (prosFechaDesde || prosFechaHasta) && "border-primary text-primary")}>
+                    <CalendarDays className="w-3.5 h-3.5" />
+                    {prosFechaDesde || prosFechaHasta
+                      ? `${prosFechaDesde ? new Date(prosFechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'} – ${prosFechaHasta ? new Date(prosFechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'}`
+                      : 'Fecha'}
                   </Button>
-                )}
-              </PopoverContent>
-            </Popover>
+                </PopoverTrigger>
+                <PopoverContent className="w-72 p-3 space-y-3" align="start">
+                  <div className="flex gap-1.5">
+                    <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyThisMonth}>Este mes</Button>
+                    <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyLastMonth}>Mes pasado</Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <span className="text-[11px] text-muted-foreground">Desde</span>
+                      <Input type="date" value={prosFechaDesde} onChange={e => { setProsFechaDesde(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[11px] text-muted-foreground">Hasta</span>
+                      <Input type="date" value={prosFechaHasta} onChange={e => { setProsFechaHasta(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
+                    </div>
+                  </div>
+                  {(prosFechaDesde || prosFechaHasta) && (
+                    <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setCurrentPage(1); }}>
+                      Quitar rango
+                    </Button>
+                  )}
+                </PopoverContent>
+              </Popover>
+            </div>
             <Button
               variant="outline" size="sm"
               className={cn("h-8 text-xs gap-1.5 shrink-0", showAdvancedFilters && "border-primary text-primary")}
@@ -916,43 +928,58 @@ const DealershipProspectos = () => {
           </div>
           {/* Filtros avanzados (colapsable) */}
           {showAdvancedFilters && (
-            <div className="flex flex-wrap gap-1.5 items-center pt-1 border-t border-dashed border-border">
-              <Select value={prosEstadoVzlaFilter} onValueChange={v => { setProsEstadoVzlaFilter(v); setCurrentPage(1); }}>
-                <SelectTrigger className="h-8 text-xs w-[140px] shrink-0"><SelectValue placeholder="Estado (Vzla)" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Estado Venezuela</SelectItem>
-                  {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={prosTestDriveFilter} onValueChange={v => { setProsTestDriveFilter(v); setCurrentPage(1); }}>
-                <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Test Drive" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Test Drive</SelectItem>
-                  <SelectItem value="si">Sí</SelectItem>
-                  <SelectItem value="no">No</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={prosPersonTypeFilter} onValueChange={v => { setProsPersonTypeFilter(v); setCurrentPage(1); }}>
-                <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Tipo persona" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Tipo persona</SelectItem>
-                  {PERSON_TYPES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={prosGenderFilter} onValueChange={v => { setProsGenderFilter(v); setCurrentPage(1); }}>
-                <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Género" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Género</SelectItem>
-                  {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Select value={prosAgeRangeFilter} onValueChange={v => { setProsAgeRangeFilter(v); setCurrentPage(1); }}>
-                <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Edad" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Edad</SelectItem>
-                  {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+            <div className="flex flex-wrap gap-1.5 items-end pt-1 border-t border-dashed border-border">
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Estado Venezuela</span>
+                <Select value={prosEstadoVzlaFilter} onValueChange={v => { setProsEstadoVzlaFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="h-8 text-xs w-[140px]"><SelectValue placeholder="Todos" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos los estados</SelectItem>
+                    {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Test Drive</span>
+                <Select value={prosTestDriveFilter} onValueChange={v => { setProsTestDriveFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="h-8 text-xs w-[110px]"><SelectValue placeholder="Todos" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos</SelectItem>
+                    <SelectItem value="si">Sí</SelectItem>
+                    <SelectItem value="no">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Tipo Persona</span>
+                <Select value={prosPersonTypeFilter} onValueChange={v => { setProsPersonTypeFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="h-8 text-xs w-[130px]"><SelectValue placeholder="Todos" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos</SelectItem>
+                    {PERSON_TYPES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Género</span>
+                <Select value={prosGenderFilter} onValueChange={v => { setProsGenderFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="h-8 text-xs w-[110px]"><SelectValue placeholder="Todos" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos</SelectItem>
+                    {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Edad</span>
+                <Select value={prosAgeRangeFilter} onValueChange={v => { setProsAgeRangeFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="h-8 text-xs w-[110px]"><SelectValue placeholder="Todos" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos</SelectItem>
+                    {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           )}
         </div>
@@ -994,6 +1021,7 @@ const DealershipProspectos = () => {
                   {visibleCols.has('modelo') && <TableHead>Modelo</TableHead>}
                   {!isSalesperson && !isVendedor && visibleCols.has('vendedor') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('salesperson')}>Vendedor<SortIcon field="salesperson" /></TableHead>}
                   {visibleCols.has('fuente') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>}
+                  {(visibleCols.has('evento') || eventNameFilter !== 'todos') && <TableHead>Evento</TableHead>}
                   {visibleCols.has('estado') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>}
                   {visibleCols.has('testdrive') && <TableHead className="text-center">TD</TableHead>}
                   {visibleCols.has('tipopersona') && <TableHead>Tipo</TableHead>}
@@ -1024,14 +1052,14 @@ const DealershipProspectos = () => {
                       {!isSalesperson && !isVendedor && visibleCols.has('vendedor') && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
                       {visibleCols.has('fuente') && (
                         <TableCell>
-                          <div className="flex flex-col gap-0.5">
-                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 w-fit capitalize">
-                              {src?.label || p.source}
-                            </Badge>
-                            {p.source === 'evento' && p.event_name && (
-                              <span className="text-[10px] text-muted-foreground">{p.event_name}</span>
-                            )}
-                          </div>
+                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 w-fit capitalize">
+                            {src?.label || p.source}
+                          </Badge>
+                        </TableCell>
+                      )}
+                      {(visibleCols.has('evento') || eventNameFilter !== 'todos') && (
+                        <TableCell className="max-w-[140px]">
+                          <span className="text-[11px] text-muted-foreground truncate block">{p.event_name || '-'}</span>
                         </TableCell>
                       )}
                       {visibleCols.has('estado') && (
