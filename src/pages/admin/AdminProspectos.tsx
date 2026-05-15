@@ -135,8 +135,8 @@ const AdminProspectos = () => {
   const [personTypeFilter, setPersonTypeFilter] = useState('todos');
   const [genderFilter, setGenderFilter] = useState('todos');
   const [ageRangeFilter, setAgeRangeFilter] = useState('todos');
-  const [fechaDesde, setFechaDesde] = useState('');
-  const [fechaHasta, setFechaHasta] = useState('');
+  const [fechaDesde, setFechaDesde] = useState(() => searchParams.get('fecha_desde') || '');
+  const [fechaHasta, setFechaHasta] = useState(() => searchParams.get('fecha_hasta') || '');
   const [eventNameFilter, setEventNameFilter] = useState(() => searchParams.get('event_name') || 'todos');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 

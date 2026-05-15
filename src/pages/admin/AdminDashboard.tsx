@@ -538,7 +538,7 @@ const AdminDashboard = () => {
                   <div
                     key={sp.name}
                     className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
-                    onClick={() => navigate(`/admin/prospectos?salesperson=${encodeURIComponent(sp.name)}${rankingSource !== 'todos' ? `&source=${rankingSource}` : ''}${rankingDealership !== 'todos' ? `&dealership=${rankingDealership}` : ''}`)}
+                    onClick={() => navigate(`/admin/prospectos?salesperson=${encodeURIComponent(sp.name)}${rankingSource !== 'todos' ? `&source=${rankingSource}` : ''}${rankingDealership !== 'todos' ? `&dealership=${rankingDealership}` : ''}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
                     title={`Ver ${sp.total} prospectos de ${sp.name}`}
                   >
                     <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
@@ -700,7 +700,7 @@ const AdminDashboard = () => {
                 <div
                   key={ev.name}
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
-                  onClick={() => navigate(`/admin/prospectos?event_name=${encodeURIComponent(ev.name)}`)}
+                  onClick={() => navigate(`/admin/prospectos?event_name=${encodeURIComponent(ev.name)}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
                   title={`Ver ${ev.total} prospectos del evento`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
