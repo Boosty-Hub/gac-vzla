@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -341,37 +342,102 @@ const DealershipProspectos = () => {
 
   const BRANDS_LIST = ['GAC', 'DFSK', 'SHINERAY'];
 
-  const exportToXLSX = () => {
+  const exportToXLSX = async () => {
     if (prospects.length === 0) { toast.error('No hay prospectos para exportar'); return; }
-    const rows = prospects.map(p => {
-      const parts = (p.model_interest || '').split(' ');
-      const brand = (parts.length > 1 && BRANDS_LIST.includes(parts[0])) ? parts[0] : '';
-      const model = brand ? parts.slice(1).join(' ') : (p.model_interest || '');
-      return {
-        nombre: p.name,
-        telefono: p.phone || '',
-        email: p.email || '',
-        marca: brand,
-        modelo: model,
-        tipo_contacto: PROSPECT_SOURCES.find(s => s.value === p.source)?.label || p.source,
-        nombre_evento: p.source === 'evento' ? (p.event_name || '') : '',
-        vendedor: p.salesperson || '',
-        estado_vzla: p['Estado de Vnzla'] || '',
-        tipo_persona: p.person_type || '',
-        genero: p.gender || '',
-        rango_edad: p.age_range || '',
-        test_drive: p.test_drive ? 'si' : 'no',
-        estado: PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
-        notas: p.notes || '',
-        fecha: new Date(p.created_at).toLocaleDateString('es-VE'),
-      };
-    });
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:20},{wch:22},{wch:20},{wch:18},{wch:14},{wch:12},{wch:12},{wch:10},{wch:18},{wch:35},{wch:15}];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
-    XLSX.writeFile(wb, `prospectos_${new Date().toISOString().slice(0,10)}.xlsx`);
-    toast.success(`${rows.length} prospecto(s) exportados`);
+    try {
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'IMB Movilidad';
+      wb.created = new Date();
+
+      const ws = wb.addWorksheet('Prospectos', {
+        views: [{ state: 'frozen', xSplit: 0, ySplit: 1, activeCell: 'A2' }],
+      });
+
+      const COLS = [
+        { header: 'Nombre',              key: 'nombre',        width: 28 },
+        { header: 'Teléfono',            key: 'telefono',      width: 18 },
+        { header: 'Email',               key: 'email',         width: 30 },
+        { header: 'Marca',               key: 'marca',         width: 14 },
+        { header: 'Modelo de Interés',   key: 'modelo',        width: 28 },
+        { header: 'Tipo de Contacto',    key: 'tipo_contacto', width: 22 },
+        { header: 'Nombre del Evento',   key: 'nombre_evento', width: 25 },
+        { header: 'Vendedor',            key: 'vendedor',      width: 22 },
+        { header: 'Estado de Venezuela', key: 'estado_vzla',   width: 24 },
+        { header: 'Tipo de Persona',     key: 'tipo_persona',  width: 16 },
+        { header: 'Género',              key: 'genero',        width: 12 },
+        { header: 'Rango de Edad',       key: 'rango_edad',    width: 16 },
+        { header: 'Test Drive',          key: 'test_drive',    width: 12 },
+        { header: 'Estado',              key: 'estado',        width: 18 },
+        { header: 'Notas',               key: 'notas',         width: 45 },
+        { header: 'Fecha de Registro',   key: 'fecha',         width: 18 },
+      ];
+
+      ws.columns = COLS;
+
+      // Header row styling
+      const headerRow = ws.getRow(1);
+      headerRow.height = 24;
+      headerRow.eachCell(cell => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1B3A5F' } };
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        cell.border = {
+          top:    { style: 'thin',   color: { argb: 'FF1B3A5F' } },
+          left:   { style: 'thin',   color: { argb: 'FF1B3A5F' } },
+          bottom: { style: 'medium', color: { argb: 'FF2E6FD8' } },
+          right:  { style: 'thin',   color: { argb: 'FF1B3A5F' } },
+        };
+      });
+
+      // Data rows
+      prospects.forEach((p, idx) => {
+        const parts = (p.model_interest || '').split(' ');
+        const brand = (parts.length > 1 && BRANDS_LIST.includes(parts[0])) ? parts[0] : '';
+        const model = brand ? parts.slice(1).join(' ') : (p.model_interest || '');
+        const dataRow = ws.addRow({
+          nombre:        p.name,
+          telefono:      p.phone || '',
+          email:         p.email || '',
+          marca:         brand,
+          modelo:        model,
+          tipo_contacto: PROSPECT_SOURCES.find(s => s.value === p.source)?.label || p.source,
+          nombre_evento: p.source === 'evento' ? (p.event_name || '') : '',
+          vendedor:      p.salesperson || '',
+          estado_vzla:   p['Estado de Vnzla'] || '',
+          tipo_persona:  p.person_type || '',
+          genero:        p.gender || '',
+          rango_edad:    p.age_range || '',
+          test_drive:    p.test_drive ? 'Sí' : 'No',
+          estado:        PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
+          notas:         p.notes || '',
+          fecha:         new Date(p.created_at).toLocaleDateString('es-VE'),
+        });
+        dataRow.height = 18;
+        const bg = idx % 2 === 0 ? 'FFFFFFFF' : 'FFF0F4FA';
+        dataRow.eachCell({ includeEmpty: true }, cell => {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bg } };
+          cell.font = { size: 10, name: 'Calibri' };
+          cell.alignment = { vertical: 'middle' };
+        });
+      });
+
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: COLS.length } };
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `prospectos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`${prospects.length} prospecto(s) exportados`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al exportar');
+    }
   };
 
   const downloadTemplate = () => {
