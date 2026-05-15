@@ -25,7 +25,6 @@ import {
   LogOut,
   Users,
   LayoutDashboard,
-  AlertTriangle,
 } from 'lucide-react';
 import imbLogo from '@/assets/imb-logo.png';
 
