@@ -856,7 +856,7 @@ const DealershipReservas = () => {
           {/* Concesionario — siempre visible como dropdown */}
           <div className="space-y-1">
             <Label className="text-xs font-semibold">Concesionario</Label>
-            <Select value={selectedDealership} onValueChange={showSelector ? setSelectedDealership : undefined} disabled={!showSelector}>
+            <Select value={selectedDealership} onValueChange={setSelectedDealership}>
               <SelectTrigger className="h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
