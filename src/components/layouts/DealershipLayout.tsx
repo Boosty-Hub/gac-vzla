@@ -45,7 +45,6 @@ const menuItems = [
     items: [
       { label: 'Reservas / Servicios', icon: CalendarDays, path: '/concesionario/reservas' },
       { label: 'Prospectos', icon: Users, path: '/concesionario/prospectos' },
-      { label: 'Incidencias', icon: AlertTriangle, path: '/concesionario/incidencias' },
     ],
   },
 ];
@@ -57,14 +56,14 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
 
   const isVendedor = role?.name?.toLowerCase() === 'vendedor';
 
-  // Vendedor sees Prospectos and Incidencias
+  // Vendedor sees Reservas and Prospectos
   const filteredMenuItems = isVendedor
-    ? menuItems.map(g => ({ ...g, items: g.items.filter(i => i.path === '/concesionario/prospectos' || i.path === '/concesionario/incidencias') })).filter(g => g.items.length > 0)
+    ? menuItems.map(g => ({ ...g, items: g.items.filter(i => i.path === '/concesionario/reservas' || i.path === '/concesionario/prospectos') })).filter(g => g.items.length > 0)
     : menuItems;
 
-  // Redirect vendedor from dashboard to prospectos
+  // Redirect vendedor from dashboard to reservas
   if (isVendedor && location.pathname === '/concesionario') {
-    return <Navigate to="/concesionario/prospectos" replace />;
+    return <Navigate to="/concesionario/reservas" replace />;
   }
 
   const handleSignOut = async () => {

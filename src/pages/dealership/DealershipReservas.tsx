@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,12 +6,12 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle } from 'lucide-react';
+import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
 import { cn } from '@/lib/utils';
@@ -84,12 +84,31 @@ interface HistoryRecord {
   dealerships: { name: string } | null;
 }
 
+interface ClientResult {
+  id: string;
+  full_name: string;
+}
+
+interface VehicleResult {
+  id: string;
+  plate: string | null;
+  year: number;
+  vehicle_models: { name: string; brand: string } | null;
+}
+
 const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
   confirmada: { label: 'Confirmada', color: 'bg-blue-100 text-blue-800' },
   en_proceso: { label: 'En Proceso', color: 'bg-purple-100 text-purple-800' },
   completada: { label: 'Completada', color: 'bg-green-100 text-green-800' },
   cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
+};
+
+const INCIDENCIA_STATUSES: Record<string, { label: string; color: string }> = {
+  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
+  agendada: { label: 'Agendada', color: 'bg-blue-100 text-blue-800' },
+  en_proceso: { label: 'En Proceso', color: 'bg-purple-100 text-purple-800' },
+  culminado: { label: 'Culminado', color: 'bg-green-100 text-green-800' },
 };
 
 const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
@@ -132,6 +151,8 @@ const DealershipReservas = () => {
   // Create dialog (initialized from localStorage to survive page refresh)
   const [createOpen, setCreateOpenRaw] = useState<boolean>(() => getDrLS().createOpen === true);
   const [saving, setSaving] = useState(false);
+
+  // Normal reservation form fields
   const [plateSearch, setPlateSearch] = useState<string>(() => getDrLS().plateSearch || '');
   const [plateResult, setPlateResult] = useState<PlateResult | null>(() => getDrLS().plateResult || null);
   const [plateSearched, setPlateSearched] = useState<boolean>(() => getDrLS().plateSearched === true);
@@ -145,6 +166,20 @@ const DealershipReservas = () => {
   const [fWalkinName, setFWalkinName] = useState<string>(() => getDrLS().fWalkinName || '');
   const [fWalkinPhone, setFWalkinPhone] = useState<string>(() => getDrLS().fWalkinPhone || '');
 
+  // Incidencia form fields
+  const [fClientSearch, setFClientSearch] = useState('');
+  const [fClientResults, setFClientResults] = useState<ClientResult[]>([]);
+  const [fClientId, setFClientId] = useState('');
+  const [fClientName, setFClientName] = useState('');
+  const [fClientDropdown, setFClientDropdown] = useState(false);
+  const [fIncVehicleId, setFIncVehicleId] = useState('');
+  const [fIncVehicles, setFIncVehicles] = useState<VehicleResult[]>([]);
+  const [fIncMediaUrls, setFIncMediaUrls] = useState<string | null>(null);
+  const clientSearchRef = useRef<HTMLDivElement>(null);
+
+  const hoy = new Date().toISOString().split('T')[0];
+  const isIncidencia = fService === 'Incidencia';
+
   const fetchReservations = async () => {
     if (!selectedDealership) return;
     setLoading(true);
@@ -154,7 +189,6 @@ const DealershipReservas = () => {
       .eq('dealership_id', selectedDealership)
       .order('reservation_date', { ascending: false })
       .order('reservation_time', { ascending: false })
-      .neq('service_type', 'Incidencia')
       .limit(200);
     setReservations((data || []) as Reservation[]);
     setLoading(false);
@@ -177,7 +211,47 @@ const DealershipReservas = () => {
     })();
   }, []);
 
-  const hoy = new Date().toISOString().split('T')[0];
+  // Client name autocomplete for incidencia form
+  useEffect(() => {
+    if (!fClientSearch.trim() || fClientId) {
+      setFClientResults([]);
+      setFClientDropdown(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('clients')
+        .select('id, full_name')
+        .ilike('full_name', `%${fClientSearch.trim()}%`)
+        .limit(8);
+      setFClientResults((data || []) as ClientResult[]);
+      setFClientDropdown(true);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [fClientSearch, fClientId]);
+
+  // Fetch vehicles when client selected in incidencia form
+  useEffect(() => {
+    if (!fClientId) { setFIncVehicles([]); setFIncVehicleId(''); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('vehicles')
+        .select('id, plate, year, vehicle_models(name, brand)')
+        .eq('client_id', fClientId);
+      setFIncVehicles((data || []) as unknown as VehicleResult[]);
+    })();
+  }, [fClientId]);
+
+  // Close client dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (clientSearchRef.current && !clientSearchRef.current.contains(e.target as Node)) {
+        setFClientDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Wrapper clears LS when dialog closes
   const setCreateOpen = (open: boolean) => {
@@ -185,7 +259,7 @@ const DealershipReservas = () => {
     if (!open) { try { localStorage.removeItem(DR_LS_KEY); } catch {} }
   };
 
-  // Persist create-form to localStorage so a page refresh restores the dialog
+  // Persist create-form to localStorage
   useEffect(() => {
     if (!createOpen) return;
     try {
@@ -195,7 +269,9 @@ const DealershipReservas = () => {
 
   const filteredReservations = reservations.filter(r => {
     if (resStatusFilter !== 'todos' && r.status !== resStatusFilter) return false;
-    if (resServiceFilter !== 'todos' && r.service_type !== resServiceFilter) return false;
+    if (resServiceFilter !== 'todos') {
+      if (resServiceFilter === 'Incidencia' ? r.service_type !== 'Incidencia' : r.service_type !== resServiceFilter) return false;
+    }
     if (resFechaDesde && r.reservation_date < resFechaDesde) return false;
     if (resFechaHasta && r.reservation_date > resFechaHasta) return false;
     if (resSearch.trim()) {
@@ -219,15 +295,62 @@ const DealershipReservas = () => {
     setSearchingPlate(false);
   };
 
-  const openCreate = () => {
+  const resetIncidenciaFields = () => {
+    setFClientSearch(''); setFClientResults([]); setFClientId(''); setFClientName('');
+    setFClientDropdown(false); setFIncVehicleId(''); setFIncVehicles([]); setFIncMediaUrls(null);
+  };
+
+  const resetNormalFields = () => {
     setPlateSearch(''); setPlateResult(null); setPlateSearched(false);
-    setFDate(hoy); setFTime('09:00'); setFService(''); setFMileage('0'); setFNotes(''); setFObs('');
     setFWalkinName(''); setFWalkinPhone('');
+  };
+
+  const openCreate = () => {
+    resetNormalFields();
+    resetIncidenciaFields();
+    setFDate(hoy); setFTime('09:00'); setFService(''); setFMileage('0'); setFNotes(''); setFObs('');
     setCreateTechReportUrl(null);
     setCreateOpen(true);
   };
 
+  const selectClient = (client: ClientResult) => {
+    setFClientId(client.id);
+    setFClientName(client.full_name);
+    setFClientSearch(client.full_name);
+    setFClientDropdown(false);
+    setFClientResults([]);
+  };
+
+  const clearClient = () => {
+    setFClientId(''); setFClientName(''); setFClientSearch('');
+    setFClientResults([]); setFClientDropdown(false);
+    setFIncVehicleId(''); setFIncVehicles([]);
+  };
+
   const handleSave = async () => {
+    if (isIncidencia) {
+      if (!fDate) { toast.error('La fecha es requerida'); return; }
+      if (!fNotes.trim()) { toast.error('La descripción de la falla es requerida'); return; }
+      setSaving(true);
+      const payload = {
+        dealership_id: selectedDealership,
+        client_id: fClientId || null,
+        vehicle_id: fIncVehicleId || null,
+        reservation_date: fDate,
+        reservation_time: '08:00',
+        service_type: 'Incidencia',
+        notes: fNotes.trim(),
+        current_mileage: parseInt(fMileage) || 0,
+        status: 'pendiente',
+        technical_report_url: fIncMediaUrls || null,
+      };
+      const { error } = await supabase.from('reservations').insert(payload);
+      if (error) { toast.error('Error al crear incidencia'); console.error(error); }
+      else { toast.success('Incidencia creada exitosamente'); setCreateOpen(false); fetchReservations(); }
+      setSaving(false);
+      return;
+    }
+
     if (!fDate || !fTime || !fService) { toast.error('Fecha, hora y servicio son requeridos'); return; }
     if (!plateResult && !fWalkinName.trim()) { toast.error('Ingrese el nombre del cliente'); return; }
     setSaving(true);
@@ -262,7 +385,6 @@ const DealershipReservas = () => {
 
     if (r.vehicle_id) {
       setLoadingDetail(true);
-      // Fetch full vehicle info
       const { data: veh } = await supabase
         .from('vehicles')
         .select('id, plate, year, color, vin, mileage, warranty_active, vehicle_models(name, brand), clients(full_name, cedula, phone)')
@@ -270,7 +392,6 @@ const DealershipReservas = () => {
         .single();
       if (veh) setVehicleDetail(veh as unknown as VehicleDetail);
 
-      // Fetch all service history for this vehicle across ALL dealerships
       const { data: history } = await supabase
         .from('reservations')
         .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name)')
@@ -341,6 +462,9 @@ const DealershipReservas = () => {
             <SelectContent>
               <SelectItem value="todos">Todos los estados</SelectItem>
               {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+              <SelectSeparator />
+              <SelectItem value="agendada">Agendada</SelectItem>
+              <SelectItem value="culminado">Culminado</SelectItem>
             </SelectContent>
           </Select>
           <Select value={resServiceFilter} onValueChange={setResServiceFilter}>
@@ -348,6 +472,8 @@ const DealershipReservas = () => {
             <SelectContent>
               <SelectItem value="todos">Todos los servicios</SelectItem>
               {serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+              <SelectSeparator />
+              <SelectItem value="Incidencia">Incidencia / Falla</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -399,11 +525,13 @@ const DealershipReservas = () => {
                   ? `${r.vehicles.vehicle_models?.brand || ''} ${r.vehicles.vehicle_models?.name || ''} ${r.vehicles.year}`
                   : r.walkin_plate || '-';
                 const plate = r.vehicles?.plate || r.walkin_plate || '-';
-                const st = STATUS_CONFIG[r.status] || STATUS_CONFIG.pendiente;
+                const isInc = r.service_type === 'Incidencia';
+                const statusMap = isInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
+                const st = statusMap[r.status] || (isInc ? INCIDENCIA_STATUSES.pendiente : STATUS_CONFIG.pendiente);
                 return (
                   <TableRow key={r.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(r)}>
                     <TableCell className="font-medium">{r.reservation_date}</TableCell>
-                    <TableCell>{r.reservation_time?.slice(0, 5)}</TableCell>
+                    <TableCell>{isInc ? <span className="text-muted-foreground">—</span> : r.reservation_time?.slice(0, 5)}</TableCell>
                     <TableCell>
                       <div>{clientName}</div>
                       {!r.clients && r.walkin_client_phone && <span className="text-[10px] text-muted-foreground">{r.walkin_client_phone}</span>}
@@ -412,14 +540,19 @@ const DealershipReservas = () => {
                       <div>{vehicleInfo}</div>
                       <span className="text-[10px] text-muted-foreground">{plate}</span>
                     </TableCell>
-                    <TableCell>{r.service_type}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {isInc && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
+                        <span>{r.service_type}</span>
+                      </div>
+                    </TableCell>
                     <TableCell>{r.current_mileage.toLocaleString()}</TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
                         <Select
                           value={r.status}
                           onValueChange={val => {
-                            if (val === 'completada') { openComplete(r); }
+                            if (!isInc && val === 'completada') { openComplete(r); }
                             else { updateStatus(r.id, val); }
                           }}
                         >
@@ -427,35 +560,24 @@ const DealershipReservas = () => {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {Object.entries(STATUS_CONFIG).map(([k, v]) => (
+                            {Object.entries(statusMap).map(([k, v]) => (
                               <SelectItem key={k} value={k} className="text-xs">{v.label}</SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                        {r.status === 'confirmada' && (r.clients?.phone || r.walkin_client_phone) && (() => {
+                        {!isInc && r.status === 'confirmada' && (r.clients?.phone || r.walkin_client_phone) && (() => {
                           const phone = r.clients?.phone || r.walkin_client_phone || '';
                           const name = r.clients?.full_name || r.walkin_client_name || 'Cliente';
                           const dealerName = dealerships.find(d => d.id === selectedDealership)?.name;
                           const waUrl = buildWhatsAppReservationUrl({
-                            phone,
-                            clientName: name,
-                            date: r.reservation_date,
-                            time: r.reservation_time,
-                            serviceType: r.service_type,
-                            vehicleBrand: r.vehicles?.vehicle_models?.brand,
-                            vehicleModel: r.vehicles?.vehicle_models?.name,
-                            vehicleYear: r.vehicles?.year,
-                            vehiclePlate: r.vehicles?.plate || r.walkin_plate || undefined,
-                            dealershipName: dealerName,
-                            mileage: r.current_mileage,
-                            notes: r.notes || undefined,
+                            phone, clientName: name, date: r.reservation_date, time: r.reservation_time, serviceType: r.service_type,
+                            vehicleBrand: r.vehicles?.vehicle_models?.brand, vehicleModel: r.vehicles?.vehicle_models?.name,
+                            vehicleYear: r.vehicles?.year, vehiclePlate: r.vehicles?.plate || r.walkin_plate || undefined,
+                            dealershipName: dealerName, mileage: r.current_mileage, notes: r.notes || undefined,
                           });
                           return waUrl ? (
                             <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-green-600 hover:text-green-700 shrink-0" asChild onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp">
-                                <MessageCircle className="w-3.5 h-3.5" />
-                              </a>
-
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></a>
                             </Button>
                           ) : null;
                         })()}
@@ -474,21 +596,26 @@ const DealershipReservas = () => {
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              <CalendarDays className="w-4 h-4" /> Detalle de Cita
+              {detailRes?.service_type === 'Incidencia'
+                ? <><AlertTriangle className="w-4 h-4 text-amber-500" /> Detalle de Incidencia</>
+                : <><CalendarDays className="w-4 h-4" /> Detalle de Cita</>
+              }
             </DialogTitle>
           </DialogHeader>
           {detailRes && (() => {
-            const st = STATUS_CONFIG[detailRes.status] || STATUS_CONFIG.pendiente;
+            const isInc = detailRes.service_type === 'Incidencia';
+            const statusMap = isInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
+            const st = statusMap[detailRes.status] || (isInc ? INCIDENCIA_STATUSES.pendiente : STATUS_CONFIG.pendiente);
             const clientName = detailRes.clients?.full_name || detailRes.walkin_client_name || '-';
             return (
               <Tabs defaultValue="cita" className="w-full">
                 <TabsList className="w-full grid grid-cols-3">
-                  <TabsTrigger value="cita" className="text-xs">Cita</TabsTrigger>
+                  <TabsTrigger value="cita" className="text-xs">{isInc ? 'Incidencia' : 'Cita'}</TabsTrigger>
                   <TabsTrigger value="vehiculo" className="text-xs">Vehículo</TabsTrigger>
                   <TabsTrigger value="historial" className="text-xs">Historial ({vehicleHistory.length})</TabsTrigger>
                 </TabsList>
 
-                {/* TAB: CITA */}
+                {/* TAB: CITA / INCIDENCIA */}
                 <TabsContent value="cita" className="space-y-3 mt-3">
                   <div className="flex items-center justify-between">
                     <Badge className={cn("text-xs px-2 py-0.5", st.color)}>{st.label}</Badge>
@@ -508,13 +635,13 @@ const DealershipReservas = () => {
                     </div>
                     <Separator />
                     <div className="flex items-center gap-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_date}</span></div>
-                    <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_time?.slice(0, 5)}</span></div>
+                    {!isInc && <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_time?.slice(0, 5)}</span></div>}
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
-                    <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>
+                    {detailRes.current_mileage > 0 && <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>}
                   </div>
                   {detailRes.notes && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
-                      <p className="font-semibold mb-1">Notas</p>
+                      <p className="font-semibold mb-1">{isInc ? 'Descripción de la falla' : 'Notas'}</p>
                       <p className="text-muted-foreground whitespace-pre-wrap">{detailRes.notes}</p>
                     </div>
                   )}
@@ -527,16 +654,18 @@ const DealershipReservas = () => {
                   )}
                   {detailRes.technical_report_url && (
                     <div className="space-y-1">
-                      <p className="text-xs font-semibold flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-blue-600" /> Informe Técnico</p>
+                      <p className="text-xs font-semibold flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-blue-600" /> {isInc ? 'Archivos adjuntos' : 'Informe Técnico'}</p>
                       <TechnicalReportUploader reservationId={detailRes.id} value={detailRes.technical_report_url} onChange={() => {}} readonly />
                     </div>
                   )}
-                  <div className="flex justify-end gap-2 pt-2">
-                    {detailRes.status === 'pendiente' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'confirmada'); }}>Confirmar</Button>}
-                    {detailRes.status === 'confirmada' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'en_proceso'); }}>Iniciar</Button>}
-                    {detailRes.status === 'en_proceso' && <Button size="sm" className="text-xs gac-gradient gap-1" onClick={() => { setDetailOpen(false); openComplete(detailRes); }}><ClipboardCheck className="w-3 h-3" /> Completar</Button>}
-                    {(detailRes.status === 'pendiente' || detailRes.status === 'confirmada') && <Button size="sm" variant="ghost" className="text-xs text-destructive" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'cancelada'); }}>Cancelar</Button>}
-                  </div>
+                  {!isInc && (
+                    <div className="flex justify-end gap-2 pt-2">
+                      {detailRes.status === 'pendiente' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'confirmada'); }}>Confirmar</Button>}
+                      {detailRes.status === 'confirmada' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'en_proceso'); }}>Iniciar</Button>}
+                      {detailRes.status === 'en_proceso' && <Button size="sm" className="text-xs gac-gradient gap-1" onClick={() => { setDetailOpen(false); openComplete(detailRes); }}><ClipboardCheck className="w-3 h-3" /> Completar</Button>}
+                      {(detailRes.status === 'pendiente' || detailRes.status === 'confirmada') && <Button size="sm" variant="ghost" className="text-xs text-destructive" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'cancelada'); }}>Cancelar</Button>}
+                    </div>
+                  )}
                 </TabsContent>
 
                 {/* TAB: VEHICULO */}
@@ -600,22 +729,27 @@ const DealershipReservas = () => {
                     <div className="space-y-2">
                       <p className="text-xs text-muted-foreground">{vehicleHistory.length} servicio(s) previo(s)</p>
                       {vehicleHistory.map(h => {
-                        const hst = STATUS_CONFIG[h.status] || STATUS_CONFIG.pendiente;
+                        const hIsInc = h.service_type === 'Incidencia';
+                        const hStatusMap = hIsInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
+                        const hst = hStatusMap[h.status] || hStatusMap.pendiente;
                         return (
                           <div key={h.id} className="border rounded-md p-2.5 text-xs space-y-1.5">
                             <div className="flex items-center justify-between">
-                              <span className="font-semibold">{h.service_type}</span>
+                              <span className="font-semibold flex items-center gap-1">
+                                {hIsInc && <AlertTriangle className="w-3 h-3 text-amber-500" />}
+                                {h.service_type}
+                              </span>
                               <Badge className={cn("text-[10px] px-1.5 py-0", hst.color)}>{hst.label}</Badge>
                             </div>
                             <div className="flex items-center gap-3 text-muted-foreground">
                               <span className="flex items-center gap-1"><CalendarDays className="w-3 h-3" />{h.reservation_date}</span>
-                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{h.reservation_time?.slice(0, 5)}</span>
+                              {!hIsInc && <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{h.reservation_time?.slice(0, 5)}</span>}
                               <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
                             </div>
                             {h.dealerships && (
                               <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>
                             )}
-                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Notas:</span> {h.notes}</p>}
+                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">{hIsInc ? 'Falla:' : 'Notas:'}</span> {h.notes}</p>}
                             {h.service_notes && (
                               <div className="bg-green-50 border border-green-200 rounded p-1.5">
                                 <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo realizado:</p>
@@ -657,20 +791,11 @@ const DealershipReservas = () => {
               </div>
               <div className="space-y-2">
                 <Label>¿Qué se realizó en el servicio? *</Label>
-                <Textarea
-                  value={serviceNotes}
-                  onChange={e => setServiceNotes(e.target.value)}
-                  rows={4}
-                  placeholder="Describa los trabajos realizados, repuestos cambiados, observaciones..." 
-                />
+                <Textarea value={serviceNotes} onChange={e => setServiceNotes(e.target.value)} rows={4} placeholder="Describa los trabajos realizados, repuestos cambiados, observaciones..." />
               </div>
               <div className="space-y-2">
-                <Label>Informe Técnico (PDF)</Label>
-                <TechnicalReportUploader
-                  reservationId={completingRes.id}
-                  value={technicalReportUrl}
-                  onChange={setTechnicalReportUrl}
-                />
+                <Label>Informe Técnico</Label>
+                <TechnicalReportUploader reservationId={completingRes.id} value={technicalReportUrl} onChange={setTechnicalReportUrl} />
               </div>
             </div>
           )}
@@ -683,79 +808,204 @@ const DealershipReservas = () => {
         </DialogContent>
       </Dialog>
 
-      {/* CREATE RESERVATION DIALOG */}
+      {/* CREATE DIALOG */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">Nueva Reserva</DialogTitle>
+            <DialogTitle className="font-display flex items-center gap-2">
+              {isIncidencia
+                ? <><AlertTriangle className="w-4 h-4 text-amber-500" /> Nueva Incidencia</>
+                : 'Nueva Reserva'
+              }
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
-            <Label className="text-xs font-semibold">Buscar por placa</Label>
-            <div className="flex gap-2">
-              <Input value={plateSearch} onChange={e => { setPlateSearch(e.target.value.toUpperCase()); setPlateSearched(false); setPlateResult(null); }} placeholder="Ej: ABC123" className="h-8 text-xs uppercase" onKeyDown={e => e.key === 'Enter' && handlePlateSearch()} />
-              <Button size="sm" variant="outline" onClick={handlePlateSearch} disabled={searchingPlate || !plateSearch.trim()}>
-                <Search className="w-3.5 h-3.5 mr-1" /> Buscar
-              </Button>
-            </div>
-            {plateSearched && (
-              <div className={cn("rounded-md border p-3", plateResult ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200")}>
-                {plateResult ? (
-                  <div className="flex items-start gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
-                    <div className="text-xs space-y-1 flex-1 min-w-0">
-                      <p className="font-semibold text-green-800">Vehículo encontrado</p>
-                      <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span>{plateResult.color && <span className="text-muted-foreground">· {plateResult.color}</span>}</div>
-                      <div className="flex items-center gap-2"><User className="w-3 h-3" /><span>{plateResult.clients?.full_name}</span>{plateResult.clients?.cedula && <span className="text-muted-foreground">· {plateResult.clients.cedula}</span>}</div>
-                      <div className="pt-1"><WarrantyChip vehicleId={plateResult.id} /></div>
-                    </div>
+
+          {/* Tipo de servicio — siempre visible primero */}
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold">Tipo de servicio *</Label>
+            <Select
+              value={fService}
+              onValueChange={v => {
+                const prev = fService;
+                setFService(v);
+                setFNotes('');
+                if (v === 'Incidencia' && prev !== 'Incidencia') { resetNormalFields(); setFDate(hoy); }
+                if (v !== 'Incidencia' && prev === 'Incidencia') { resetIncidenciaFields(); setFDate(hoy); setFTime('09:00'); }
+              }}
+            >
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar tipo..." /></SelectTrigger>
+              <SelectContent>
+                {serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+                <SelectSeparator />
+                <SelectItem value="Incidencia">
+                  <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> Incidencia / Falla</span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Separator />
+
+          {/* FORMA INCIDENCIA */}
+          {isIncidencia && (
+            <div className="space-y-3">
+              {/* Cliente */}
+              <div className="space-y-1" ref={clientSearchRef}>
+                <Label className="text-xs">Cliente</Label>
+                <div className="relative">
+                  <div className="flex items-center gap-1">
+                    <Input
+                      value={fClientSearch}
+                      onChange={e => { setFClientSearch(e.target.value); if (fClientId) clearClient(); }}
+                      placeholder="Buscar por nombre..."
+                      className="h-8 text-xs"
+                      disabled={!!fClientId}
+                    />
+                    {fClientId && (
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 shrink-0" onClick={clearClient}>
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                   </div>
-                ) : (
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                    <div className="text-xs">
-                      <p className="font-semibold text-amber-800">Placa no encontrada</p>
-                      <p className="text-amber-700">Puede crear la reserva ingresando los datos del cliente manualmente.</p>
+                  {fClientDropdown && fClientResults.length > 0 && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-48 overflow-y-auto">
+                      {fClientResults.map(c => (
+                        <div key={c.id} className="px-3 py-2 text-xs cursor-pointer hover:bg-accent" onMouseDown={() => selectClient(c)}>
+                          {c.full_name}
+                        </div>
+                      ))}
                     </div>
-                  </div>
+                  )}
+                </div>
+                {fClientId && (
+                  <p className="text-[10px] text-green-700 flex items-center gap-1 mt-0.5">
+                    <User className="w-3 h-3" /> {fClientName} seleccionado
+                  </p>
                 )}
               </div>
-            )}
-          </div>
-          <Separator />
-          {plateSearched && !plateResult && (
-            <div className="space-y-3">
-              <Label className="text-xs font-semibold">Datos del cliente</Label>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1"><Label className="text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-8 text-xs" /></div>
-                <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412 1234567" className="h-8 text-xs" /></div>
+
+              {/* Vehículo */}
+              {fClientId && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Vehículo</Label>
+                  {fIncVehicles.length === 0 ? (
+                    <p className="text-[10px] text-muted-foreground">Este cliente no tiene vehículos registrados</p>
+                  ) : (
+                    <Select value={fIncVehicleId} onValueChange={setFIncVehicleId}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vehículo" /></SelectTrigger>
+                      <SelectContent>
+                        {fIncVehicles.map(v => (
+                          <SelectItem key={v.id} value={v.id} className="text-xs">
+                            {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}{v.plate ? ` · ${v.plate}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
+
+              {/* Fecha */}
+              <div className="space-y-1">
+                <Label className="text-xs">Fecha del reporte *</Label>
+                <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" />
+              </div>
+
+              {/* Descripción */}
+              <div className="space-y-1">
+                <Label className="text-xs">Descripción de la falla *</Label>
+                <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={4} placeholder="Describa la falla, desperfecto o problema observado..." className="text-xs resize-none" />
+              </div>
+
+              {/* Kilometraje */}
+              <div className="space-y-1">
+                <Label className="text-xs">Kilometraje actual</Label>
+                <Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} placeholder="Ej: 25000" className="h-8 text-xs" />
+              </div>
+
+              {/* Archivos */}
+              <div className="space-y-1">
+                <Label className="text-xs">Fotos / Videos</Label>
+                <TechnicalReportUploader maxSizeMB={100} value={fIncMediaUrls} onChange={setFIncMediaUrls} />
               </div>
             </div>
           )}
-          <div className="space-y-3">
-            <Label className="text-xs font-semibold">Detalles de la cita</Label>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1"><Label className="text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" /></div>
-              <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-1 col-span-2"><Label className="text-xs">Servicio *</Label><Select value={fService} onValueChange={v => { setFService(v); setFNotes(''); }}><SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger><SelectContent>{serviceTypes.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}</SelectContent></Select></div>
-              <div className="space-y-1 col-span-2"><Label className="text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-8 text-xs" /></div>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Descripción de la incidencia</Label>
-              <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Notas</Label>
-              <Textarea value={fObs} onChange={e => setFObs(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones adicionales..." />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Archivo adjunto</Label>
-              <TechnicalReportUploader value={createTechReportUrl} onChange={setCreateTechReportUrl} />
-            </div>
-          </div>
+
+          {/* FORMA RESERVA NORMAL */}
+          {!isIncidencia && (
+            <>
+              <div className="space-y-3">
+                <Label className="text-xs font-semibold">Buscar por placa</Label>
+                <div className="flex gap-2">
+                  <Input value={plateSearch} onChange={e => { setPlateSearch(e.target.value.toUpperCase()); setPlateSearched(false); setPlateResult(null); }} placeholder="Ej: ABC123" className="h-8 text-xs uppercase" onKeyDown={e => e.key === 'Enter' && handlePlateSearch()} />
+                  <Button size="sm" variant="outline" onClick={handlePlateSearch} disabled={searchingPlate || !plateSearch.trim()}>
+                    <Search className="w-3.5 h-3.5 mr-1" /> Buscar
+                  </Button>
+                </div>
+                {plateSearched && (
+                  <div className={cn("rounded-md border p-3", plateResult ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200")}>
+                    {plateResult ? (
+                      <div className="flex items-start gap-2">
+                        <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
+                        <div className="text-xs space-y-1 flex-1 min-w-0">
+                          <p className="font-semibold text-green-800">Vehículo encontrado</p>
+                          <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span>{plateResult.color && <span className="text-muted-foreground">· {plateResult.color}</span>}</div>
+                          <div className="flex items-center gap-2"><User className="w-3 h-3" /><span>{plateResult.clients?.full_name}</span>{plateResult.clients?.cedula && <span className="text-muted-foreground">· {plateResult.clients.cedula}</span>}</div>
+                          <div className="pt-1"><WarrantyChip vehicleId={plateResult.id} /></div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                        <div className="text-xs">
+                          <p className="font-semibold text-amber-800">Placa no encontrada</p>
+                          <p className="text-amber-700">Puede crear la reserva ingresando los datos del cliente manualmente.</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <Separator />
+              {plateSearched && !plateResult && (
+                <div className="space-y-3">
+                  <Label className="text-xs font-semibold">Datos del cliente</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1"><Label className="text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-8 text-xs" /></div>
+                    <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412 1234567" className="h-8 text-xs" /></div>
+                  </div>
+                </div>
+              )}
+              <div className="space-y-3">
+                <Label className="text-xs font-semibold">Detalles de la cita</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1"><Label className="text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" /></div>
+                  <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
+                  <div className="space-y-1 col-span-2"><Label className="text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-8 text-xs" /></div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Descripción / Motivo</Label>
+                  <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Notas</Label>
+                  <Textarea value={fObs} onChange={e => setFObs(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones adicionales..." />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Archivo adjunto</Label>
+                  <TechnicalReportUploader value={createTechReportUrl} onChange={setCreateTechReportUrl} />
+                </div>
+              </div>
+            </>
+          )}
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancelar</Button>
             <Button onClick={handleSave} disabled={saving} className="gac-gradient">
-              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Crear Reserva'}
+              {saving
+                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : isIncidencia ? 'Crear Incidencia' : 'Crear Reserva'
+              }
             </Button>
           </DialogFooter>
         </DialogContent>
