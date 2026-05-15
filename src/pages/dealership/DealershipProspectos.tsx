@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { supabase } from '@/integrations/supabase/client';
@@ -99,12 +100,13 @@ const DealershipProspectos = () => {
   const isVendedor = role?.name?.toLowerCase() === 'vendedor';
   const isMobile = useIsMobile();
   const { models: prospectModels, brands: prospectBrands } = useProspectModels();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [prosSearch, setProsSearch] = useState('');
   const [prosStatusFilter, setProsStatusFilter] = useState('todos');
-  const [prosSourceFilter, setProsSourceFilter] = useState('todos');
+  const [prosSourceFilter, setProsSourceFilter] = useState(() => searchParams.get('source') || 'todos');
   const [prosEstadoVzlaFilter, setProsEstadoVzlaFilter] = useState('todos');
   const [prosTestDriveFilter, setProsTestDriveFilter] = useState('todos');
   const [prosPersonTypeFilter, setProsPersonTypeFilter] = useState('todos');
@@ -112,7 +114,12 @@ const DealershipProspectos = () => {
   const [prosAgeRangeFilter, setProsAgeRangeFilter] = useState('todos');
   const [prosFechaDesde, setProsFechaDesde] = useState('');
   const [prosFechaHasta, setProsFechaHasta] = useState('');
-  const [eventNameFilter, setEventNameFilter] = useState('todos');
+  const [eventNameFilter, setEventNameFilter] = useState(() => searchParams.get('event_name') || 'todos');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.toString()) setSearchParams({}, { replace: true });
+  }, []);
 
   // Column visibility
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(new Set(ALL_COLS));
@@ -287,10 +294,11 @@ const DealershipProspectos = () => {
   });
 
   const CLOSED_STATUSES = ['ganado', 'perdido'];
-  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados'>('abiertos');
+  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados' | 'ganados'>('abiertos');
   const openProspects = sortedProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
-  const closedProspects = sortedProspects.filter(p => CLOSED_STATUSES.includes(p.status));
-  const displayedProspects = activeTab === 'abiertos' ? openProspects : closedProspects;
+  const ganadosProspects = sortedProspects.filter(p => p.status === 'ganado');
+  const closedProspects = sortedProspects.filter(p => p.status === 'perdido');
+  const displayedProspects = activeTab === 'ganados' ? ganadosProspects : activeTab === 'cerrados' ? closedProspects : openProspects;
   const totalPages = Math.ceil(displayedProspects.length / PAGE_SIZE);
   const paginatedProspects = displayedProspects.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
@@ -788,140 +796,164 @@ const DealershipProspectos = () => {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados'); setSelectedIds(new Set()); setCurrentPage(1); }} className="space-y-3">
+      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados' | 'ganados'); setSelectedIds(new Set()); setCurrentPage(1); }} className="space-y-3">
         <TabsList>
           <TabsTrigger value="abiertos" className="text-xs gap-1">
             Abiertos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{openProspects.length}</Badge>
           </TabsTrigger>
+          <TabsTrigger value="ganados" className="text-xs gap-1">
+            <span className="text-green-700">Ganados</span> <Badge className="text-[10px] px-1.5 py-0 ml-1 bg-green-100 text-green-800 border-green-300">{ganadosProspects.length}</Badge>
+          </TabsTrigger>
           <TabsTrigger value="cerrados" className="text-xs gap-1">
-            Cerrados <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{closedProspects.length}</Badge>
+            Perdidos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{closedProspects.length}</Badge>
           </TabsTrigger>
         </TabsList>
 
-        {/* Filters — single row */}
-        <div className="flex flex-wrap gap-1.5 items-center">
-          <div className="relative min-w-[160px] flex-1 max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => { setProsSearch(e.target.value); setCurrentPage(1); }} />
-          </div>
-          <Select value={prosStatusFilter} onValueChange={v => { setProsStatusFilter(v); setCurrentPage(1); }}>
-            <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos los estados</SelectItem>
-              {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={prosSourceFilter} onValueChange={v => { setProsSourceFilter(v); setEventNameFilter('todos'); setCurrentPage(1); }}>
-            <SelectTrigger className="h-8 text-xs w-[120px] shrink-0"><SelectValue placeholder="Fuente" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todas las fuentes</SelectItem>
-              {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          {prosSourceFilter === 'evento' && (
-            <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
-              <SelectTrigger className="w-[180px] h-8 text-xs shrink-0"><SelectValue placeholder="Nombre de evento" /></SelectTrigger>
+        {/* ── Filtros ── */}
+        <div className="space-y-2">
+          {/* Fila principal */}
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <div className="relative min-w-[160px] flex-1 max-w-xs">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={prosSearch} onChange={e => { setProsSearch(e.target.value); setCurrentPage(1); }} />
+            </div>
+            <Select value={prosStatusFilter} onValueChange={v => { setProsStatusFilter(v); setCurrentPage(1); }}>
+              <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="todos">Todos los eventos</SelectItem>
-                {[...new Set(prospects.filter(p => p.source === 'evento' && p.event_name).map(p => p.event_name!))].map(en => (
-                  <SelectItem key={en} value={en}>{en}</SelectItem>
-                ))}
+                <SelectItem value="todos">Todos los estados</SelectItem>
+                {PROSPECT_STATUSES.map(s => <SelectItem key={s.name} value={s.name}>{s.label}</SelectItem>)}
               </SelectContent>
             </Select>
-          )}
-          <Select value={prosEstadoVzlaFilter} onValueChange={v => { setProsEstadoVzlaFilter(v); setCurrentPage(1); }}>
-            <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Estado (Vzla)" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos los estados</SelectItem>
-              {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={prosTestDriveFilter} onValueChange={v => { setProsTestDriveFilter(v); setCurrentPage(1); }}>
-            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Test Drive" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Test Drive</SelectItem>
-              <SelectItem value="si">Sí</SelectItem>
-              <SelectItem value="no">No</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={prosPersonTypeFilter} onValueChange={v => { setProsPersonTypeFilter(v); setCurrentPage(1); }}>
-            <SelectTrigger className="h-8 text-xs w-[120px] shrink-0"><SelectValue placeholder="Tipo persona" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Tipo persona</SelectItem>
-              {PERSON_TYPES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={prosGenderFilter} onValueChange={v => { setProsGenderFilter(v); setCurrentPage(1); }}>
-            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Género" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Género</SelectItem>
-              {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={prosAgeRangeFilter} onValueChange={v => { setProsAgeRangeFilter(v); setCurrentPage(1); }}>
-            <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Edad" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Edad</SelectItem>
-              {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className={cn("h-8 text-xs shrink-0 gap-1.5", (prosFechaDesde || prosFechaHasta) && "border-primary text-primary")}>
-                <CalendarDays className="w-3.5 h-3.5" />
-                {prosFechaDesde || prosFechaHasta
-                  ? `${prosFechaDesde ? new Date(prosFechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'} – ${prosFechaHasta ? new Date(prosFechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'}`
-                  : 'Fecha'}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-72 p-3 space-y-3" align="start">
-              <div className="flex gap-1.5">
-                <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyThisMonth}>Este mes</Button>
-                <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyLastMonth}>Mes pasado</Button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <span className="text-[11px] text-muted-foreground">Desde</span>
-                  <Input type="date" value={prosFechaDesde} onChange={e => { setProsFechaDesde(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[11px] text-muted-foreground">Hasta</span>
-                  <Input type="date" value={prosFechaHasta} onChange={e => { setProsFechaHasta(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
-                </div>
-              </div>
-              {(prosFechaDesde || prosFechaHasta) && (
-                <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setCurrentPage(1); }}>
-                  Quitar rango
+            <Select value={prosSourceFilter} onValueChange={v => { setProsSourceFilter(v); setEventNameFilter('todos'); setCurrentPage(1); }}>
+              <SelectTrigger className="h-8 text-xs w-[120px] shrink-0"><SelectValue placeholder="Canal" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los canales</SelectItem>
+                {PROSPECT_SOURCES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {(prosSourceFilter === 'evento' || eventNameFilter !== 'todos') && (
+              <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="w-[180px] h-8 text-xs shrink-0"><SelectValue placeholder="Nombre de evento" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los eventos</SelectItem>
+                  {[...new Set(prospects.filter(p => p.event_name).map(p => p.event_name!))].map(en => (
+                    <SelectItem key={en} value={en}>{en}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className={cn("h-8 text-xs shrink-0 gap-1.5", (prosFechaDesde || prosFechaHasta) && "border-primary text-primary")}>
+                  <CalendarDays className="w-3.5 h-3.5" />
+                  {prosFechaDesde || prosFechaHasta
+                    ? `${prosFechaDesde ? new Date(prosFechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'} – ${prosFechaHasta ? new Date(prosFechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' }) : '…'}`
+                    : 'Fecha'}
                 </Button>
-              )}
-            </PopoverContent>
-          </Popover>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 shrink-0">
-                <SlidersHorizontal className="w-3.5 h-3.5" /> Columnas
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-56 p-3" align="end">
-              <p className="text-xs font-semibold mb-2">Columnas visibles</p>
-              <div className="space-y-1.5">
-                {ALL_COLS.map(col => (
-                  <div key={col} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`col-${col}`}
-                      checked={visibleCols.has(col)}
-                      onCheckedChange={() => toggleCol(col)}
-                    />
-                    <label htmlFor={`col-${col}`} className="text-xs cursor-pointer">{COL_LABELS[col]}</label>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-3 space-y-3" align="start">
+                <div className="flex gap-1.5">
+                  <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyThisMonth}>Este mes</Button>
+                  <Button variant="outline" size="sm" className="h-7 text-xs flex-1" onClick={applyLastMonth}>Mes pasado</Button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground">Desde</span>
+                    <Input type="date" value={prosFechaDesde} onChange={e => { setProsFechaDesde(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
                   </div>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
-          {(prosSearch || prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos' || eventNameFilter !== 'todos' || prosEstadoVzlaFilter !== 'todos' || prosTestDriveFilter !== 'todos' || prosPersonTypeFilter !== 'todos' || prosGenderFilter !== 'todos' || prosAgeRangeFilter !== 'todos') && (
-            <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setEventNameFilter('todos'); setProsEstadoVzlaFilter('todos'); setProsTestDriveFilter('todos'); setProsPersonTypeFilter('todos'); setProsGenderFilter('todos'); setProsAgeRangeFilter('todos'); setProsSearch(''); setCurrentPage(1); }}>
-              <X className="w-3 h-3" />Limpiar
+                  <div className="space-y-1">
+                    <span className="text-[11px] text-muted-foreground">Hasta</span>
+                    <Input type="date" value={prosFechaHasta} onChange={e => { setProsFechaHasta(e.target.value); setCurrentPage(1); }} className="h-8 text-xs" />
+                  </div>
+                </div>
+                {(prosFechaDesde || prosFechaHasta) && (
+                  <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setCurrentPage(1); }}>
+                    Quitar rango
+                  </Button>
+                )}
+              </PopoverContent>
+            </Popover>
+            <Button
+              variant="outline" size="sm"
+              className={cn("h-8 text-xs gap-1.5 shrink-0", showAdvancedFilters && "border-primary text-primary")}
+              onClick={() => setShowAdvancedFilters(v => !v)}
+            >
+              {showAdvancedFilters ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+              Más filtros
+              {(() => {
+                const c = [prosEstadoVzlaFilter !== 'todos', prosTestDriveFilter !== 'todos', prosPersonTypeFilter !== 'todos', prosGenderFilter !== 'todos', prosAgeRangeFilter !== 'todos'].filter(Boolean).length;
+                return c > 0 ? <Badge className="h-4 w-4 p-0 flex items-center justify-center text-[10px] bg-primary text-primary-foreground rounded-full">{c}</Badge> : null;
+              })()}
             </Button>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 shrink-0">
+                  <SlidersHorizontal className="w-3.5 h-3.5" /> Columnas
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-56 p-3" align="end">
+                <p className="text-xs font-semibold mb-2">Columnas visibles</p>
+                <div className="space-y-1.5">
+                  {ALL_COLS.map(col => (
+                    <div key={col} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`col-${col}`}
+                        checked={visibleCols.has(col)}
+                        onCheckedChange={() => toggleCol(col)}
+                      />
+                      <label htmlFor={`col-${col}`} className="text-xs cursor-pointer">{COL_LABELS[col]}</label>
+                    </div>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+            {(prosSearch || prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos' || eventNameFilter !== 'todos' || prosEstadoVzlaFilter !== 'todos' || prosTestDriveFilter !== 'todos' || prosPersonTypeFilter !== 'todos' || prosGenderFilter !== 'todos' || prosAgeRangeFilter !== 'todos') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setEventNameFilter('todos'); setProsEstadoVzlaFilter('todos'); setProsTestDriveFilter('todos'); setProsPersonTypeFilter('todos'); setProsGenderFilter('todos'); setProsAgeRangeFilter('todos'); setProsSearch(''); setCurrentPage(1); }}>
+                <X className="w-3 h-3" />Limpiar
+              </Button>
+            )}
+          </div>
+          {/* Filtros avanzados (colapsable) */}
+          {showAdvancedFilters && (
+            <div className="flex flex-wrap gap-1.5 items-center pt-1 border-t border-dashed border-border">
+              <Select value={prosEstadoVzlaFilter} onValueChange={v => { setProsEstadoVzlaFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[140px] shrink-0"><SelectValue placeholder="Estado (Vzla)" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Estado Venezuela</SelectItem>
+                  {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={prosTestDriveFilter} onValueChange={v => { setProsTestDriveFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Test Drive" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Test Drive</SelectItem>
+                  <SelectItem value="si">Sí</SelectItem>
+                  <SelectItem value="no">No</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={prosPersonTypeFilter} onValueChange={v => { setProsPersonTypeFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[130px] shrink-0"><SelectValue placeholder="Tipo persona" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Tipo persona</SelectItem>
+                  {PERSON_TYPES.map(p => <SelectItem key={p.value} value={p.value}>{p.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={prosGenderFilter} onValueChange={v => { setProsGenderFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Género" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Género</SelectItem>
+                  {GENDERS.map(g => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={prosAgeRangeFilter} onValueChange={v => { setProsAgeRangeFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[110px] shrink-0"><SelectValue placeholder="Edad" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Edad</SelectItem>
+                  {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
           )}
         </div>
 
@@ -938,7 +970,7 @@ const DealershipProspectos = () => {
             <CardContent className="p-8 text-center">
               <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">
-                {activeTab === 'abiertos' ? 'No hay prospectos abiertos' : 'No hay prospectos cerrados'}
+                {activeTab === 'ganados' ? 'No hay prospectos ganados' : activeTab === 'cerrados' ? 'No hay prospectos perdidos' : 'No hay prospectos abiertos'}
               </p>
             </CardContent>
           </Card>

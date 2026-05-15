@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -59,6 +60,7 @@ const COLORS = [
 const AdminDashboard = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const isMobile = useIsMobile();
+  const navigate = useNavigate();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
@@ -204,8 +206,10 @@ const AdminDashboard = () => {
 
   // ─── 5-8. Salesperson ranking (leads, performance, conversion) ───
   const [rankingDealership, setRankingDealership] = useState('todos');
+  const [rankingSource, setRankingSource] = useState('todos');
   const salespersonRanking = useMemo(() => {
-    const filtered = rankingDealership === 'todos' ? prospects : prospects.filter(p => p.dealership_id === rankingDealership);
+    let filtered = rankingDealership === 'todos' ? prospects : prospects.filter(p => p.dealership_id === rankingDealership);
+    if (rankingSource !== 'todos') filtered = filtered.filter(p => p.source === rankingSource);
     const map: Record<string, { total: number; ganados: number; perdidos: number }> = {};
     filtered.forEach(p => {
       const sp = p.salesperson || 'Sin asignar';
@@ -223,7 +227,7 @@ const AdminDashboard = () => {
         conversion: data.total > 0 ? Math.round((data.ganados / data.total) * 100) : 0,
       }))
       .sort((a, b) => b.ganados - a.ganados || b.total - a.total);
-  }, [prospects, rankingDealership]);
+  }, [prospects, rankingDealership, rankingSource]);
 
   // ─── 9. Prospectos por canal ───
   const SOURCE_LABELS: Record<string, string> = {
@@ -239,11 +243,11 @@ const AdminDashboard = () => {
       .sort((a, b) => b.value - a.value);
   }, [prospects]);
 
-  // ─── 10. Eventos ───
+  // ─── 10. Eventos — todos los prospectos con event_name (igual que widgets) ───
   const eventBreakdown = useMemo(() => {
     const map: Record<string, { total: number; ganados: number }> = {};
     prospects.forEach(p => {
-      if (p.source === 'evento' && p.event_name) {
+      if (p.event_name) {
         if (!map[p.event_name]) map[p.event_name] = { total: 0, ganados: 0 };
         map[p.event_name].total++;
         if (p.status === 'ganado') map[p.event_name].ganados++;
@@ -507,11 +511,18 @@ const AdminDashboard = () => {
             <CardTitle className="text-sm font-display flex items-center gap-2">
               <Trophy className="w-4 h-4 text-amber-500" /> Leads · Rendimiento · Conversión por Vendedor
             </CardTitle>
-            <select value={rankingDealership} onChange={e => setRankingDealership(e.target.value)}
-              className="text-[10px] border rounded-md px-2 py-1 bg-background text-foreground h-7">
-              <option value="todos">Todos los concesionarios</option>
-              {dealerships.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select value={rankingSource} onChange={e => setRankingSource(e.target.value)}
+                className="text-[10px] border rounded-md px-2 py-1 bg-background text-foreground h-7">
+                <option value="todos">Todos los canales</option>
+                {Object.entries(SOURCE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <select value={rankingDealership} onChange={e => setRankingDealership(e.target.value)}
+                className="text-[10px] border rounded-md px-2 py-1 bg-background text-foreground h-7">
+                <option value="todos">Todos los concesionarios</option>
+                {dealerships.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -524,7 +535,12 @@ const AdminDashboard = () => {
               </div>
               <div className="divide-y divide-border">
                 {salespersonRanking.map((sp, i) => (
-                  <div key={sp.name} className="flex items-center gap-3 px-4 py-2.5">
+                  <div
+                    key={sp.name}
+                    className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
+                    onClick={() => navigate(`/admin/prospectos?salesperson=${encodeURIComponent(sp.name)}${rankingSource !== 'todos' ? `&source=${rankingSource}` : ''}${rankingDealership !== 'todos' ? `&dealership=${rankingDealership}` : ''}`)}
+                    title={`Ver ${sp.total} prospectos de ${sp.name}`}
+                  >
                     <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
                       i === 0 ? "bg-amber-100 text-amber-800 ring-1 ring-amber-400" :
                       i === 1 ? "bg-gray-100 text-gray-700 ring-1 ring-gray-300" :
@@ -681,14 +697,19 @@ const AdminDashboard = () => {
           ) : (
             <div className="divide-y divide-border">
               {eventBreakdown.map(ev => (
-                <div key={ev.name} className="flex items-center justify-between px-4 py-3">
+                <div
+                  key={ev.name}
+                  className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => navigate(`/admin/prospectos?event_name=${encodeURIComponent(ev.name)}`)}
+                  title={`Ver ${ev.total} prospectos del evento`}
+                >
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="p-2 rounded-lg bg-violet-50 text-violet-600 shrink-0">
                       <CalendarDays className="w-4 h-4" />
                     </div>
                     <div className="min-w-0">
                       <p className="text-xs font-semibold truncate">{ev.name}</p>
-                      <p className="text-[10px] text-muted-foreground">Evento</p>
+                      <p className="text-[10px] text-muted-foreground">Haz clic para ver prospectos</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
