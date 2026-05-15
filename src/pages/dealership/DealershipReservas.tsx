@@ -8,15 +8,18 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X } from 'lucide-react';
+import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X, Pencil, Trash2 } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
+import { useAuth } from '@/contexts/AuthContext';
+import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 
 // Service types that trigger the incidencia form
@@ -40,6 +43,8 @@ interface Reservation {
   technical_report_url: string | null;
   completed_at: string | null;
   created_at: string;
+  created_by_name: string | null;
+  created_by_role: string | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
@@ -125,6 +130,8 @@ const getDrLS = () => { try { return JSON.parse(localStorage.getItem(DR_LS_KEY) 
 
 const DealershipReservas = () => {
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
+  const { profile, role } = useAuth();
+  const { salesperson: currentSalesperson } = useCurrentSalesperson();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,6 +149,10 @@ const DealershipReservas = () => {
   const [vehicleDetail, setVehicleDetail] = useState<VehicleDetail | null>(null);
   const [vehicleHistory, setVehicleHistory] = useState<HistoryRecord[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  // Edit incidencia
+  const [editingRes, setEditingRes] = useState<Reservation | null>(null);
+  const [deletingIncId, setDeletingIncId] = useState<string | null>(null);
 
   // Complete dialog
   const [completeOpen, setCompleteOpen] = useState(false);
@@ -304,7 +315,7 @@ const DealershipReservas = () => {
 
   const setCreateOpen = (open: boolean) => {
     setCreateOpenRaw(open);
-    if (!open) { try { localStorage.removeItem(DR_LS_KEY); } catch {} }
+    if (!open) { try { localStorage.removeItem(DR_LS_KEY); } catch {} setEditingRes(null); }
   };
 
   useEffect(() => {
@@ -403,7 +414,7 @@ const DealershipReservas = () => {
       if (!fDate) { toast.error('La fecha es requerida'); return; }
       if (!fNotes.trim()) { toast.error('La descripción de la falla es requerida'); return; }
       setSaving(true);
-      const payload = {
+      const incPayload: Record<string, unknown> = {
         dealership_id: selectedDealership,
         client_id: fClientId || null,
         vehicle_id: fIncVehicleId || null,
@@ -412,12 +423,22 @@ const DealershipReservas = () => {
         service_type: fService,
         notes: fNotes.trim(),
         current_mileage: parseInt(fMileage) || 0,
-        status: 'pendiente',
         technical_report_url: fIncMediaUrls || null,
       };
-      const { error } = await supabase.from('reservations').insert(payload);
-      if (error) { toast.error('Error al crear incidencia'); console.error(error); }
-      else { toast.success('Incidencia creada exitosamente'); setCreateOpen(false); fetchReservations(); }
+      if (editingRes) {
+        const { error } = await supabase.from('reservations').update(incPayload).eq('id', editingRes.id);
+        if (error) { toast.error('Error al actualizar incidencia'); console.error(error); }
+        else { toast.success('Incidencia actualizada'); setCreateOpen(false); setEditingRes(null); fetchReservations(); }
+      } else {
+        const creatorName = currentSalesperson?.name || profile?.full_name || null;
+        const creatorRole = role?.name || null;
+        incPayload.status = 'pendiente';
+        incPayload.created_by_name = creatorName;
+        incPayload.created_by_role = creatorRole;
+        const { error } = await supabase.from('reservations').insert(incPayload);
+        if (error) { toast.error('Error al crear incidencia'); console.error(error); }
+        else { toast.success('Incidencia creada exitosamente'); setCreateOpen(false); fetchReservations(); }
+      }
       setSaving(false);
       return;
     }
@@ -485,6 +506,32 @@ const DealershipReservas = () => {
       setVehicleHistory((history || []) as unknown as HistoryRecord[]);
       setLoadingDetail(false);
     }
+  };
+
+  const openEditIncidencia = (r: Reservation) => {
+    setEditingRes(r);
+    setFService(r.service_type);
+    setFDate(r.reservation_date);
+    setFMileage(String(r.current_mileage));
+    setFNotes(r.notes || '');
+    setFClientId(r.client_id || '');
+    setFClientName(r.clients?.full_name || '');
+    setFClientSearch(r.clients?.full_name || '');
+    setFIncVehicleId(r.vehicle_id || '');
+    setFIncMediaUrls(r.technical_report_url || null);
+    if (r.client_id) {
+      supabase.from('vehicles').select('id, plate, year, vehicle_models(name, brand)')
+        .eq('client_id', r.client_id).then(({ data }) => setFIncVehicles((data || []) as unknown as VehicleResult[]));
+    }
+    setDetailOpen(false);
+    setCreateOpen(true);
+  };
+
+  const deleteIncidencia = async (id: string) => {
+    const { error } = await supabase.from('reservations').delete().eq('id', id);
+    if (error) { toast.error('Error al eliminar la incidencia'); }
+    else { toast.success('Incidencia eliminada'); setDetailOpen(false); fetchReservations(); }
+    setDeletingIncId(null);
   };
 
   const openComplete = (r: Reservation) => {
@@ -694,6 +741,9 @@ const DealershipReservas = () => {
                     <Badge className={cn("text-xs px-2 py-0.5", st.color)}>{st.label}</Badge>
                     <span className="text-[10px] text-muted-foreground">{detailRes.created_at ? new Date(detailRes.created_at).toLocaleDateString('es-VE') : ''}</span>
                   </div>
+                  {isInc && detailRes.created_by_name && (
+                    <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name}</span>{detailRes.created_by_role ? ` · ${detailRes.created_by_role}` : ''}</p>
+                  )}
                   <div className="space-y-2 text-xs">
                     <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
                       {detailRes.clients?.cedula && <span className="text-muted-foreground">· {detailRes.clients.cedula}</span>}
@@ -729,7 +779,16 @@ const DealershipReservas = () => {
                       <TechnicalReportUploader reservationId={detailRes.id} value={detailRes.technical_report_url} onChange={() => {}} readonly />
                     </div>
                   )}
-                  {!isInc && (
+                  {isInc ? (
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => openEditIncidencia(detailRes)}>
+                        <Pencil className="w-3 h-3" /> Editar
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-xs text-destructive gap-1" onClick={() => { setDeletingIncId(detailRes.id); }}>
+                        <Trash2 className="w-3 h-3" /> Eliminar
+                      </Button>
+                    </div>
+                  ) : (
                     <div className="flex justify-end gap-2 pt-2">
                       {detailRes.status === 'pendiente' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'confirmada'); }}>Confirmar</Button>}
                       {detailRes.status === 'confirmada' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'en_proceso'); }}>Iniciar</Button>}
@@ -819,6 +878,20 @@ const DealershipReservas = () => {
         </DialogContent>
       </Dialog>
 
+      {/* DELETE INCIDENCIA CONFIRMATION */}
+      <AlertDialog open={!!deletingIncId} onOpenChange={open => { if (!open) setDeletingIncId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar esta incidencia?</AlertDialogTitle>
+            <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deletingIncId && deleteIncidencia(deletingIncId)}>Eliminar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* COMPLETE SERVICE DIALOG */}
       <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
         <DialogContent className="max-w-md">
@@ -849,7 +922,9 @@ const DealershipReservas = () => {
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              {isIncidencia ? <><AlertTriangle className="w-4 h-4 text-amber-500" /> Nueva Incidencia</> : 'Nueva Reserva'}
+              {isIncidencia
+              ? <><AlertTriangle className="w-4 h-4 text-amber-500" /> {editingRes ? 'Editar Incidencia' : 'Nueva Incidencia'}</>
+              : 'Nueva Reserva'}
             </DialogTitle>
           </DialogHeader>
 
@@ -1117,7 +1192,7 @@ const DealershipReservas = () => {
             <Button onClick={handleSave} disabled={saving} className="gac-gradient">
               {saving
                 ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                : isIncidencia ? 'Crear Incidencia' : 'Crear Reserva'
+                : isIncidencia ? (editingRes ? 'Actualizar Incidencia' : 'Crear Incidencia') : 'Crear Reserva'
               }
             </Button>
           </DialogFooter>

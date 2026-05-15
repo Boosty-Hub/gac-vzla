@@ -62,7 +62,9 @@ interface Reservation {
   service_notes: string | null;
   technical_report_url: string | null;
   satisfaction_rating: number | null;
-  dealerships: { id: string; name: string; city: string | null } | null;
+  created_by_name: string | null;
+  created_by_role: string | null;
+  dealerships: { id: string; name: string; city: string | null; state: string | null } | null;
   clients: { full_name: string; cedula: string | null; phone: string | null; state: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
@@ -94,6 +96,19 @@ const STATUS_LABELS: Record<string, string> = {
   cancelada: 'Cancelada',
 };
 
+const INCIDENCIA_TYPES = new Set(['Incidencia', 'Falla o Desperfecto']);
+const INCIDENCIA_STATUS_LABELS: Record<string, string> = {
+  pendiente: 'Pendiente',
+  agendada: 'Agendada',
+  en_proceso: 'En Proceso',
+  culminado: 'Culminado',
+};
+const INCIDENCIA_STATUS_COLORS: Record<string, string> = {
+  pendiente: 'bg-yellow-100 text-yellow-800',
+  agendada: 'bg-blue-100 text-blue-800',
+  en_proceso: 'bg-orange-100 text-orange-800',
+  culminado: 'bg-green-100 text-green-800',
+};
 
 const AR_LS_KEY = 'admin_reservas_create_form';
 const getArLS = () => { try { return JSON.parse(localStorage.getItem(AR_LS_KEY) || '{}'); } catch { return {}; } };
@@ -201,7 +216,7 @@ const AdminReservas = () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, dealerships(id, name, city), clients(full_name, cedula, phone, state), vehicles(plate, year, vehicle_models(name, brand))');
+      .select('*, dealerships(id, name, city, state), clients(full_name, cedula, phone, state), vehicles(plate, year, vehicle_models(name, brand)), created_by_name, created_by_role');
 
     if (view === 'matrix') {
       query = query.eq('reservation_date', selectedDate);
@@ -829,7 +844,7 @@ const AdminReservas = () => {
                       <span className="text-muted-foreground">{formatTime(r.reservation_time)}</span>
                     </TableCell>
                     <TableCell>{r.clients?.full_name || '-'}</TableCell>
-                    <TableCell>{r.clients?.state || '-'}</TableCell>
+                    <TableCell>{INCIDENCIA_TYPES.has(r.service_type) ? (r.dealerships?.state || '-') : (r.clients?.state || '-')}</TableCell>
                     <TableCell>
                       {r.vehicles?.vehicle_models?.brand} {r.vehicles?.vehicle_models?.name} {r.vehicles?.year}
                       <br />
@@ -1116,7 +1131,7 @@ const AdminReservas = () => {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display">{editingRes ? 'Editar Reserva' : 'Nueva Reserva'}</DialogTitle>
+            <DialogTitle className="font-display">{editingRes ? (INCIDENCIA_TYPES.has(editingRes.service_type) ? 'Editar Incidencia' : 'Editar Reserva') : (INCIDENCIA_TYPES.has(fService) ? 'Nueva Incidencia' : 'Nueva Reserva')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {/* Concesionario */}
@@ -1184,22 +1199,24 @@ const AdminReservas = () => {
             )}
 
             {/* Fecha y Hora */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className={INCIDENCIA_TYPES.has(fService) ? 'space-y-2' : 'grid grid-cols-2 gap-4'}>
               <div className="space-y-2">
                 <Label>Fecha *</Label>
                 <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} />
               </div>
-              <div className="space-y-2">
-                <Label>Hora *</Label>
-                <Select value={fTime} onValueChange={setFTime}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {HOURS.map(h => (
-                      <SelectItem key={h} value={h}>{HOUR_LABELS[h]}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {!INCIDENCIA_TYPES.has(fService) && (
+                <div className="space-y-2">
+                  <Label>Hora *</Label>
+                  <Select value={fTime} onValueChange={setFTime}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {HOURS.map(h => (
+                        <SelectItem key={h} value={h}>{HOUR_LABELS[h]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
 
             {/* Servicio */}
@@ -1236,19 +1253,22 @@ const AdminReservas = () => {
                 <Select value={fStatus} onValueChange={setFStatus}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {Object.entries(STATUS_LABELS).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>{v}</SelectItem>
-                    ))}
+                    {INCIDENCIA_TYPES.has(fService)
+                      ? Object.entries(INCIDENCIA_STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)
+                      : Object.entries(STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)
+                    }
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
             {/* Descripción de la incidencia */}
-            <div className="space-y-2">
-              <Label>Descripción de la incidencia</Label>
-              <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." rows={3} />
-            </div>
+            {INCIDENCIA_TYPES.has(fService) && (
+              <div className="space-y-2">
+                <Label>Descripción de la incidencia</Label>
+                <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." rows={3} />
+              </div>
+            )}
 
             {/* Notas */}
             <div className="space-y-2">
@@ -1410,18 +1430,26 @@ const AdminReservas = () => {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
-              <FileText className="w-4 h-4" /> Detalle de Reserva
+              {detailRes && INCIDENCIA_TYPES.has(detailRes.service_type)
+                ? <><AlertCircle className="w-4 h-4 text-amber-500" /> Detalle de Incidencia</>
+                : <><FileText className="w-4 h-4" /> Detalle de Reserva</>}
             </DialogTitle>
           </DialogHeader>
           {detailRes && (
             <div className="space-y-4 py-1">
               {/* Status badge */}
               <div className="flex items-center justify-between">
-                <Badge className={cn('text-xs px-2 py-0.5', STATUS_COLORS[detailRes.status] || 'bg-muted')}>
-                  {STATUS_LABELS[detailRes.status] || detailRes.status}
-                </Badge>
+                {(() => {
+                  const isInc = INCIDENCIA_TYPES.has(detailRes.service_type);
+                  const statusColor = isInc ? (INCIDENCIA_STATUS_COLORS[detailRes.status] || 'bg-muted') : (STATUS_COLORS[detailRes.status] || 'bg-muted');
+                  const statusLabel = isInc ? (INCIDENCIA_STATUS_LABELS[detailRes.status] || detailRes.status) : (STATUS_LABELS[detailRes.status] || detailRes.status);
+                  return <Badge className={cn('text-xs px-2 py-0.5', statusColor)}>{statusLabel}</Badge>;
+                })()}
                 <span className="text-xs text-muted-foreground">{formatDate(detailRes.reservation_date)} · {formatTime(detailRes.reservation_time)}</span>
               </div>
+              {detailRes.created_by_name && (
+                <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name}</span>{detailRes.created_by_role ? ` · ${detailRes.created_by_role}` : ''}</p>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 {/* Client */}
@@ -1490,7 +1518,7 @@ const AdminReservas = () => {
               {/* Notes */}
               {detailRes.notes && (
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Notas de reserva</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{detailRes && INCIDENCIA_TYPES.has(detailRes.service_type) ? 'Descripción de la falla' : 'Notas de reserva'}</p>
                   <div className="flex gap-1.5">
                     <StickyNote className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
                     <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.notes}</p>
@@ -1538,7 +1566,7 @@ const AdminReservas = () => {
       <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar esta reserva?</AlertDialogTitle>
+            <AlertDialogTitle>{deleteTarget && INCIDENCIA_TYPES.has(deleteTarget.service_type) ? '¿Eliminar esta incidencia?' : '¿Eliminar esta reserva?'}</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget && (
                 <>
