@@ -637,6 +637,7 @@ const DealershipReservas = () => {
                 <TableHead>Cliente</TableHead>
                 <TableHead>Vehículo / Placa</TableHead>
                 <TableHead>Servicio</TableHead>
+                <TableHead>Registrado por</TableHead>
                 <TableHead>Km</TableHead>
                 <TableHead>Estado</TableHead>
               </TableRow>
@@ -668,6 +669,14 @@ const DealershipReservas = () => {
                         {isInc && <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />}
                         <span>{r.service_type}</span>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {r.created_by_name ? (
+                        <div>
+                          <div>{r.created_by_name}</div>
+                          {r.created_by_role && <span className="text-[10px] text-muted-foreground">{r.created_by_role}</span>}
+                        </div>
+                      ) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>{r.current_mileage.toLocaleString()}</TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
@@ -741,8 +750,8 @@ const DealershipReservas = () => {
                     <Badge className={cn("text-xs px-2 py-0.5", st.color)}>{st.label}</Badge>
                     <span className="text-[10px] text-muted-foreground">{detailRes.created_at ? new Date(detailRes.created_at).toLocaleDateString('es-VE') : ''}</span>
                   </div>
-                  {isInc && detailRes.created_by_name && (
-                    <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name}</span>{detailRes.created_by_role ? ` · ${detailRes.created_by_role}` : ''}</p>
+                  {isInc && (
+                    <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'No registrado'}</span>{detailRes.created_by_role ? ` · ${detailRes.created_by_role}` : ''}</p>
                   )}
                   <div className="space-y-2 text-xs">
                     <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>

@@ -149,6 +149,7 @@ const AdminReservas = () => {
   const [filtroConc, setFiltroConc] = useState('todos');
   const [filtroEstado, setFiltroEstado] = useState('todos');
   const [filtroServicio, setFiltroServicio] = useState('todos');
+  const [filtroVendedor, setFiltroVendedor] = useState('todos');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -555,9 +556,12 @@ const AdminReservas = () => {
     setCompleting(false);
   };
 
+  const vendedores = [...new Set(reservations.filter(r => r.created_by_name).map(r => r.created_by_name!))].sort();
+
   const filteredReservations = reservations.filter(r => {
     if (filtroEstado !== 'todos' && r.status !== filtroEstado) return false;
     if (filtroServicio !== 'todos' && r.service_type !== filtroServicio) return false;
+    if (filtroVendedor !== 'todos' && r.created_by_name !== filtroVendedor) return false;
     if (fechaDesde && r.reservation_date < fechaDesde) return false;
     if (fechaHasta && r.reservation_date > fechaHasta) return false;
     if (busqueda.trim()) {
@@ -677,6 +681,15 @@ const AdminReservas = () => {
                   {serviceTypes.filter(s => s.is_active).map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {vendedores.length > 0 && (
+                <Select value={filtroVendedor} onValueChange={v => { setFiltroVendedor(v); setSelectedIds(new Set()); }}>
+                  <SelectTrigger className="flex-1 sm:w-[160px] sm:flex-none h-8 text-xs"><SelectValue placeholder="Registrado por" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos los vendedores</SelectItem>
+                    {vendedores.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
             </>
           )}
         </div>
@@ -690,8 +703,8 @@ const AdminReservas = () => {
               <span className="text-[11px] text-muted-foreground shrink-0">Hasta</span>
               <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
             </div>
-            {(fechaDesde || fechaHasta || filtroEstado !== 'todos' || filtroServicio !== 'todos') && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setFechaDesde(''); setFechaHasta(''); setFiltroEstado('todos'); setFiltroServicio('todos'); }}>
+            {(fechaDesde || fechaHasta || filtroEstado !== 'todos' || filtroServicio !== 'todos' || filtroVendedor !== 'todos') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground" onClick={() => { setFechaDesde(''); setFechaHasta(''); setFiltroEstado('todos'); setFiltroServicio('todos'); setFiltroVendedor('todos'); }}>
                 Limpiar
               </Button>
             )}
@@ -822,6 +835,7 @@ const AdminReservas = () => {
                   <TableHead>Estado (Vzla)</TableHead>
                   <TableHead>Vehículo</TableHead>
                   <TableHead>Servicio</TableHead>
+                  <TableHead>Registrado por</TableHead>
                   <TableHead>Concesionario</TableHead>
                   <TableHead>Km</TableHead>
                   <TableHead>Estado</TableHead>
@@ -851,6 +865,14 @@ const AdminReservas = () => {
                       <span className="text-muted-foreground">{r.vehicles?.plate || '-'}</span>
                     </TableCell>
                     <TableCell>{r.service_type}</TableCell>
+                    <TableCell>
+                      {r.created_by_name ? (
+                        <div>
+                          <div>{r.created_by_name}</div>
+                          {r.created_by_role && <span className="text-[10px] text-muted-foreground">{r.created_by_role}</span>}
+                        </div>
+                      ) : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell>{r.dealerships?.name || '-'}</TableCell>
                     <TableCell>{r.current_mileage.toLocaleString()}</TableCell>
                     <TableCell onClick={e => e.stopPropagation()} className="text-right">
@@ -1447,8 +1469,8 @@ const AdminReservas = () => {
                 })()}
                 <span className="text-xs text-muted-foreground">{formatDate(detailRes.reservation_date)} · {formatTime(detailRes.reservation_time)}</span>
               </div>
-              {detailRes.created_by_name && (
-                <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name}</span>{detailRes.created_by_role ? ` · ${detailRes.created_by_role}` : ''}</p>
+              {INCIDENCIA_TYPES.has(detailRes.service_type) && (
+                <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'No registrado'}</span>{detailRes.created_by_role ? ` · ${detailRes.created_by_role}` : ''}</p>
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
