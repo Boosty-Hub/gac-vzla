@@ -419,7 +419,7 @@ const DealershipReservas = () => {
         client_id: fClientId || null,
         vehicle_id: fIncVehicleId || null,
         reservation_date: fDate,
-        reservation_time: '08:00',
+        reservation_time: fTime || '08:00',
         service_type: fService,
         notes: fNotes.trim(),
         current_mileage: parseInt(fMileage) || 0,
@@ -632,8 +632,7 @@ const DealershipReservas = () => {
           <Table className="text-xs">
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
-                <TableHead>Fecha</TableHead>
-                <TableHead>Hora</TableHead>
+                <TableHead>Fecha / Hora</TableHead>
                 <TableHead>Cliente</TableHead>
                 <TableHead>Vehículo / Placa</TableHead>
                 <TableHead>Servicio</TableHead>
@@ -654,8 +653,11 @@ const DealershipReservas = () => {
                 const st = statusMap[r.status] || (isInc ? INCIDENCIA_STATUSES.pendiente : STATUS_CONFIG.pendiente);
                 return (
                   <TableRow key={r.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(r)}>
-                    <TableCell className="font-medium">{r.reservation_date}</TableCell>
-                    <TableCell>{isInc ? <span className="text-muted-foreground">—</span> : r.reservation_time?.slice(0, 5)}</TableCell>
+                    <TableCell className="font-medium">
+                      {r.reservation_date}
+                      <br />
+                      <span className="text-[10px] text-muted-foreground">{r.reservation_time?.slice(0, 5) || '—'}</span>
+                    </TableCell>
                     <TableCell>
                       <div>{clientName}</div>
                       {!r.clients && r.walkin_client_phone && <span className="text-[10px] text-muted-foreground">{r.walkin_client_phone}</span>}
@@ -1031,9 +1033,15 @@ const DealershipReservas = () => {
                 </div>
               )}
 
-              <div className="space-y-1">
-                <Label className="text-xs">Fecha del reporte *</Label>
-                <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Fecha del reporte *</Label>
+                  <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Hora</Label>
+                  <Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select>
+                </div>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Descripción de la falla *</Label>
