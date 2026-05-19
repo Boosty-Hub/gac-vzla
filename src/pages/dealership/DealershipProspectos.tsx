@@ -1017,13 +1017,13 @@ const DealershipProspectos = () => {
                   </TableHead>
                   {visibleCols.has('nombre') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('name')}>Nombre<SortIcon field="name" /></TableHead>}
                   {(visibleCols.has('telefono') || visibleCols.has('email')) && <TableHead>Contacto</TableHead>}
+                  {visibleCols.has('estadovzla') && <TableHead>Estado Vzla</TableHead>}
                   {visibleCols.has('marca') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('model_interest')}>Marca<SortIcon field="model_interest" /></TableHead>}
                   {visibleCols.has('modelo') && <TableHead>Modelo</TableHead>}
                   {!isSalesperson && !isVendedor && visibleCols.has('vendedor') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('salesperson')}>Vendedor<SortIcon field="salesperson" /></TableHead>}
                   {visibleCols.has('fuente') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>}
                   {(visibleCols.has('evento') || eventNameFilter !== 'todos') && <TableHead>Evento</TableHead>}
                   {visibleCols.has('estado') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>}
-                  {visibleCols.has('estadovzla') && <TableHead>Estado Vzla</TableHead>}
                   {visibleCols.has('testdrive') && <TableHead className="text-center">TD</TableHead>}
                   {visibleCols.has('tipopersona') && <TableHead>Tipo</TableHead>}
                   {visibleCols.has('genero') && <TableHead>Género</TableHead>}
@@ -1048,6 +1048,7 @@ const DealershipProspectos = () => {
                           {visibleCols.has('email') && p.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="w-2.5 h-2.5" />{p.email}</div>}
                         </TableCell>
                       )}
+                      {visibleCols.has('estadovzla') && <TableCell className="text-muted-foreground">{p['Estado de Vnzla'] || '-'}</TableCell>}
                       {visibleCols.has('marca') && <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{parts[0]}</Badge> : '-'; })()}</TableCell>}
                       {visibleCols.has('modelo') && <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? (parts.slice(1).join(' ') || '-') : (p.model_interest || '-'); })()}</TableCell>}
                       {!isSalesperson && !isVendedor && visibleCols.has('vendedor') && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
@@ -1079,7 +1080,6 @@ const DealershipProspectos = () => {
                           </Select>
                         </TableCell>
                       )}
-                      {visibleCols.has('estadovzla') && <TableCell className="text-muted-foreground">{p['Estado de Vnzla'] || '-'}</TableCell>}
                       {visibleCols.has('testdrive') && (
                         <TableCell className="text-center">
                           {p.test_drive ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 inline" /> : <span className="text-muted-foreground/40">-</span>}
