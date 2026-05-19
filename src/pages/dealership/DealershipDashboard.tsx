@@ -11,6 +11,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Legend,
 } from 'recharts';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -173,6 +174,8 @@ const DealershipDashboard = () => {
   }, [prospects]);
 
   // ─── Events breakdown ───
+  const [eventFilter, setEventFilter] = useState('todos');
+
   const eventBreakdown = useMemo(() => {
     const eventProspects = prospects.filter(p => p.source === 'evento' && p.event_name);
     const map: Record<string, { total: number; ganados: number }> = {};
@@ -186,6 +189,10 @@ const DealershipDashboard = () => {
       .map(([name, d]) => ({ name, total: d.total, ganados: d.ganados }))
       .sort((a, b) => b.total - a.total);
   }, [prospects]);
+
+  const filteredEventBreakdown = eventFilter === 'todos'
+    ? eventBreakdown
+    : eventBreakdown.filter(ev => ev.name === eventFilter);
 
   // ─── Salesperson ranking ───
   const salespersonRanking = useMemo(() => {
@@ -442,13 +449,26 @@ const DealershipDashboard = () => {
       {eventBreakdown.length > 0 && (
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-display flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-muted-foreground" /> Captación por Evento
-            </CardTitle>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <CardTitle className="text-sm font-display flex items-center gap-2">
+                <CalendarDays className="w-4 h-4 text-muted-foreground" /> Captación por Evento
+              </CardTitle>
+              <Select value={eventFilter} onValueChange={setEventFilter}>
+                <SelectTrigger className="h-7 text-xs w-[180px]">
+                  <SelectValue placeholder="Todos los eventos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los eventos</SelectItem>
+                  {eventBreakdown.map(ev => (
+                    <SelectItem key={ev.name} value={ev.name}>{ev.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y divide-border">
-              {eventBreakdown.map(ev => (
+              {filteredEventBreakdown.map(ev => (
                 <div key={ev.name} className="flex items-center justify-between px-4 py-3">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="p-2 rounded-lg bg-violet-50 text-violet-600 shrink-0">

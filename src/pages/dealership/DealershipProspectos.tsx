@@ -1023,6 +1023,7 @@ const DealershipProspectos = () => {
                   {visibleCols.has('fuente') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>}
                   {(visibleCols.has('evento') || eventNameFilter !== 'todos') && <TableHead>Evento</TableHead>}
                   {visibleCols.has('estado') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>}
+                  {visibleCols.has('estadovzla') && <TableHead>Estado Vzla</TableHead>}
                   {visibleCols.has('testdrive') && <TableHead className="text-center">TD</TableHead>}
                   {visibleCols.has('tipopersona') && <TableHead>Tipo</TableHead>}
                   {visibleCols.has('genero') && <TableHead>Género</TableHead>}
@@ -1078,6 +1079,7 @@ const DealershipProspectos = () => {
                           </Select>
                         </TableCell>
                       )}
+                      {visibleCols.has('estadovzla') && <TableCell className="text-muted-foreground">{p['Estado de Vnzla'] || '-'}</TableCell>}
                       {visibleCols.has('testdrive') && (
                         <TableCell className="text-center">
                           {p.test_drive ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 inline" /> : <span className="text-muted-foreground/40">-</span>}
