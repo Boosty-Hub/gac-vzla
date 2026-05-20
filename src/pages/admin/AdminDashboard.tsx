@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
@@ -244,6 +245,8 @@ const AdminDashboard = () => {
   }, [prospects]);
 
   // ─── 10. Eventos — todos los prospectos con event_name (igual que widgets) ───
+  const [eventFilter, setEventFilter] = useState('todos');
+
   const eventBreakdown = useMemo(() => {
     const map: Record<string, { total: number; ganados: number }> = {};
     prospects.forEach(p => {
@@ -686,17 +689,30 @@ const AdminDashboard = () => {
 
       {/* ── 10. Captación por evento ── */}
       <Card className="gac-shadow">
-        <CardHeader className="pb-2">
+        <CardHeader className="pb-2 space-y-2">
           <CardTitle className="text-sm font-display flex items-center gap-2">
             <CalendarDays className="w-4 h-4 text-violet-500" /> Eventos — Captación de Leads
           </CardTitle>
+          {eventBreakdown.length > 0 && (
+            <Select value={eventFilter} onValueChange={setEventFilter}>
+              <SelectTrigger className="h-8 text-xs w-full">
+                <SelectValue placeholder="Todos los eventos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los eventos</SelectItem>
+                {eventBreakdown.map(ev => (
+                  <SelectItem key={ev.name} value={ev.name}>{ev.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           {eventBreakdown.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">No hay prospectos registrados desde eventos</p>
           ) : (
             <div className="divide-y divide-border">
-              {eventBreakdown.map(ev => (
+              {(eventFilter === 'todos' ? eventBreakdown : eventBreakdown.filter(ev => ev.name === eventFilter)).map(ev => (
                 <div
                   key={ev.name}
                   className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"

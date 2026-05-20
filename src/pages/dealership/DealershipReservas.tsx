@@ -633,6 +633,7 @@ const DealershipReservas = () => {
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                 <TableHead>Fecha / Hora</TableHead>
+                <TableHead>Estado Vzla</TableHead>
                 <TableHead>Cliente</TableHead>
                 <TableHead>Vehículo / Placa</TableHead>
                 <TableHead>Servicio</TableHead>
@@ -657,6 +658,9 @@ const DealershipReservas = () => {
                       {r.reservation_date}
                       <br />
                       <span className="text-[10px] text-muted-foreground">{r.reservation_time?.slice(0, 5) || '—'}</span>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-[11px]">
+                      {dealerships.find(d => d.id === selectedDealership)?.state || '—'}
                     </TableCell>
                     <TableCell>
                       <div>{clientName}</div>

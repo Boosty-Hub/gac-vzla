@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 interface Dealership {
   id: string;
   name: string;
+  state: string | null;
 }
 
 /**
@@ -27,7 +28,7 @@ export function useDealershipAccess() {
         // Admins see all dealerships
         const { data } = await supabase
           .from('dealerships')
-          .select('id, name')
+          .select('id, name, state')
           .eq('is_active', true)
           .order('name');
         if (data && data.length > 0) {
@@ -38,7 +39,7 @@ export function useDealershipAccess() {
         // Concesionario: get linked dealership
         const { data: links } = await supabase
           .from('dealership_users')
-          .select('dealership_id, dealerships(id, name)')
+          .select('dealership_id, dealerships(id, name, state)')
           .eq('profile_id', user.id);
 
         if (links && links.length > 0) {
