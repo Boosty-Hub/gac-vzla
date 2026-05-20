@@ -734,6 +734,7 @@ const DealershipProspectos = () => {
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             {p.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{p.phone}</span>}
             {p.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{p.email}</span>}
+            {p['Estado de Vnzla'] && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{p['Estado de Vnzla']}</span>}
           </div>
           <div className="flex items-center gap-2 text-[10px]">
             {p.model_interest && <span className="text-muted-foreground">🚘 {p.model_interest}</span>}
