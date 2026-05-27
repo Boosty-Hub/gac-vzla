@@ -316,10 +316,16 @@ async function syncFieldsFromKommo(
   }
 
   // Source (select → text)
+  // NOTE: 'visita' and 'concesionario' both map to the same Kommo enum (7832230) because
+  // Kommo doesn't distinguish between them. On round-trip, the webhook would always
+  // downgrade 'visita' to 'concesionario'. We preserve the local 'visita' value in that case.
   const sourceEnumId = getCFEnum(cfValues, CF.fuente)
   if (sourceEnumId !== null) {
     const source = KOMMO_TO_SOURCE[String(sourceEnumId)] ?? null
-    if (source && source !== prospect.source) updates.source = source
+    if (source && source !== prospect.source) {
+      const isDowngradeFromVisita = prospect.source === 'visita' && source === 'concesionario'
+      if (!isDowngradeFromVisita) updates.source = source
+    }
   }
 
   // Brand + model
