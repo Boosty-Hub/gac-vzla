@@ -32,6 +32,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import ProspectSourceManager from '@/components/ProspectSourceManager';
+import ProspectEventManager from '@/components/ProspectEventManager';
+import { useProspectEvents } from '@/hooks/useProspectEvents';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 
@@ -122,6 +124,8 @@ const AdminProspectos = () => {
   const [salespersonManagerOpen, setSalespersonManagerOpen] = useState(false);
   const [modelManagerOpen, setModelManagerOpen] = useState(false);
   const [sourceManagerOpen, setSourceManagerOpen] = useState(false);
+  const [eventManagerOpen, setEventManagerOpen] = useState(false);
+  const { events: prospectEvents, fetchEvents: refetchEvents } = useProspectEvents();
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1002,6 +1006,9 @@ const AdminProspectos = () => {
           <Button size="sm" variant="outline" onClick={() => setSourceManagerOpen(true)} className="gap-1">
             <MapPin className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Tipos contacto</span>
           </Button>
+          <Button size="sm" variant="outline" onClick={() => setEventManagerOpen(true)} className="gap-1">
+            <CalendarDays className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Eventos</span>
+          </Button>
           {canCreate && (
             <>
               <Button size="sm" variant="outline" onClick={exportToXLSX} className="gap-1 hidden sm:flex">
@@ -1702,7 +1709,18 @@ const AdminProspectos = () => {
               {pSource === 'evento' && (
                 <div className="space-y-1">
                   <Label className="text-xs">Nombre de evento</Label>
-                  <Input value={pEventName} onChange={e => setPEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" className="h-9 text-xs" />
+                  <Select value={pEventName || '__none'} onValueChange={v => setPEventName(v === '__none' ? '' : v)}>
+                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar evento" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Sin evento</SelectItem>
+                      {/* Si el evento del prospecto no está en la lista activa, lo añadimos arriba para no perderlo */}
+                      {pEventName && !prospectEvents.some(ev => ev.name === pEventName) && (
+                        <SelectItem value={pEventName} className="italic text-muted-foreground">{pEventName} (no listado)</SelectItem>
+                      )}
+                      {prospectEvents.map(ev => <SelectItem key={ev.id} value={ev.name}>{ev.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground">Gestiona los eventos disponibles desde el botón <strong>Eventos</strong> arriba.</p>
                 </div>
               )}
               <div className="space-y-1">
@@ -1866,6 +1884,13 @@ const AdminProspectos = () => {
         open={sourceManagerOpen}
         onOpenChange={setSourceManagerOpen}
         onSourcesChanged={refetchSources}
+      />
+
+      {/* PROSPECT EVENT MANAGER */}
+      <ProspectEventManager
+        open={eventManagerOpen}
+        onOpenChange={setEventManagerOpen}
+        onEventsChanged={refetchEvents}
       />
 
       {/* UPDATES SIDEBAR */}

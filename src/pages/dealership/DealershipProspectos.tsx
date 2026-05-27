@@ -29,6 +29,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useProspectModels } from '@/hooks/useProspectModels';
 import { useProspectSources } from '@/hooks/useProspectSources';
+import { useProspectEvents } from '@/hooks/useProspectEvents';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 
@@ -96,6 +97,7 @@ interface Prospect {
 const DealershipProspectos = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { sources: PROSPECT_SOURCES } = useProspectSources();
+  const { events: prospectEvents } = useProspectEvents();
   const { salespersons } = useSalespersons();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
@@ -1222,7 +1224,16 @@ const DealershipProspectos = () => {
               {pSource === 'evento' && (
                 <div className="space-y-1">
                   <Label className="text-xs">Nombre de evento</Label>
-                  <Input value={pEventName} onChange={e => setPEventName(e.target.value)} placeholder="Ej: Expo Auto 2026" className="h-9 text-xs" />
+                  <Select value={pEventName || '__none'} onValueChange={v => setPEventName(v === '__none' ? '' : v)}>
+                    <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar evento" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Sin evento</SelectItem>
+                      {pEventName && !prospectEvents.some(ev => ev.name === pEventName) && (
+                        <SelectItem value={pEventName} className="italic text-muted-foreground">{pEventName} (no listado)</SelectItem>
+                      )}
+                      {prospectEvents.map(ev => <SelectItem key={ev.id} value={ev.name}>{ev.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
               {autoSalesperson ? (
