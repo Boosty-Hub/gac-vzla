@@ -153,7 +153,8 @@ const DealershipReservas = () => {
 
   // Edit incidencia
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
-  const [deletingIncId, setDeletingIncId] = useState<string | null>(null);
+  const [deletingResId, setDeletingResId] = useState<string | null>(null);
+  const [deletingResIsInc, setDeletingResIsInc] = useState(false);
 
   // Inline Km edit (for any reservation)
   const [editingKmMode, setEditingKmMode] = useState(false);
@@ -565,11 +566,12 @@ const DealershipReservas = () => {
     setCreateOpen(true);
   };
 
-  const deleteIncidencia = async (id: string) => {
+  const deleteReservation = async (id: string) => {
     const { error } = await supabase.from('reservations').delete().eq('id', id);
-    if (error) { toast.error('Error al eliminar la incidencia'); }
-    else { toast.success('Incidencia eliminada'); setDetailOpen(false); fetchReservations(); }
-    setDeletingIncId(null);
+    if (error) { toast.error('Error al eliminar'); }
+    else { toast.success(deletingResIsInc ? 'Incidencia eliminada' : 'Reserva eliminada'); setDetailOpen(false); fetchReservations(); }
+    setDeletingResId(null);
+    setDeletingResIsInc(false);
   };
 
   const openComplete = (r: Reservation) => {
@@ -870,7 +872,7 @@ const DealershipReservas = () => {
                       <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => openEditIncidencia(detailRes)}>
                         <Pencil className="w-3 h-3" /> Editar
                       </Button>
-                      <Button size="sm" variant="ghost" className="text-xs text-destructive gap-1" onClick={() => { setDeletingIncId(detailRes.id); }}>
+                      <Button size="sm" variant="ghost" className="text-xs text-destructive gap-1" onClick={() => { setDeletingResIsInc(true); setDeletingResId(detailRes.id); }}>
                         <Trash2 className="w-3 h-3" /> Eliminar
                       </Button>
                     </div>
@@ -879,7 +881,9 @@ const DealershipReservas = () => {
                       {detailRes.status === 'pendiente' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'confirmada'); }}>Confirmar</Button>}
                       {detailRes.status === 'confirmada' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'en_proceso'); }}>Iniciar</Button>}
                       {detailRes.status === 'en_proceso' && <Button size="sm" className="text-xs gac-gradient gap-1" onClick={() => { setDetailOpen(false); openComplete(detailRes); }}><ClipboardCheck className="w-3 h-3" /> Completar</Button>}
-                      {(detailRes.status === 'pendiente' || detailRes.status === 'confirmada') && <Button size="sm" variant="ghost" className="text-xs text-destructive" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'cancelada'); }}>Cancelar</Button>}
+                      <Button size="sm" variant="ghost" className="text-xs text-destructive gap-1" onClick={() => { setDeletingResIsInc(false); setDeletingResId(detailRes.id); }}>
+                        <Trash2 className="w-3 h-3" /> Eliminar
+                      </Button>
                     </div>
                   )}
                 </TabsContent>
@@ -964,16 +968,16 @@ const DealershipReservas = () => {
         </DialogContent>
       </Dialog>
 
-      {/* DELETE INCIDENCIA CONFIRMATION */}
-      <AlertDialog open={!!deletingIncId} onOpenChange={open => { if (!open) setDeletingIncId(null); }}>
+      {/* DELETE RESERVATION/INCIDENCIA CONFIRMATION */}
+      <AlertDialog open={!!deletingResId} onOpenChange={open => { if (!open) { setDeletingResId(null); setDeletingResIsInc(false); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar esta incidencia?</AlertDialogTitle>
+            <AlertDialogTitle>{deletingResIsInc ? '¿Eliminar esta incidencia?' : '¿Eliminar esta reserva?'}</AlertDialogTitle>
             <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deletingIncId && deleteIncidencia(deletingIncId)}>Eliminar</AlertDialogAction>
+            <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90" onClick={() => deletingResId && deleteReservation(deletingResId)}>Eliminar</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
