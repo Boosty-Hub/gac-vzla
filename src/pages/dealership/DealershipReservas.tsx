@@ -45,6 +45,7 @@ interface Reservation {
   created_at: string;
   created_by_name: string | null;
   created_by_role: string | null;
+  created_by_profile_id: string | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
@@ -154,6 +155,11 @@ const DealershipReservas = () => {
   const [editingRes, setEditingRes] = useState<Reservation | null>(null);
   const [deletingIncId, setDeletingIncId] = useState<string | null>(null);
 
+  // Inline Km edit (for any reservation)
+  const [editingKmMode, setEditingKmMode] = useState(false);
+  const [editingKmValue, setEditingKmValue] = useState('');
+  const [savingKm, setSavingKm] = useState(false);
+
   // Complete dialog
   const [completeOpen, setCompleteOpen] = useState(false);
   const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
@@ -210,16 +216,23 @@ const DealershipReservas = () => {
   const hoy = new Date().toISOString().split('T')[0];
   const isIncidencia = INCIDENCIA_TYPES.has(fService);
 
+  const isVendedor = role?.name?.toLowerCase() === 'vendedor';
+
   const fetchReservations = async () => {
     if (!selectedDealership) return;
     setLoading(true);
-    const { data } = await supabase
+    let query = supabase
       .from('reservations')
       .select('*, clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand))')
       .eq('dealership_id', selectedDealership)
       .order('reservation_date', { ascending: false })
       .order('reservation_time', { ascending: false })
       .limit(200);
+    // Vendedor sees ONLY their own reservations/incidencias
+    if (isVendedor && profile?.id) {
+      query = query.eq('created_by_profile_id', profile.id);
+    }
+    const { data } = await query;
     setReservations((data || []) as Reservation[]);
     setLoading(false);
   };
@@ -325,7 +338,10 @@ const DealershipReservas = () => {
     } catch {}
   }, [createOpen, plateSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone]);
 
+  const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
+    // Hide archived (completada/cancelada/culminado) unless explicitly filtered
+    if (resStatusFilter === 'todos' && ARCHIVED_STATUSES.has(r.status)) return false;
     if (resStatusFilter !== 'todos' && r.status !== resStatusFilter) return false;
     if (resServiceFilter !== 'todos' && r.service_type !== resServiceFilter) return false;
     if (resFechaDesde && r.reservation_date < resFechaDesde) return false;
@@ -435,6 +451,7 @@ const DealershipReservas = () => {
         incPayload.status = 'pendiente';
         incPayload.created_by_name = creatorName;
         incPayload.created_by_role = creatorRole;
+        incPayload.created_by_profile_id = profile?.id || null;
         const { error } = await supabase.from('reservations').insert(incPayload);
         if (error) { toast.error('Error al crear incidencia'); console.error(error); }
         else { toast.success('Incidencia creada exitosamente'); setCreateOpen(false); fetchReservations(); }
@@ -453,6 +470,8 @@ const DealershipReservas = () => {
     }
 
     setSaving(true);
+    const creatorName = currentSalesperson?.name || profile?.full_name || null;
+    const creatorRole = role?.name || null;
     const payload: any = {
       dealership_id: selectedDealership,
       reservation_date: fDate, reservation_time: fTime, service_type: fService,
@@ -460,6 +479,9 @@ const DealershipReservas = () => {
       notes: [fNotes.trim(), fObs.trim()].filter(Boolean).join('\n') || null,
       status: 'pendiente',
       technical_report_url: createTechReportUrl || null,
+      created_by_name: creatorName,
+      created_by_role: creatorRole,
+      created_by_profile_id: profile?.id || null,
     };
 
     if (searchMode === 'nombre') {
@@ -489,8 +511,24 @@ const DealershipReservas = () => {
     else { toast.success('Estado actualizado'); fetchReservations(); }
   };
 
+  const saveKmEdit = async () => {
+    if (!detailRes) return;
+    const km = parseInt(editingKmValue) || 0;
+    setSavingKm(true);
+    const { error } = await supabase.from('reservations').update({ current_mileage: km }).eq('id', detailRes.id);
+    if (error) { toast.error('Error al actualizar Km'); console.error(error); }
+    else {
+      toast.success('Km actualizado');
+      setDetailRes({ ...detailRes, current_mileage: km });
+      setEditingKmMode(false);
+      fetchReservations();
+    }
+    setSavingKm(false);
+  };
+
   const openDetail = async (r: Reservation) => {
     setDetailRes(r); setVehicleDetail(null); setVehicleHistory([]); setDetailOpen(true);
+    setEditingKmMode(false); setEditingKmValue(String(r.current_mileage || 0));
     if (r.vehicle_id) {
       setLoadingDetail(true);
       const { data: veh } = await supabase
@@ -629,7 +667,8 @@ const DealershipReservas = () => {
             <p className="text-sm text-muted-foreground">No hay reservas</p>
           </CardContent>
         ) : (
-          <Table className="text-xs">
+          <div className="overflow-x-auto">
+          <Table className="text-xs min-w-[700px]">
             <TableHeader>
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                 <TableHead>Fecha / Hora</TableHead>
@@ -731,6 +770,7 @@ const DealershipReservas = () => {
               })}
             </TableBody>
           </Table>
+          </div>
         )}
       </Card>
 
@@ -778,7 +818,33 @@ const DealershipReservas = () => {
                     <div className="flex items-center gap-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_date}</span></div>
                     {!isInc && <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_time?.slice(0, 5)}</span></div>}
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
-                    {detailRes.current_mileage > 0 && <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>}
+                    <div className="flex items-center gap-2">
+                      <Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      {editingKmMode ? (
+                        <>
+                          <Input
+                            type="number"
+                            value={editingKmValue}
+                            onChange={e => setEditingKmValue(e.target.value)}
+                            className="h-6 text-xs w-28"
+                            autoFocus
+                          />
+                          <Button size="sm" className="h-6 text-[10px] px-2 gac-gradient" onClick={saveKmEdit} disabled={savingKm}>
+                            {savingKm ? '...' : 'Guardar'}
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5" onClick={() => { setEditingKmMode(false); setEditingKmValue(String(detailRes.current_mileage || 0)); }}>
+                            Cancelar
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <span>{detailRes.current_mileage > 0 ? `${detailRes.current_mileage.toLocaleString()} km` : 'Sin registrar'}</span>
+                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground" title="Editar Km" onClick={() => setEditingKmMode(true)}>
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                   {detailRes.notes && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">

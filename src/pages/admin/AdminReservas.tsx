@@ -115,7 +115,7 @@ const getArLS = () => { try { return JSON.parse(localStorage.getItem(AR_LS_KEY) 
 
 const AdminReservas = () => {
   const isMobile = useIsMobile();
-  const { hasPermission, role } = useAuth();
+  const { hasPermission, role, profile } = useAuth();
   const canCreate = hasPermission('reservas.create');
   const canEdit = hasPermission('reservas.edit');
   const canDelete = role?.name === 'superadmin' || role?.name === 'admin';
@@ -482,7 +482,7 @@ const AdminReservas = () => {
       return;
     }
 
-    const payload = {
+    const payload: any = {
       dealership_id: fDealership,
       client_id: fClientId,
       vehicle_id: fVehicleId,
@@ -500,6 +500,9 @@ const AdminReservas = () => {
       if (error) { toast.error('Error al actualizar reserva'); console.error(error); }
       else { toast.success('Reserva actualizada'); setDialogOpen(false); fetchReservations(); }
     } else {
+      payload.created_by_name = profile?.full_name || role?.name || 'Admin';
+      payload.created_by_role = role?.name || 'admin';
+      payload.created_by_profile_id = profile?.id || null;
       const { error } = await supabase.from('reservations').insert(payload);
       if (error) { toast.error('Error al crear reserva'); console.error(error); }
       else { toast.success('Reserva creada'); setDialogOpen(false); fetchReservations(); }
@@ -558,7 +561,10 @@ const AdminReservas = () => {
 
   const vendedores = [...new Set(reservations.filter(r => r.created_by_name).map(r => r.created_by_name!))].sort();
 
+  const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
+    // Hide archived (completada/cancelada/culminado) unless explicitly filtered
+    if (filtroEstado === 'todos' && ARCHIVED_STATUSES.has(r.status)) return false;
     if (filtroEstado !== 'todos' && r.status !== filtroEstado) return false;
     if (filtroServicio !== 'todos' && r.service_type !== filtroServicio) return false;
     if (filtroVendedor !== 'todos' && r.created_by_name !== filtroVendedor) return false;

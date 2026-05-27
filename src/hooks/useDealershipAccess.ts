@@ -11,6 +11,7 @@ interface Dealership {
 /**
  * Resolves which dealership(s) the current user has access to.
  * - concesionario role: only their linked dealership via dealership_users
+ * - vendedor role: all active dealerships (can pick any)
  * - admin/superadmin: all active dealerships (with selector)
  */
 export function useDealershipAccess() {
@@ -18,14 +19,16 @@ export function useDealershipAccess() {
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [selectedDealership, setSelectedDealership] = useState('');
   const [loading, setLoading] = useState(true);
-  const isAdmin = role?.name === 'superadmin' || role?.name === 'admin';
+  const roleName = role?.name?.toLowerCase() || '';
+  const isAdmin = roleName === 'superadmin' || roleName === 'admin';
+  const isVendedor = roleName === 'vendedor';
 
   useEffect(() => {
     const resolve = async () => {
       if (!user) { setLoading(false); return; }
 
-      if (isAdmin) {
-        // Admins see all dealerships
+      if (isAdmin || isVendedor) {
+        // Admins + Vendedores see all active dealerships
         const { data } = await supabase
           .from('dealerships')
           .select('id, name, state')
@@ -55,7 +58,7 @@ export function useDealershipAccess() {
       setLoading(false);
     };
     resolve();
-  }, [user, isAdmin]);
+  }, [user, isAdmin, isVendedor]);
 
   return {
     dealerships,

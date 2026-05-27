@@ -175,6 +175,8 @@ const PublicReserva = () => {
       current_mileage: parseInt(mileage) || 0,
       status: 'pendiente',
       notes: notes.trim() || null,
+      created_by_name: vehicle.clients?.full_name || 'Cliente',
+      created_by_role: 'Cliente',
     });
 
     if (error) {

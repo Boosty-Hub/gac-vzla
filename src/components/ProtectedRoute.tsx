@@ -5,6 +5,7 @@ import { useAuth, UserRole } from '@/contexts/AuthContext';
 interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];
+  allowedPortals?: string[];
 }
 
 const portalPaths: Record<string, string> = {
@@ -14,12 +15,12 @@ const portalPaths: Record<string, string> = {
 };
 
 function getRedirectPath(role: { name: string; redirect_portal?: string } | null): string {
-  if (!role) return '/usuario';
-  const portal = role.redirect_portal || role.name;
+  if (!role) return '/login';
+  const portal = role.redirect_portal || role.name?.toLowerCase();
   return portalPaths[portal] || '/usuario';
 }
 
-export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
+export function ProtectedRoute({ children, allowedRoles, allowedPortals }: ProtectedRouteProps) {
   const { user, role, loading } = useAuth();
 
   if (loading) {
@@ -37,10 +38,25 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && role) {
-    const hasAccess = allowedRoles.includes(role.name);
+  if (role) {
+    const roleName = (role.name || '').toLowerCase();
+    let hasAccess = false;
+    if (allowedRoles) {
+      hasAccess = allowedRoles.some(r => r?.toLowerCase() === roleName);
+    }
+    if (!hasAccess && allowedPortals) {
+      hasAccess = allowedPortals.includes(role.redirect_portal || '');
+    }
+    // No restrictions = allow
+    if (!allowedRoles && !allowedPortals) hasAccess = true;
+
     if (!hasAccess) {
-      return <Navigate to={getRedirectPath(role)} replace />;
+      const redirect = getRedirectPath(role);
+      // Avoid redirect loop: if redirect path is the SAME route, just render to prevent infinite loop
+      if (typeof window !== 'undefined' && window.location.pathname.startsWith(redirect)) {
+        return <>{children}</>;
+      }
+      return <Navigate to={redirect} replace />;
     }
   }
 

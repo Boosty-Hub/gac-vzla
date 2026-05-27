@@ -207,6 +207,7 @@ const UserPortal = () => {
   const [selectedTime, setSelectedTime] = useState<string>(() => getUpLS().selectedTime || '');
   const [mileage, setMileage] = useState<string>(() => getUpLS().mileage || '');
   const [notes, setNotes] = useState<string>(() => getUpLS().notes || '');
+  const [reservaReportUrl, setReservaReportUrl] = useState<string | null>(null);
   const [occupiedTimes, setOccupiedTimes] = useState<string[]>([]);
   const [loadingTimes, setLoadingTimes] = useState(false);
   const [vehicleSearch, setVehicleSearch] = useState('');
@@ -436,8 +437,10 @@ const UserPortal = () => {
       current_mileage: parseInt(mileage) || 0,
       status: 'pendiente',
       notes: notes.trim() || null,
+      technical_report_url: reservaReportUrl || null,
       created_by_name: clientData.full_name || 'Cliente',
       created_by_role: 'Cliente',
+      created_by_profile_id: user?.id || null,
     });
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
     else {
@@ -461,6 +464,7 @@ const UserPortal = () => {
     setVista('inicio');
     setReservaConfirmada(false);
     setPaso(1);
+    setReservaReportUrl(null);
   };
 
   const refreshReservations = async () => {
@@ -859,16 +863,28 @@ const UserPortal = () => {
                     </SelectContent>
                   </Select>
                   {selectedService && serviceTypes.find(s => s.name === selectedService)?.requires_description && (
-                    <div className="mt-3">
-                      <Label className="text-sm">Descripción de la incidencia *</Label>
-                      <Textarea
-                        value={notes}
-                        onChange={e => setNotes(e.target.value)}
-                        rows={3}
-                        className="mt-1"
-                        placeholder="Describa la falla, desperfecto o tipo de servicio que solicita..."
-                      />
-                    </div>
+                    <>
+                      <div className="mt-3">
+                        <Label className="text-sm">Descripción de la incidencia *</Label>
+                        <Textarea
+                          value={notes}
+                          onChange={e => setNotes(e.target.value)}
+                          rows={3}
+                          className="mt-1"
+                          placeholder="Describa la falla, desperfecto o tipo de servicio que solicita..."
+                        />
+                      </div>
+                      <div className="mt-3">
+                        <Label className="text-sm">Fotos / Videos (opcional)</Label>
+                        <p className="text-[11px] text-muted-foreground mb-1.5">Adjunta evidencia: fotos del daño, videos, sonidos, etc.</p>
+                        <TechnicalReportUploader
+                          reservationId={`tmp-${clientData?.id || 'cli'}`}
+                          value={reservaReportUrl}
+                          onChange={setReservaReportUrl}
+                          maxSizeMB={40}
+                        />
+                      </div>
+                    </>
                   )}
                 </div>
                 <div>

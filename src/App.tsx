@@ -37,13 +37,13 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const AdminRoute = ({ children }: { children: React.ReactNode }) => (
-  <ProtectedRoute allowedRoles={['superadmin', 'admin']}>
+  <ProtectedRoute allowedPortals={['admin']}>
     <AdminLayout>{children}</AdminLayout>
   </ProtectedRoute>
 );
 
 const DealershipRoute = ({ children }: { children: React.ReactNode }) => (
-  <ProtectedRoute allowedRoles={['concesionario', 'Vendedor', 'superadmin', 'admin']}>
+  <ProtectedRoute allowedPortals={['concesionario', 'admin']}>
     <DealershipLayout>{children}</DealershipLayout>
   </ProtectedRoute>
 );
@@ -64,7 +64,7 @@ const App = () => (
 
             {/* Cliente routes */}
             <Route path="/usuario" element={
-              <ProtectedRoute allowedRoles={['cliente', 'superadmin', 'admin']}>
+              <ProtectedRoute allowedPortals={['cliente', 'admin']}>
                 <UserPortal />
               </ProtectedRoute>
             } />

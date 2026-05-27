@@ -35,7 +35,7 @@ import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
-type ColKey = 'nombre' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'estado' | 'fecha';
+type ColKey = 'nombre' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'showroom' | 'estado' | 'fecha';
 const COL_LABELS: Record<ColKey, string> = {
   nombre: 'Nombre',
   telefono: 'Teléfono',
@@ -50,6 +50,7 @@ const COL_LABELS: Record<ColKey, string> = {
   genero: 'Género',
   edad: 'Edad',
   testdrive: 'Test Drive',
+  showroom: 'Show Room',
   estado: 'Estado',
   fecha: 'Fecha',
 };
@@ -84,6 +85,7 @@ interface Prospect {
   'Estado de Vnzla': string | null;
   kommo_lead_id: number | null;
   test_drive: boolean | null;
+  visited_showroom: boolean | null;
   person_type: string | null;
   gender: string | null;
   age_range: string | null;
@@ -145,6 +147,7 @@ const DealershipProspectos = () => {
   const [pEventName, setPEventName] = useState<string>(() => getSS().pEventName || '');
   const [pEstadoVzla, setPEstadoVzla] = useState<string>(() => getSS().pEstadoVzla || '');
   const [pTestDrive, setPTestDrive] = useState<boolean>(() => !!getSS().pTestDrive);
+  const [pShowroom, setPShowroom] = useState<boolean>(() => !!getSS().pShowroom);
   const [pPersonType, setPPersonType] = useState<string>(() => getSS().pPersonType || '');
   const [pGender, setPGender] = useState<string>(() => getSS().pGender || '');
   const [pAgeRange, setPAgeRange] = useState<string>(() => getSS().pAgeRange || '');
@@ -157,9 +160,9 @@ const DealershipProspectos = () => {
   useEffect(() => {
     if (!dialogOpen) return;
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pPersonType, pGender, pAgeRange }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
     } catch {}
-  }, [dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pPersonType, pGender, pAgeRange]);
+  }, [dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
   // Import/Export
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -578,7 +581,7 @@ const DealershipProspectos = () => {
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
     setPSalesperson(autoSalesperson);
     setPEventName(''); setPEstadoVzla('');
-    setPTestDrive(false); setPPersonType(''); setPGender(''); setPAgeRange('');
+    setPTestDrive(false); setPShowroom(false); setPPersonType(''); setPGender(''); setPAgeRange('');
   };
 
   const openDialog = () => {
@@ -599,6 +602,7 @@ const DealershipProspectos = () => {
     setPEventName(p.event_name || '');
     setPEstadoVzla(p['Estado de Vnzla'] || '');
     setPTestDrive(!!p.test_drive);
+    setPShowroom(!!p.visited_showroom);
     setPPersonType(p.person_type || '');
     setPGender(p.gender || '');
     setPAgeRange(p.age_range || '');
@@ -630,13 +634,14 @@ const DealershipProspectos = () => {
         status: pStatus || 'nuevo',
         notes: pNotes.trim() || null,
         salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
-        event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
+        event_name: pEventName.trim() || null,
         'Estado de Vnzla': pEstadoVzla.trim() || null,
         test_drive: !!pTestDrive,
+        visited_showroom: !!pShowroom,
         person_type: pPersonType || null,
         gender: pGender || null,
         age_range: pAgeRange || null,
-      }).eq('id', editingProspect.id);
+      } as any).eq('id', editingProspect.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
       else {
         toast.success('Prospecto actualizado');
@@ -660,13 +665,14 @@ const DealershipProspectos = () => {
         status: pStatus || 'nuevo',
         notes: pNotes.trim() || null,
         salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
-        event_name: pSource === 'evento' ? (pEventName.trim() || null) : null,
+        event_name: pEventName.trim() || null,
         'Estado de Vnzla': pEstadoVzla.trim() || null,
         test_drive: !!pTestDrive,
+        visited_showroom: !!pShowroom,
         person_type: pPersonType || null,
         gender: pGender || null,
         age_range: pAgeRange || null,
-      }).select().single();
+      } as any).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
       else {
         toast.success('Prospecto creado');
@@ -699,6 +705,18 @@ const DealershipProspectos = () => {
       fetchProspects();
       const p = prospects.find(x => x.id === id);
       if (p?.kommo_lead_id) updateKommoLeadStage(id, p.kommo_lead_id, newStatus).catch(console.error);
+    }
+  };
+
+  const toggleProspectFlag = async (id: string, field: 'test_drive' | 'visited_showroom', value: boolean) => {
+    // Optimistic update
+    setProspects(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
+    const { error } = await supabase.from('prospects').update({ [field]: value } as any).eq('id', id);
+    if (error) {
+      toast.error(`Error al actualizar ${field === 'test_drive' ? 'Test Drive' : 'Show Room'}`);
+      console.error(error);
+      // Revert
+      setProspects(prev => prev.map(p => p.id === id ? { ...p, [field]: !value } : p));
     }
   };
 
@@ -1025,7 +1043,8 @@ const DealershipProspectos = () => {
                   {visibleCols.has('fuente') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>}
                   {(visibleCols.has('evento') || eventNameFilter !== 'todos') && <TableHead>Evento</TableHead>}
                   {visibleCols.has('estado') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>}
-                  {visibleCols.has('testdrive') && <TableHead className="text-center">TD</TableHead>}
+                  {visibleCols.has('testdrive') && <TableHead className="text-center" title="Test Drive">TD</TableHead>}
+                  {visibleCols.has('showroom') && <TableHead className="text-center" title="Visitó Show Room">SR</TableHead>}
                   {visibleCols.has('tipopersona') && <TableHead>Tipo</TableHead>}
                   {visibleCols.has('genero') && <TableHead>Género</TableHead>}
                   {visibleCols.has('edad') && <TableHead>Edad</TableHead>}
@@ -1082,8 +1101,31 @@ const DealershipProspectos = () => {
                         </TableCell>
                       )}
                       {visibleCols.has('testdrive') && (
-                        <TableCell className="text-center">
-                          {p.test_drive ? <CheckCircle2 className="w-3.5 h-3.5 text-green-600 inline" /> : <span className="text-muted-foreground/40">-</span>}
+                        <TableCell className="text-center" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => toggleProspectFlag(p.id, 'test_drive', !p.test_drive)}
+                            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-muted transition-colors"
+                            title={p.test_drive ? 'Quitar Test Drive' : 'Marcar Test Drive'}
+                          >
+                            {p.test_drive
+                              ? <CheckCircle2 className="w-4 h-4 text-green-600" />
+                              : <div className="w-3.5 h-3.5 border border-muted-foreground/40 rounded-sm" />}
+                          </button>
+                        </TableCell>
+                      )}
+                      {visibleCols.has('showroom') && (
+                        <TableCell className="text-center" onClick={e => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => toggleProspectFlag(p.id, 'visited_showroom', !p.visited_showroom)}
+                            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-muted transition-colors"
+                            title={p.visited_showroom ? 'Quitar visita Show Room' : 'Marcar visitó Show Room'}
+                          >
+                            {p.visited_showroom
+                              ? <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                              : <div className="w-3.5 h-3.5 border border-muted-foreground/40 rounded-sm" />}
+                          </button>
                         </TableCell>
                       )}
                       {visibleCols.has('tipopersona') && <TableCell className="text-muted-foreground capitalize">{p.person_type || '-'}</TableCell>}
@@ -1247,6 +1289,12 @@ const DealershipProspectos = () => {
                 <label className="flex items-center gap-2 cursor-pointer h-9">
                   <Checkbox checked={pTestDrive} onCheckedChange={v => setPTestDrive(!!v)} />
                   <span className="text-xs">Solicita Test Drive</span>
+                </label>
+              </div>
+              <div className="space-y-1 flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer h-9">
+                  <Checkbox checked={pShowroom} onCheckedChange={v => setPShowroom(!!v)} />
+                  <span className="text-xs">Visitó el Show Room</span>
                 </label>
               </div>
               <div className="space-y-1 sm:col-span-2">

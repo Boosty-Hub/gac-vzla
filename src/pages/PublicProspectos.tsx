@@ -115,7 +115,7 @@ const PublicProspectos = () => {
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="min-h-screen bg-background flex items-start sm:items-center justify-center p-4 py-8">
         <Sonner />
         <Card className="w-full max-w-md text-center">
           <CardContent className="pt-8 pb-8 space-y-4">
@@ -136,7 +136,7 @@ const PublicProspectos = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex items-start sm:items-center justify-center p-4 py-8">
       <Sonner />
       <Card className="w-full max-w-lg">
         <CardHeader className="text-center space-y-2">
