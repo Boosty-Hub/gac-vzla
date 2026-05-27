@@ -156,8 +156,8 @@ const DealershipReservas = () => {
   const [deletingResId, setDeletingResId] = useState<string | null>(null);
   const [deletingResIsInc, setDeletingResIsInc] = useState(false);
 
-  // Inline Km edit (for any reservation)
-  const [editingKmMode, setEditingKmMode] = useState(false);
+  // Inline Km edit per row
+  const [editingKmRowId, setEditingKmRowId] = useState<string | null>(null);
   const [editingKmValue, setEditingKmValue] = useState('');
   const [savingKm, setSavingKm] = useState(false);
 
@@ -512,24 +512,32 @@ const DealershipReservas = () => {
     else { toast.success('Estado actualizado'); fetchReservations(); }
   };
 
-  const saveKmEdit = async () => {
-    if (!detailRes) return;
+  const startKmEdit = (r: Reservation) => {
+    setEditingKmRowId(r.id);
+    setEditingKmValue(String(r.current_mileage || 0));
+  };
+
+  const cancelKmEdit = () => {
+    setEditingKmRowId(null);
+    setEditingKmValue('');
+  };
+
+  const saveKmEdit = async (rowId: string) => {
     const km = parseInt(editingKmValue) || 0;
     setSavingKm(true);
-    const { error } = await supabase.from('reservations').update({ current_mileage: km }).eq('id', detailRes.id);
+    const { error } = await supabase.from('reservations').update({ current_mileage: km }).eq('id', rowId);
     if (error) { toast.error('Error al actualizar Km'); console.error(error); }
     else {
       toast.success('Km actualizado');
-      setDetailRes({ ...detailRes, current_mileage: km });
-      setEditingKmMode(false);
-      fetchReservations();
+      setReservations(prev => prev.map(x => x.id === rowId ? { ...x, current_mileage: km } : x));
+      if (detailRes?.id === rowId) setDetailRes({ ...detailRes, current_mileage: km });
+      cancelKmEdit();
     }
     setSavingKm(false);
   };
 
   const openDetail = async (r: Reservation) => {
     setDetailRes(r); setVehicleDetail(null); setVehicleHistory([]); setDetailOpen(true);
-    setEditingKmMode(false); setEditingKmValue(String(r.current_mileage || 0));
     if (r.vehicle_id) {
       setLoadingDetail(true);
       const { data: veh } = await supabase
@@ -730,7 +738,32 @@ const DealershipReservas = () => {
                         </div>
                       ) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell>{r.current_mileage.toLocaleString()}</TableCell>
+                    <TableCell onClick={e => e.stopPropagation()}>
+                      {editingKmRowId === r.id ? (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number"
+                            value={editingKmValue}
+                            onChange={e => setEditingKmValue(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveKmEdit(r.id); if (e.key === 'Escape') cancelKmEdit(); }}
+                            className="h-6 text-[11px] w-20 px-1.5"
+                            autoFocus
+                          />
+                          <button onClick={() => saveKmEdit(r.id)} disabled={savingKm} className="text-green-600 hover:text-green-700 text-[10px] font-semibold" title="Guardar">✓</button>
+                          <button onClick={cancelKmEdit} className="text-muted-foreground hover:text-foreground text-[10px]" title="Cancelar">✕</button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => startKmEdit(r)}
+                          className="text-left hover:bg-muted/60 rounded px-1.5 py-0.5 -mx-1.5 transition-colors inline-flex items-center gap-1 group"
+                          title="Click para editar Km"
+                        >
+                          <span>{r.current_mileage > 0 ? r.current_mileage.toLocaleString() : '—'}</span>
+                          <Pencil className="w-2.5 h-2.5 text-muted-foreground/40 group-hover:text-muted-foreground" />
+                        </button>
+                      )}
+                    </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
                         <Select
@@ -820,33 +853,7 @@ const DealershipReservas = () => {
                     <div className="flex items-center gap-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_date}</span></div>
                     {!isInc && <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_time?.slice(0, 5)}</span></div>}
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
-                    <div className="flex items-center gap-2">
-                      <Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                      {editingKmMode ? (
-                        <>
-                          <Input
-                            type="number"
-                            value={editingKmValue}
-                            onChange={e => setEditingKmValue(e.target.value)}
-                            className="h-6 text-xs w-28"
-                            autoFocus
-                          />
-                          <Button size="sm" className="h-6 text-[10px] px-2 gac-gradient" onClick={saveKmEdit} disabled={savingKm}>
-                            {savingKm ? '...' : 'Guardar'}
-                          </Button>
-                          <Button size="sm" variant="ghost" className="h-6 text-[10px] px-1.5" onClick={() => { setEditingKmMode(false); setEditingKmValue(String(detailRes.current_mileage || 0)); }}>
-                            Cancelar
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <span>{detailRes.current_mileage > 0 ? `${detailRes.current_mileage.toLocaleString()} km` : 'Sin registrar'}</span>
-                          <Button size="sm" variant="ghost" className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground" title="Editar Km" onClick={() => setEditingKmMode(true)}>
-                            <Pencil className="w-3 h-3" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
+                    {detailRes.current_mileage > 0 && <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>}
                   </div>
                   {detailRes.notes && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
