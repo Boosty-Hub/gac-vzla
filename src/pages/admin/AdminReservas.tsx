@@ -871,6 +871,11 @@ const AdminReservas = () => {
                           <div>{r.created_by_name}</div>
                           {r.created_by_role && <span className="text-[10px] text-muted-foreground">{r.created_by_role}</span>}
                         </div>
+                      ) : INCIDENCIA_TYPES.has(r.service_type) ? (
+                        <div>
+                          <div>Cliente</div>
+                          <span className="text-[10px] text-muted-foreground">Portal</span>
+                        </div>
                       ) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>{r.dealerships?.name || '-'}</TableCell>
@@ -1470,7 +1475,7 @@ const AdminReservas = () => {
                 <span className="text-xs text-muted-foreground">{formatDate(detailRes.reservation_date)} · {formatTime(detailRes.reservation_time)}</span>
               </div>
               {INCIDENCIA_TYPES.has(detailRes.service_type) && (
-                <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'No registrado'}</span>{detailRes.created_by_role ? ` · ${detailRes.created_by_role}` : ''}</p>
+                <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'Cliente'}</span>{` · ${detailRes.created_by_role || 'Portal'}`}</p>
               )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">

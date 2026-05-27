@@ -436,6 +436,8 @@ const UserPortal = () => {
       current_mileage: parseInt(mileage) || 0,
       status: 'pendiente',
       notes: notes.trim() || null,
+      created_by_name: clientData.full_name || 'Cliente',
+      created_by_role: 'Cliente',
     });
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
     else {

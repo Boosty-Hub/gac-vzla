@@ -682,6 +682,11 @@ const DealershipReservas = () => {
                           <div>{r.created_by_name}</div>
                           {r.created_by_role && <span className="text-[10px] text-muted-foreground">{r.created_by_role}</span>}
                         </div>
+                      ) : isInc ? (
+                        <div>
+                          <div>Cliente</div>
+                          <span className="text-[10px] text-muted-foreground">Portal</span>
+                        </div>
                       ) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>{r.current_mileage.toLocaleString()}</TableCell>
@@ -731,7 +736,7 @@ const DealershipReservas = () => {
 
       {/* DETAIL DIALOG */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               {detailRes && INCIDENCIA_TYPES.has(detailRes.service_type)
@@ -757,7 +762,7 @@ const DealershipReservas = () => {
                     <span className="text-[10px] text-muted-foreground">{detailRes.created_at ? new Date(detailRes.created_at).toLocaleDateString('es-VE') : ''}</span>
                   </div>
                   {isInc && (
-                    <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'No registrado'}</span>{detailRes.created_by_role ? ` · ${detailRes.created_by_role}` : ''}</p>
+                    <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'Cliente'}</span>{` · ${detailRes.created_by_role || 'Portal'}`}</p>
                   )}
                   <div className="space-y-2 text-xs">
                     <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
@@ -909,7 +914,7 @@ const DealershipReservas = () => {
 
       {/* COMPLETE SERVICE DIALOG */}
       <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ClipboardCheck className="w-4 h-4" /> Completar Servicio</DialogTitle></DialogHeader>
           {completingRes && (
             <div className="space-y-4 py-2">
@@ -934,7 +939,7 @@ const DealershipReservas = () => {
 
       {/* CREATE DIALOG */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               {isIncidencia
