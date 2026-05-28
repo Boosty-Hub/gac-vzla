@@ -23,6 +23,31 @@ export async function updateKommoLeadStage(
   if (error) console.error('[Kommo] Error actualizando etapa:', error)
 }
 
+// Create a lead in the Post Venta (Reservas/Servicios) Kommo pipeline
+export async function createKommoReservation(reservationId: string): Promise<void> {
+  const { error } = await supabase.functions.invoke('kommo-api', {
+    body: { action: 'create_reservation', reservation_id: reservationId },
+  })
+  if (error) console.error('[Kommo] Error creando reserva en Post Venta:', error)
+}
+
+// Update the stage of a Post Venta lead when reservation status changes
+export async function updateKommoReservationStage(
+  reservationId: string,
+  kommoLeadId: number,
+  newStatus: string
+): Promise<void> {
+  const { error } = await supabase.functions.invoke('kommo-api', {
+    body: {
+      action: 'update_reservation_stage',
+      reservation_id: reservationId,
+      kommo_lead_id: kommoLeadId,
+      new_status: newStatus,
+    },
+  })
+  if (error) console.error('[Kommo] Error actualizando etapa de reserva:', error)
+}
+
 // Overwrite all matching fields in Kommo with current GAC values (true bidirectional sync)
 export async function updateKommoLeadFields(
   prospectId: string,

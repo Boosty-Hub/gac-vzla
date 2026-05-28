@@ -18,7 +18,9 @@ import { WarrantyChip } from '@/components/WarrantyChip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
+import { createKommoReservation, updateKommoReservationStage } from '@/lib/kommo';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 
 interface Dealership {
   id: string;
@@ -64,6 +66,7 @@ interface Reservation {
   satisfaction_rating: number | null;
   created_by_name: string | null;
   created_by_role: string | null;
+  kommo_lead_id: number | null;
   dealerships: { id: string; name: string; city: string | null; state: string | null } | null;
   clients: { full_name: string; cedula: string | null; phone: string | null; state: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
@@ -156,6 +159,10 @@ const AdminReservas = () => {
     const d = new Date();
     return d.toISOString().split('T')[0];
   });
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   // CRUD dialog
   const [dialogOpen, setDialogOpen] = useState<boolean>(() => getArLS().dialogOpen === true);
@@ -217,10 +224,15 @@ const AdminReservas = () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, dealerships(id, name, city, state), clients(full_name, cedula, phone, state), vehicles(plate, year, vehicle_models(name, brand)), created_by_name, created_by_role');
+      .select('*, kommo_lead_id, dealerships(id, name, city, state), clients(full_name, cedula, phone, state), vehicles(plate, year, vehicle_models(name, brand)), created_by_name, created_by_role');
 
     if (view === 'matrix') {
-      query = query.eq('reservation_date', selectedDate);
+      // Fetch reservations within the calendar month range
+      const [y, m] = calendarMonth.split('-').map(Number);
+      const firstDay = `${calendarMonth}-01`;
+      const lastDayDate = new Date(y, m, 0); // day 0 of next month = last day of current
+      const lastDay = `${calendarMonth}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
+      query = query.gte('reservation_date', firstDay).lte('reservation_date', lastDay);
     }
 
     if (filtroConc !== 'todos') {
@@ -244,7 +256,7 @@ const AdminReservas = () => {
 
   useEffect(() => {
     fetchReservations();
-  }, [view, selectedDate, filtroConc]);
+  }, [view, selectedDate, calendarMonth, filtroConc]);
 
   // Persist create-form to localStorage so a page refresh restores the dialog
   useEffect(() => {
@@ -503,9 +515,12 @@ const AdminReservas = () => {
       payload.created_by_name = profile?.full_name || role?.name || 'Admin';
       payload.created_by_role = role?.name || 'admin';
       payload.created_by_profile_id = profile?.id || null;
-      const { error } = await supabase.from('reservations').insert(payload);
+      const { data: adminInserted, error } = await supabase.from('reservations').insert(payload).select('id').single();
       if (error) { toast.error('Error al crear reserva'); console.error(error); }
-      else { toast.success('Reserva creada'); setDialogOpen(false); fetchReservations(); }
+      else {
+        toast.success('Reserva creada'); setDialogOpen(false); fetchReservations();
+        if (adminInserted?.id) createKommoReservation(adminInserted.id).catch(console.error);
+      }
     }
     setSaving(false);
   };
@@ -555,7 +570,11 @@ const AdminReservas = () => {
       completed_at: new Date().toISOString(),
     }).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
-    else { toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations(); }
+    else {
+      toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations();
+      if (completingRes.kommo_lead_id)
+        updateKommoReservationStage(completingRes.id, completingRes.kommo_lead_id, 'completada').catch(console.error);
+    }
     setCompleting(false);
   };
 
@@ -650,16 +669,7 @@ const AdminReservas = () => {
             </div>
           )}
           {view === 'matrix' && (
-            <div className="flex items-center gap-1 flex-1">
-              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => changeDate(-1)}>
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </Button>
-              <Input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="h-8 text-xs flex-1 min-w-0" />
-              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={() => changeDate(1)}>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Button>
-              <span className="text-xs font-medium ml-1 hidden sm:inline shrink-0">{formatDate(selectedDate)}</span>
-            </div>
+            <div className="text-xs text-muted-foreground">Vista mensual — usa los controles del calendario para navegar.</div>
           )}
         </div>
         {/* Row 2: filters */}
@@ -759,7 +769,12 @@ const AdminReservas = () => {
                     {canEdit ? (
                       <Select value={r.status} onValueChange={val => {
                         if (val === 'completada') { openComplete(r); }
-                        else { supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => fetchReservations()); }
+                        else {
+                          supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => {
+                            fetchReservations();
+                            if (r.kommo_lead_id) updateKommoReservationStage(r.id, r.kommo_lead_id, val).catch(console.error);
+                          });
+                        }
                       }}>
                         <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[108px] shrink-0', STATUS_COLORS[r.status] || 'bg-muted')}>
                           <SelectValue />
@@ -893,7 +908,12 @@ const AdminReservas = () => {
                             value={r.status}
                             onValueChange={val => {
                               if (val === 'completada') { openComplete(r); }
-                              else { supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => fetchReservations()); }
+                              else {
+                                supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => {
+                                  fetchReservations();
+                                  if (r.kommo_lead_id) updateKommoReservationStage(r.id, r.kommo_lead_id, val).catch(console.error);
+                                });
+                              }
                             }}
                           >
                             <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[110px]', STATUS_COLORS[r.status] || 'bg-muted')}>
@@ -953,72 +973,22 @@ const AdminReservas = () => {
         )
       )}
 
-      {/* MATRIX VIEW */}
+      {/* MATRIX VIEW — monthly calendar */}
       {view === 'matrix' && (
-        <Card className="gac-shadow overflow-auto">
+        <Card className="gac-shadow p-3">
           {loading ? (
             <CardContent className="p-8 text-center">
               <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">Cargando matriz...</p>
-            </CardContent>
-          ) : matrixDealerships.length === 0 ? (
-            <CardContent className="p-8 text-center">
-              <LayoutGrid className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">No hay concesionarios activos</p>
+              <p className="text-sm text-muted-foreground">Cargando calendario...</p>
             </CardContent>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="sticky left-0 bg-background z-10 min-w-[180px]">Concesionario</TableHead>
-                  {HOURS.map(h => (
-                    <TableHead key={h} className="text-center min-w-[130px]">{HOUR_LABELS[h]}</TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {matrixDealerships.map(d => (
-                  <TableRow key={d.id}>
-                    <TableCell className="sticky left-0 bg-background z-10 font-medium border-r">
-                      <div>{d.name}</div>
-                      <div className="text-xs text-muted-foreground">{d.city}</div>
-                    </TableCell>
-                    {HOURS.map(h => {
-                      const cellReservations = getMatrixCell(d.id, h);
-                      return (
-                        <TableCell key={h} className="p-1 align-top border-r">
-                          {cellReservations.length === 0 ? (
-                            <div className="h-16 rounded bg-muted/30 flex items-center justify-center">
-                              <span className="text-xs text-muted-foreground/50">—</span>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              {cellReservations.map(r => (
-                                <div
-                                  key={r.id}
-                                  className={cn(
-                                    "rounded-md px-2 py-1.5 text-xs cursor-default",
-                                    STATUS_COLORS[r.status] || 'bg-muted'
-                                  )}
-                                  title={`${r.clients?.full_name} - ${r.service_type}`}
-                                >
-                                  <div className="font-semibold truncate">{r.clients?.full_name || 'Cliente'}</div>
-                                  <div className="truncate opacity-80">{r.service_type}</div>
-                                  <div className="truncate opacity-60">
-                                    {r.vehicles?.vehicle_models?.brand} {r.vehicles?.vehicle_models?.name}
-                                    {r.vehicles?.plate ? ` · ${r.vehicles.plate}` : ''}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </TableCell>
-                      );
-                    })}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <MonthlyReservationsCalendar
+              reservations={reservations as any}
+              month={calendarMonth}
+              onMonthChange={setCalendarMonth}
+              onReservationClick={(r) => setDetailRes(r as any)}
+              statusColors={STATUS_COLORS}
+            />
           )}
         </Card>
       )}

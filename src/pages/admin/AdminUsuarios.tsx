@@ -11,7 +11,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle, Mail, Phone } from 'lucide-react';
+import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle, Mail, Phone, Trash2 } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,26 @@ interface Role {
   name: string;
   description: string | null;
 }
+
+interface Permission {
+  id: string;
+  name: string;
+  module: string;
+}
+
+const PERM_ACTIONS = ['view', 'create', 'edit', 'delete'] as const;
+const PERM_ACTION_LABELS: Record<string, { label: string; Icon: typeof Eye }> = {
+  view:   { label: 'Ver',      Icon: Eye },
+  create: { label: 'Crear',    Icon: Plus },
+  edit:   { label: 'Editar',   Icon: Pencil },
+  delete: { label: 'Eliminar', Icon: Trash2 },
+};
+const MODULE_LABELS: Record<string, string> = {
+  dashboard: 'Dashboard', clientes: 'Clientes', vehiculos: 'Vehículos',
+  modelos: 'Modelos', concesionarios: 'Concesionarios', reservas: 'Reservas',
+  garantias: 'Garantías', historial: 'Historial', prospectos: 'Prospectos',
+  usuarios: 'Usuarios', roles: 'Roles', eventos: 'Eventos',
+};
 
 const AdminUsuarios = () => {
   const isMobile = useIsMobile();
@@ -82,6 +103,15 @@ const AdminUsuarios = () => {
   const [createDealershipIds, setCreateDealershipIds] = useState<string[]>([]);
   // Linked dealership profile IDs
   const [linkedProfileIds, setLinkedProfileIds] = useState<Set<string>>(new Set());
+
+  // Per-user permissions dialog
+  const [userPermDialogOpen, setUserPermDialogOpen] = useState(false);
+  const [userPermUser, setUserPermUser] = useState<ProfileWithRole | null>(null);
+  const [allPermissions, setAllPermissions] = useState<Permission[]>([]);
+  const [userPermChecked, setUserPermChecked] = useState<Set<string>>(new Set()); // effective permission IDs
+  const [userRolePermIds, setUserRolePermIds] = useState<Set<string>>(new Set()); // baseline from role
+  const [loadingUserPerms, setLoadingUserPerms] = useState(false);
+  const [savingUserPerms, setSavingUserPerms] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -314,6 +344,95 @@ const AdminUsuarios = () => {
     setSaving(false);
   };
 
+  // ── Per-user permissions handlers ──────────────────────────────────────────
+  const openUserPermissions = async (u: ProfileWithRole) => {
+    setUserPermUser(u);
+    setLoadingUserPerms(true);
+    setUserPermDialogOpen(true);
+
+    // 1. All permissions
+    const { data: allPerms } = await supabase.from('permissions').select('id, name, module').order('module').order('name');
+    const perms = (allPerms || []) as Permission[];
+    setAllPermissions(perms);
+
+    // 2. Role baseline
+    let roleIds = new Set<string>();
+    if (u.role_id) {
+      const { data: rp } = await supabase
+        .from('role_permissions')
+        .select('permission_id')
+        .eq('role_id', u.role_id);
+      if (rp) roleIds = new Set(rp.map((r: any) => r.permission_id));
+    }
+    setUserRolePermIds(roleIds);
+
+    // 3. User overrides
+    const { data: ups } = await supabase
+      .from('user_permissions' as any)
+      .select('permission_id, granted')
+      .eq('profile_id', u.id);
+
+    // Build effective set
+    const effective = new Set(roleIds);
+    if (ups) {
+      for (const up of ups as any[]) {
+        if (up.granted) effective.add(up.permission_id);
+        else effective.delete(up.permission_id);
+      }
+    }
+    setUserPermChecked(effective);
+    setLoadingUserPerms(false);
+  };
+
+  const toggleUserPerm = (permId: string) => {
+    setUserPermChecked(prev => {
+      const next = new Set(prev);
+      next.has(permId) ? next.delete(permId) : next.add(permId);
+      return next;
+    });
+  };
+
+  const toggleUserModule = (mod: string) => {
+    const modPerms = allPermissions.filter(p => p.module === mod);
+    const allChecked = modPerms.every(p => userPermChecked.has(p.id));
+    setUserPermChecked(prev => {
+      const next = new Set(prev);
+      modPerms.forEach(p => allChecked ? next.delete(p.id) : next.add(p.id));
+      return next;
+    });
+  };
+
+  const handleSaveUserPerms = async () => {
+    if (!userPermUser) return;
+    setSavingUserPerms(true);
+
+    // Delete all existing overrides for this user
+    await supabase.from('user_permissions' as any).delete().eq('profile_id', userPermUser.id);
+
+    // Insert only the differences from role baseline
+    const inserts: { profile_id: string; permission_id: string; granted: boolean }[] = [];
+    for (const perm of allPermissions) {
+      const inRole = userRolePermIds.has(perm.id);
+      const isChecked = userPermChecked.has(perm.id);
+      if (isChecked && !inRole)  inserts.push({ profile_id: userPermUser.id, permission_id: perm.id, granted: true });
+      if (!isChecked && inRole) inserts.push({ profile_id: userPermUser.id, permission_id: perm.id, granted: false });
+    }
+
+    if (inserts.length > 0) {
+      const { error } = await supabase.from('user_permissions' as any).insert(inserts);
+      if (error) {
+        toast.error('Error al guardar permisos');
+        console.error(error);
+        setSavingUserPerms(false);
+        return;
+      }
+    }
+
+    toast.success(`Permisos de "${userPermUser.full_name || userPermUser.email}" actualizados`);
+    setUserPermDialogOpen(false);
+    setSavingUserPerms(false);
+  };
+
   const filteredUsers = users.filter(u => {
     const matchBusqueda = !busqueda ||
       u.email.toLowerCase().includes(busqueda.toLowerCase()) ||
@@ -459,6 +578,12 @@ const AdminUsuarios = () => {
                         {copiedLink === u.id ? <CheckIcon className="w-3 h-3 text-green-600" /> : generatingLink === u.id ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Link2 className="w-3 h-3" />}
                       </Button>
                     )}
+                    {hasPermission('usuarios.edit') && u.roles?.name !== 'superadmin' && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Permisos del usuario"
+                        onClick={() => openUserPermissions(u)}>
+                        <Shield className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                     {hasPermission('usuarios.edit') && (
                       <Button variant="ghost" size="icon" className="h-7 w-7"
                         onClick={() => openEditDialog(u)} disabled={u.id === currentProfile?.id}>
@@ -525,6 +650,17 @@ const AdminUsuarios = () => {
                           disabled={generatingLink === u.id}
                         >
                           {copiedLink === u.id ? <CheckIcon className="w-3 h-3 text-green-600" /> : generatingLink === u.id ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> : <Link2 className="w-3 h-3" />}
+                        </Button>
+                      )}
+                      {hasPermission('usuarios.edit') && u.roles?.name !== 'superadmin' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          title="Permisos del usuario"
+                          onClick={() => openUserPermissions(u)}
+                        >
+                          <Shield className="w-3 h-3" />
                         </Button>
                       )}
                       {hasPermission('usuarios.edit') && (
@@ -811,6 +947,114 @@ const AdminUsuarios = () => {
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>Cancelar</Button>
             <Button onClick={handleCreateUser} disabled={creating} className="gac-gradient">
               {creating ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Crear Usuario'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* PER-USER PERMISSIONS DIALOG */}
+      <Dialog open={userPermDialogOpen} onOpenChange={setUserPermDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display">
+              Permisos de:{' '}
+              <span className="text-primary">{userPermUser?.full_name || userPermUser?.email}</span>
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-2">
+            Configura permisos específicos para este usuario. Los cambios sobreescriben el rol base
+            sólo para este usuario y se aplican en tiempo real.{' '}
+            {userPermChecked.size} de {allPermissions.length} permisos activos.
+          </p>
+
+          {/* Legend */}
+          <div className="flex items-center gap-4 text-[11px] text-muted-foreground bg-muted/40 rounded-md px-3 py-2">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm border border-primary bg-primary inline-block" />
+              Del rol base
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm border border-green-500 bg-green-100 inline-block" />
+              Añadido solo a este usuario
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm border border-muted bg-muted/50 inline-block" />
+              Sin permiso
+            </span>
+          </div>
+
+          {loadingUserPerms ? (
+            <div className="flex items-center justify-center py-10">
+              <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <Table className="text-xs">
+              <TableHeader>
+                <TableRow className="[&>th]:py-2 [&>th]:text-[11px] [&>th]:font-semibold">
+                  <TableHead className="min-w-[130px]">Módulo</TableHead>
+                  {PERM_ACTIONS.map(a => {
+                    const { label, Icon } = PERM_ACTION_LABELS[a];
+                    return (
+                      <TableHead key={a} className="text-center w-[70px]">
+                        <div className="flex items-center justify-center gap-1">
+                          <Icon className="w-3 h-3" /> {label}
+                        </div>
+                      </TableHead>
+                    );
+                  })}
+                  <TableHead className="text-center w-[60px]">Todos</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[...new Set(allPermissions.map(p => p.module))].map(mod => {
+                  const modPerms = allPermissions.filter(p => p.module === mod);
+                  const allChecked = modPerms.every(p => userPermChecked.has(p.id));
+                  return (
+                    <TableRow key={mod} className="[&>td]:py-2">
+                      <TableCell className="font-medium">{MODULE_LABELS[mod] || mod}</TableCell>
+                      {PERM_ACTIONS.map(a => {
+                        const perm = allPermissions.find(p => p.name === `${mod}.${a}`);
+                        if (!perm) return (
+                          <TableCell key={a} className="text-center">
+                            <span className="text-muted-foreground/30">—</span>
+                          </TableCell>
+                        );
+                        const checked = userPermChecked.has(perm.id);
+                        const fromRole = userRolePermIds.has(perm.id);
+                        return (
+                          <TableCell key={a} className="text-center">
+                            <div className="flex items-center justify-center">
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={() => toggleUserPerm(perm.id)}
+                                className={cn(
+                                  "mx-auto",
+                                  checked && !fromRole && "border-green-500 data-[state=checked]:bg-green-500",
+                                )}
+                              />
+                            </div>
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell className="text-center">
+                        <Checkbox
+                          checked={allChecked}
+                          onCheckedChange={() => toggleUserModule(mod)}
+                          className="mx-auto"
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUserPermDialogOpen(false)}>Cancelar</Button>
+            <Button onClick={handleSaveUserPerms} disabled={savingUserPerms || loadingUserPerms} className="gac-gradient">
+              {savingUserPerms
+                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : 'Guardar Permisos'}
             </Button>
           </DialogFooter>
         </DialogContent>

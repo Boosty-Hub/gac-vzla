@@ -36,14 +36,14 @@ const menuItems = [
   {
     group: 'General',
     items: [
-      { label: 'Inicio', icon: LayoutDashboard, path: '/concesionario' },
+      { label: 'Inicio', icon: LayoutDashboard, path: '/concesionario', module: 'dashboard' },
     ],
   },
   {
     group: 'Operaciones',
     items: [
-      { label: 'Reservas / Servicios', icon: CalendarDays, path: '/concesionario/reservas' },
-      { label: 'Prospectos', icon: Users, path: '/concesionario/prospectos' },
+      { label: 'Reservas / Servicios', icon: CalendarDays, path: '/concesionario/reservas', module: 'reservas' },
+      { label: 'Prospectos', icon: Users, path: '/concesionario/prospectos', module: 'prospectos' },
     ],
   },
 ];
@@ -51,18 +51,42 @@ const menuItems = [
 export default function DealershipLayout({ children }: DealershipLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { profile, role, signOut } = useAuth();
+  const { profile, role, signOut, hasPermission } = useAuth();
 
-  const isVendedor = role?.name?.toLowerCase() === 'vendedor';
+  const roleName = role?.name?.toLowerCase() || '';
+  const isAdmin = roleName === 'superadmin' || roleName === 'admin';
+  const isVendedor = roleName === 'vendedor';
 
-  // Vendedor sees Reservas and Prospectos
-  const filteredMenuItems = isVendedor
-    ? menuItems.map(g => ({ ...g, items: g.items.filter(i => i.path === '/concesionario/reservas' || i.path === '/concesionario/prospectos') })).filter(g => g.items.length > 0)
-    : menuItems;
+  // Filter menu by permissions. Admin/superadmin see everything; otherwise check hasPermission(module.view).
+  const filteredMenuItems = menuItems
+    .map(group => ({
+      ...group,
+      items: group.items.filter(item => isAdmin || hasPermission(`${item.module}.view`)),
+    }))
+    .filter(group => group.items.length > 0);
 
-  // Redirect vendedor from dashboard to reservas
-  if (isVendedor && location.pathname === '/concesionario') {
-    return <Navigate to="/concesionario/reservas" replace />;
+  const allFilteredItems = filteredMenuItems.flatMap(g => g.items);
+
+  // If user lands on /concesionario but doesn't have dashboard.view, redirect to first available
+  if (location.pathname === '/concesionario' && !isAdmin && !hasPermission('dashboard.view') && allFilteredItems.length > 0) {
+    return <Navigate to={allFilteredItems[0].path} replace />;
+  }
+
+  // If user has zero visible items, show "no access" state instead of blank screen
+  if (allFilteredItems.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-6">
+        <div className="max-w-md text-center space-y-3">
+          <h2 className="text-lg font-semibold">Sin permisos</h2>
+          <p className="text-sm text-muted-foreground">
+            Tu rol <strong>{role?.name || 'desconocido'}</strong> no tiene módulos asignados. Contacta a un administrador.
+          </p>
+          <Button variant="outline" onClick={async () => { await signOut(); navigate('/login'); }}>
+            Cerrar sesión
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const handleSignOut = async () => {

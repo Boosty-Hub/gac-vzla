@@ -29,6 +29,7 @@ import AdminCondicionesGarantia from './pages/admin/config/AdminCondicionesGaran
 import AdminGeneral from './pages/admin/config/AdminGeneral';
 import AdminPlantillas from './pages/admin/config/AdminPlantillas';
 import AdminAutomatizaciones from './pages/admin/config/AdminAutomatizaciones';
+import AdminEventos from './pages/admin/config/AdminEventos';
 import ConfigLayout from "./components/layouts/ConfigLayout";
 import PublicReserva from "./pages/PublicReserva";
 import PublicProspectos from "./pages/PublicProspectos";
@@ -84,6 +85,7 @@ const App = () => (
             <Route path="/admin/modelos" element={<AdminRoute><AdminModelos /></AdminRoute>} />
             <Route path="/admin/clientes" element={<AdminRoute><AdminClientes /></AdminRoute>} />
             <Route path="/admin/prospectos" element={<AdminRoute><AdminProspectos /></AdminRoute>} />
+            <Route path="/admin/eventos" element={<AdminRoute><AdminEventos /></AdminRoute>} />
             <Route path="/admin/configuracion" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminGeneral /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/general" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminGeneral /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/usuarios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminUsuarios /></ConfigLayout></ProtectedRoute>} />

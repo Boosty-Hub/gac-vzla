@@ -29,26 +29,33 @@ const CONTACT_CF = {
 }
 
 // ─── Source mappings ──────────────────────────────────────────────────────────
+// IMPORTANT: 'Visita' en Kommo tiene ID 8164367 (≠ 'Vendedor' = 7832230)
 const SOURCE_TO_KOMMO: Record<string, number> = {
-  concesionario:  7832230,
+  concesionario:  7832230,  // "Vendedor" en Kommo
   evento:         7832228,
   pagina_web:     7832226,
   redes_sociales: 7893992,
   referido:       7832232,
-  visita:         7832230,
+  visita:         8164367,  // "Visita" en Kommo — ID correcto
+  whatsapp:       7893992,
+  tiktok:         7893994,
+  qr:             8158236,
+  ads:            8162702,
 }
 const KOMMO_TO_SOURCE: Record<string, string> = {
-  '7832218': 'redes_sociales',
-  '7832220': 'redes_sociales',
-  '7832222': 'redes_sociales',
-  '7832224': 'redes_sociales',
+  '7832218': 'redes_sociales',   // Instagram DFSK
+  '7832220': 'redes_sociales',   // Instagram GAC
+  '7832222': 'redes_sociales',   // Facebook DFSK
+  '7832224': 'redes_sociales',   // Facebook GAC
   '7832226': 'pagina_web',
   '7832228': 'evento',
-  '7832230': 'concesionario',
+  '7832230': 'concesionario',    // Vendedor
   '7832232': 'referido',
-  '7893992': 'redes_sociales',
-  '7893994': 'redes_sociales',
-  '8158236': 'redes_sociales',
+  '7893992': 'redes_sociales',   // WhatsApp
+  '7893994': 'redes_sociales',   // TikTok
+  '8158236': 'redes_sociales',   // QR
+  '8162702': 'redes_sociales',   // Campaña ADS
+  '8164367': 'visita',           // Visita — ID correcto
 }
 
 // ─── Brand mappings ───────────────────────────────────────────────────────────
@@ -197,6 +204,56 @@ function extractModelFromKommoFields(
     : brand === 'DFSK' ? KOMMO_DFSK_LABEL_TO_MODEL
     : KOMMO_SHINEREY_LABEL_TO_MODEL
   return labelMap[label] ?? label
+}
+
+// ─── Post Venta pipeline (Reservas / Servicios) ──────────────────────────────
+const POSTVENTA_PIPELINE_ID = 13151339
+
+const POSTVENTA_STATUS_TO_STAGE: Record<string, number> = {
+  pendiente:  101411319,  // Pendiente
+  confirmada: 101411323,  // Confirmada
+  en_proceso: 101411327,  // En proceso
+  completada: 104022404,  // Completada
+  cancelada:  104022408,  // Cancelada
+  agendada:   101411323,  // Confirmada (incidencias agendadas)
+  culminado:  142,        // servicio realizado
+}
+
+// Custom fields específicos del pipeline Post Venta (grupo leads_87791771102231)
+const CF_RES = {
+  vehiculo:          2989052,  // Vehículo (text)
+  placa:             3017626,  // Placa (text)
+  kilometraje:       2989050,  // Kilometraje (numeric)
+  centro_servicio:   2989054,  // Centro de Servicio (select)
+  servicio_realizar: 2989056,  // Servicio a Realizar (textarea)
+  descripcion_inc:   3017690,  // Descripción incidencia (textarea)
+  estado_cita:       3417651,  // Estado de la Cita (text)
+  fecha_cita:        3417653,  // Fecha de la Cita (text)
+  hora_cita:         3417655,  // Hora de la Cita (text)
+  servicio_cita:     3417657,  // Servicio de la Cita (text)
+  vehiculo_cita:     3417659,  // Vehículo de la Cita (text)
+  placa_vehiculo:    3417661,  // Placa del Vehiculo (text)
+  concesionario_cita:3417663,  // Concesionario de la Cita (text)
+  km_vehiculo:       3417665,  // Kilometraje del Vehiculo (text)
+  supabase_id:       3192400,  // ID Supabase (reused)
+}
+
+// Centro de Servicio (select) para el pipeline Post Venta
+const CENTRO_SERVICIO_KOMMO: Array<{ id: number; keywords: string[] }> = [
+  { id: 7832600, keywords: ['florida', 'la florida'] },
+  { id: 7832602, keywords: ['guarenas'] },
+  { id: 7832604, keywords: ['valencia'] },
+  { id: 7832606, keywords: ['barquisimeto'] },
+  { id: 7832608, keywords: ['mérida', 'merida'] },
+  { id: 7832610, keywords: ['puerto ordaz', 'ordaz'] },
+]
+
+function dealershipToCentroServicioId(name: string): number | null {
+  const lower = name.toLowerCase()
+  for (const c of CENTRO_SERVICIO_KOMMO) {
+    if (c.keywords.some(k => lower.includes(k))) return c.id
+  }
+  return null
 }
 
 // ─── Concesionario mappings ───────────────────────────────────────────────────
@@ -428,7 +485,7 @@ Deno.serve(async (req) => {
     )
 
     const body = await req.json()
-    const { action, prospect_id, kommo_lead_id, new_status } = body
+    const { action, prospect_id, kommo_lead_id, new_status, reservation_id } = body
 
     const { data: configRow } = await supabase
       .from('integration_configs')
@@ -640,6 +697,137 @@ Deno.serve(async (req) => {
       if (!prospect_id || !kommo_lead_id) throw new Error('Faltan parámetros')
       await syncFromKommo(supabase, prospect_id, kommo_lead_id, authHeaders, baseUrl)
       return new Response(JSON.stringify({ success: true }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // ── Create reservation in Post Venta pipeline ────────────────────────────
+    if (action === 'create_reservation') {
+      if (!reservation_id) throw new Error('Falta reservation_id')
+
+      const { data: res } = await supabase
+        .from('reservations')
+        .select(`
+          id, reservation_date, reservation_time, service_type, current_mileage,
+          status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
+          clients(full_name, phone, cedula),
+          vehicles(plate, year, vehicle_models(name, brand)),
+          dealerships(name)
+        `)
+        .eq('id', reservation_id)
+        .single()
+
+      if (!res) throw new Error('Reserva no encontrada')
+
+      const clientName =
+        (res.clients as { full_name: string } | null)?.full_name
+        || res.walkin_client_name
+        || 'Sin nombre'
+      const clientPhone =
+        (res.clients as { phone: string | null } | null)?.phone
+        || res.walkin_client_phone
+        || null
+      const vehicleModel =
+        (res.vehicles as { vehicle_models: { name: string; brand: string } | null } | null)?.vehicle_models
+      const plate =
+        (res.vehicles as { plate: string | null } | null)?.plate
+        || res.walkin_plate
+        || null
+      const vehicleStr = vehicleModel ? `${vehicleModel.brand} ${vehicleModel.name}` : ''
+      const dealershipName = (res.dealerships as { name: string } | null)?.name || ''
+
+      const stageId = POSTVENTA_STATUS_TO_STAGE[res.status] ?? POSTVENTA_STATUS_TO_STAGE.pendiente
+      const leadName = `${clientName} - ${res.service_type} ${res.reservation_date}`
+
+      const resCFs: unknown[] = []
+      const addResField = (field_id: number, value: unknown) => {
+        if (value !== null && value !== undefined && value !== '')
+          resCFs.push({ field_id, values: [{ value }] })
+      }
+      const addResEnum = (field_id: number, enum_id: number | null) => {
+        if (enum_id !== null) resCFs.push({ field_id, values: [{ enum_id }] })
+      }
+
+      addResField(CF_RES.supabase_id, res.id)
+      addResField(CF_RES.estado_cita, res.status)
+      addResField(CF_RES.fecha_cita, res.reservation_date)
+      addResField(CF_RES.hora_cita, res.reservation_time)
+      addResField(CF_RES.servicio_cita, res.service_type)
+      addResField(CF_RES.vehiculo_cita, vehicleStr)
+      addResField(CF_RES.placa_vehiculo, plate)
+      addResField(CF_RES.concesionario_cita, dealershipName)
+      if (res.current_mileage) addResField(CF_RES.km_vehiculo, String(res.current_mileage))
+      if (res.notes) addResField(CF_RES.descripcion_inc, res.notes)
+      addResEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
+
+      const contactFields: unknown[] = []
+      if (clientPhone)
+        contactFields.push({ field_code: 'PHONE', values: [{ value: clientPhone, enum_code: 'WORK' }] })
+
+      const leadPayload = [{
+        name: leadName,
+        pipeline_id: POSTVENTA_PIPELINE_ID,
+        status_id: stageId,
+        custom_fields_values: resCFs,
+        _embedded: {
+          contacts: [{ name: clientName, custom_fields_values: contactFields }],
+          tags: [{ name: 'Post Venta' }],
+        },
+      }]
+
+      const kommoRes = await fetch(`${baseUrl}/leads/complex`, {
+        method: 'POST', headers: authHeaders, body: JSON.stringify(leadPayload),
+      })
+      const kommoData = await kommoRes.json() as Record<string, unknown>
+
+      if (!kommoRes.ok) {
+        await supabase.from('integration_logs').insert({
+          integration_name: 'kommo', event_type: 'create_reservation',
+          status: 'error', details: { ...kommoData, reservation_id },
+        })
+        throw new Error(`Kommo API error: ${JSON.stringify(kommoData)}`)
+      }
+
+      const leadsArr = Array.isArray(kommoData) ? kommoData as Array<{ id: number }> : []
+      const newLead = leadsArr[0]
+      if (newLead?.id) {
+        await supabase.from('reservations').update({ kommo_lead_id: newLead.id }).eq('id', reservation_id)
+        await supabase.from('integration_logs').insert({
+          integration_name: 'kommo', event_type: 'create_reservation',
+          status: 'success', details: { lead_id: newLead.id, reservation_id, fields: resCFs.length },
+        })
+      }
+
+      return new Response(JSON.stringify({ success: true, kommo_lead_id: newLead?.id }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // ── Update reservation stage in Post Venta pipeline ──────────────────────
+    if (action === 'update_reservation_stage') {
+      if (!kommo_lead_id || !new_status) throw new Error('Faltan parámetros')
+
+      const stageId = POSTVENTA_STATUS_TO_STAGE[new_status]
+      if (!stageId) throw new Error(`Sin mapeo de stage para status: ${new_status}`)
+
+      const patchBody = {
+        status_id: stageId,
+        custom_fields_values: [
+          { field_id: CF_RES.estado_cita, values: [{ value: new_status }] },
+        ],
+      }
+
+      const kommoRes = await fetch(`${baseUrl}/leads/${kommo_lead_id}`, {
+        method: 'PATCH', headers: authHeaders, body: JSON.stringify(patchBody),
+      })
+
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'update_reservation_stage',
+        status: kommoRes.ok ? 'success' : 'error',
+        details: { reservation_id: reservation_id || null, kommo_lead_id, new_status, stage_id: stageId },
+      })
+
+      return new Response(JSON.stringify({ success: kommoRes.ok }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }

@@ -159,12 +159,19 @@ const DealershipProspectos = () => {
     if (!open) { setEditingProspect(null); try { sessionStorage.removeItem(SS_KEY); } catch {} }
   };
 
+  // Solo persistir en sessionStorage cuando es modo CREACIÓN (no edición).
+  // En edición, editingProspect vive solo en memoria React; si el usuario navega sin guardar,
+  // el diálogo NO se reabre para evitar crear duplicados al volver y hacer clic en Guardar.
   useEffect(() => {
-    if (!dialogOpen) return;
+    if (!dialogOpen || editingProspect) {
+      // En edición o con diálogo cerrado: limpiar storage para no dejar estado sucio
+      try { sessionStorage.removeItem(SS_KEY); } catch {}
+      return;
+    }
     try {
       sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
     } catch {}
-  }, [dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
+  }, [dialogOpen, editingProspect, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
   // Import/Export
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -592,6 +599,8 @@ const DealershipProspectos = () => {
   };
 
   const openEditDialog = (p: Prospect) => {
+    // Limpiar cualquier estado de creación guardado para evitar confusión
+    try { sessionStorage.removeItem(SS_KEY); } catch {}
     setEditingProspect(p);
     setPName(p.name);
     setPPhone(p.phone || '');
@@ -1335,11 +1344,11 @@ const DealershipProspectos = () => {
           </ResponsiveModalFooter>
       </ResponsiveModal>
 
-      {/* CONFIRM PARTIAL CREATE */}
+      {/* CONFIRM PARTIAL CREATE/EDIT */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Crear prospecto con información incompleta?</AlertDialogTitle>
+            <AlertDialogTitle>{editingProspect ? '¿Guardar con información incompleta?' : '¿Crear prospecto con información incompleta?'}</AlertDialogTitle>
             <AlertDialogDescription>
               Los siguientes campos no fueron completados:
               <ul className="mt-2 list-disc list-inside space-y-0.5">
@@ -1351,7 +1360,7 @@ const DealershipProspectos = () => {
           <AlertDialogFooter>
             <AlertDialogCancel>Volver y completar</AlertDialogCancel>
             <AlertDialogAction onClick={doSave} className="gac-gradient" disabled={saving}>
-              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Sí, crear de todas formas'}
+              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingProspect ? 'Sí, guardar de todas formas' : 'Sí, crear de todas formas'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -34,6 +34,8 @@ const KOMMO_TO_SOURCE: Record<string, string> = {
   '7893992': 'redes_sociales',
   '7893994': 'redes_sociales',
   '8158236': 'redes_sociales',
+  '8162702': 'redes_sociales',   // Campaña ADS
+  '8164367': 'visita',           // Visita — ID correcto (≠ Vendedor)
 }
 
 const KOMMO_TO_BRAND: Record<number, string> = {
@@ -61,8 +63,16 @@ const K_DFSK = {
 const K_SHINEREY = { PASAJEROS: 7832388, PANEL: 7832390 }
 
 const SOURCE_TO_KOMMO: Record<string, number> = {
-  concesionario: 7832230, evento: 7832228, pagina_web: 7832226,
-  redes_sociales: 7893992, referido: 7832232, visita: 7832230,
+  concesionario:  7832230,
+  evento:         7832228,
+  pagina_web:     7832226,
+  redes_sociales: 7893992,
+  referido:       7832232,
+  visita:         8164367,  // ID correcto (≠ Vendedor = 7832230)
+  whatsapp:       7893992,
+  tiktok:         7893994,
+  qr:             8158236,
+  ads:            8162702,
 }
 const BRAND_TO_KOMMO: Record<string, number> = { GAC: 7832208, DFSK: 7832206, SHINERAY: 7857650 }
 
@@ -121,6 +131,16 @@ const KOMMO_DFSK_LABEL_TO_MODEL: Record<string, string> = {
 }
 const KOMMO_SHINEREY_LABEL_TO_MODEL: Record<string, string> = {
   'X30 (PASAJEROS)': 'X30 (Pasajeros)', 'X30 (PANEL)': 'X30 (Panel)', 'X30 (PANEL': 'X30 (Panel)',
+}
+
+// ─── Post Venta pipeline ──────────────────────────────────────────────────────
+const POSTVENTA_PIPELINE_ID = 13151339
+const POSTVENTA_STAGE_TO_STATUS: Record<string, string> = {
+  '101411319': 'pendiente',
+  '101411323': 'confirmada',
+  '101411327': 'en_proceso',
+  '104022404': 'completada',
+  '104022408': 'cancelada',
 }
 
 const CONCESIONARIO_KOMMO = [
@@ -204,6 +224,29 @@ Deno.serve(async (req) => {
     const pipelineId   = params.get('leads[status][0][pipeline_id]')
 
     if (statusLeadId && statusId) {
+      // ── Post Venta pipeline: update reservation status ───────────────────
+      if (String(pipelineId) === String(POSTVENTA_PIPELINE_ID)) {
+        const ourStatus = POSTVENTA_STAGE_TO_STATUS[statusId]
+        if (ourStatus) {
+          const { data: reservation } = await supabase
+            .from('reservations')
+            .select('id, status')
+            .eq('kommo_lead_id', parseInt(statusLeadId))
+            .single()
+
+          if (reservation && reservation.status !== ourStatus) {
+            await supabase.from('reservations').update({ status: ourStatus }).eq('id', reservation.id)
+            await supabase.from('integration_logs').insert({
+              integration_name: 'kommo', event_type: 'webhook_reservation_status_update',
+              kommo_lead_id: parseInt(statusLeadId), status: 'success',
+              details: { reservation_id: reservation.id, old_status: reservation.status, new_status: ourStatus },
+            })
+          }
+        }
+        return new Response('OK', { status: 200 })
+      }
+
+      // ── Prospects pipeline ───────────────────────────────────────────────
       if (pipelineId && String(pipelineId) !== String(config.pipeline_id)) {
         return new Response('OK', { status: 200 })
       }
@@ -308,24 +351,22 @@ async function syncFieldsFromKommo(
   const estadoVzla = getCFText(cfValues, CF.estado_vzla)
   if (estadoVzla !== null && estadoVzla !== prospect['Estado de Vnzla']) updates['Estado de Vnzla'] = estadoVzla
 
-  // Event name (select → text)
-  const eventEnumId = getCFEnum(cfValues, CF.event_name)
-  if (eventEnumId !== null) {
-    const eventName = KOMMO_EVENT_ID_TO_NAME[eventEnumId] ?? null
-    if (eventName && eventName !== prospect.event_name) updates.event_name = eventName
+  // Event name: only fill if GAC doesn't have an event yet.
+  // GAC has more events than Kommo's enum list — never overwrite a GAC value with Kommo's
+  // (Kommo would revert it back because it can't represent GAC-only events as enums).
+  if (!prospect.event_name) {
+    const eventEnumId = getCFEnum(cfValues, CF.event_name)
+    if (eventEnumId !== null) {
+      const eventName = KOMMO_EVENT_ID_TO_NAME[eventEnumId] ?? null
+      if (eventName) updates.event_name = eventName
+    }
   }
 
   // Source (select → text)
-  // NOTE: 'visita' and 'concesionario' both map to the same Kommo enum (7832230) because
-  // Kommo doesn't distinguish between them. On round-trip, the webhook would always
-  // downgrade 'visita' to 'concesionario'. We preserve the local 'visita' value in that case.
   const sourceEnumId = getCFEnum(cfValues, CF.fuente)
   if (sourceEnumId !== null) {
     const source = KOMMO_TO_SOURCE[String(sourceEnumId)] ?? null
-    if (source && source !== prospect.source) {
-      const isDowngradeFromVisita = prospect.source === 'visita' && source === 'concesionario'
-      if (!isDowngradeFromVisita) updates.source = source
-    }
+    if (source && source !== prospect.source) updates.source = source
   }
 
   // Brand + model

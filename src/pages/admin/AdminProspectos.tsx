@@ -183,15 +183,21 @@ const AdminProspectos = () => {
 
   const setDialogOpen = (open: boolean) => {
     setDialogOpenRaw(open);
-    if (!open) { try { sessionStorage.removeItem(SS_KEY); } catch {} }
+    if (!open) { setEditing(null); try { sessionStorage.removeItem(SS_KEY); } catch {} }
   };
 
+  // Solo persistir en sessionStorage cuando es modo CREACIÓN (no edición).
+  // En edición, editing vive solo en memoria React; si el usuario navega sin guardar,
+  // el diálogo NO se reabre para evitar crear duplicados al volver y hacer clic en Guardar.
   useEffect(() => {
-    if (!dialogOpen) return;
+    if (!dialogOpen || editing) {
+      try { sessionStorage.removeItem(SS_KEY); } catch {}
+      return;
+    }
     try {
       sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
     } catch {}
-  }, [dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
+  }, [dialogOpen, editing, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -329,6 +335,8 @@ const AdminProspectos = () => {
   };
 
   const openEdit = (p: Prospect) => {
+    // Limpiar cualquier estado de creación guardado para evitar confusión
+    try { sessionStorage.removeItem(SS_KEY); } catch {}
     setEditing(p);
     setPDealership(p.dealership_id);
     setPName(p.name);

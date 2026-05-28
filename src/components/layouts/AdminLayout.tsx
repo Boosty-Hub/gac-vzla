@@ -32,6 +32,7 @@ import {
   Settings,
   BookOpen,
   UserCheck,
+  CalendarCheck,
 } from 'lucide-react';
 import imbLogo from '@/assets/imb-logo.png';
 
@@ -59,6 +60,7 @@ const menuItems = [
     items: [
       { label: 'Clientes', icon: UserCheck, path: '/admin/clientes', module: 'clientes' },
       { label: 'Prospectos', icon: Users, path: '/admin/prospectos', module: 'prospectos' },
+      { label: 'Eventos', icon: CalendarCheck, path: '/admin/eventos', module: 'eventos' },
       { label: 'Modelos', icon: BookOpen, path: '/admin/modelos', module: 'modelos' },
       { label: 'Concesionarios', icon: MapPin, path: '/admin/concesionarios', module: 'concesionarios' },
       { label: 'Vehículos', icon: Car, path: '/admin/vehiculos', module: 'vehiculos' },

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -67,6 +67,24 @@ async function loadUserProfile(userId: string) {
     }
   }
 
+  // 3. Apply per-user permission overrides (grant extras or revoke role perms)
+  const { data: userPerms } = await supabase
+    .from('user_permissions' as any)
+    .select('permissions(name), granted')
+    .eq('profile_id', userId);
+
+  if (userPerms) {
+    for (const up of userPerms as any[]) {
+      const permName = up.permissions?.name;
+      if (!permName) continue;
+      if (up.granted) {
+        if (!permNames.includes(permName)) permNames.push(permName);
+      } else {
+        permNames = permNames.filter((p) => p !== permName);
+      }
+    }
+  }
+
   return {
     profile: profileOnly as Profile,
     role: roleData as RoleData | null,
@@ -103,6 +121,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setRole(null);
     setPermissions([]);
   }, []);
+
+  // Refs to expose latest user/applyProfile to realtime callbacks without stale closures
+  const userRef = useRef<User | null>(null);
+  const applyProfileRef = useRef(applyProfile);
+  useEffect(() => { userRef.current = user; }, [user]);
+  useEffect(() => { applyProfileRef.current = applyProfile; }, [applyProfile]);
+
+  // Realtime: when an admin changes permissions for this user's role,
+  // re-fetch the profile so hasPermission() reflects the new rules immediately.
+  useEffect(() => {
+    if (!role?.id) return;
+
+    const channel = supabase
+      .channel(`role-perms-live-${role.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',       // INSERT (grant), DELETE (revoke)
+          schema: 'public',
+          table: 'role_permissions',
+          filter: `role_id=eq.${role.id}`,
+        },
+        async () => {
+          const uid = userRef.current?.id;
+          if (!uid) return;
+          const data = await loadUserProfile(uid);
+          if (data) applyProfileRef.current(data);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [role?.id]);
+
+  // Realtime: when an admin changes this specific user's permission overrides,
+  // re-fetch the profile immediately.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+
+    const channel = supabase
+      .channel(`user-perms-live-${uid}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'user_permissions',
+          filter: `profile_id=eq.${uid}`,
+        },
+        async () => {
+          const currentUid = userRef.current?.id;
+          if (!currentUid) return;
+          const data = await loadUserProfile(currentUid);
+          if (data) applyProfileRef.current(data);
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id]);
 
   useEffect(() => {
     let mounted = true;

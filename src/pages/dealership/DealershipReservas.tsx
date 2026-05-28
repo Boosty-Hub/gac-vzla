@@ -21,6 +21,9 @@ import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
+import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
+import { createKommoReservation, updateKommoReservationStage } from '@/lib/kommo';
+import { List, LayoutGrid } from 'lucide-react';
 
 // Service types that trigger the incidencia form
 const INCIDENCIA_TYPES = new Set(['Incidencia', 'Falla o Desperfecto']);
@@ -46,8 +49,10 @@ interface Reservation {
   created_by_name: string | null;
   created_by_role: string | null;
   created_by_profile_id: string | null;
+  kommo_lead_id: number | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
+  dealerships: { name: string; state: string | null } | null;
 }
 
 interface PlateResult {
@@ -136,6 +141,11 @@ const DealershipReservas = () => {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<'table' | 'matrix'>('matrix');
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   // Search/filter
   const [resSearch, setResSearch] = useState('');
@@ -224,14 +234,25 @@ const DealershipReservas = () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand))')
-      .eq('dealership_id', selectedDealership)
+      .select('*, kommo_lead_id, clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand)), dealerships(name, state)')
       .order('reservation_date', { ascending: false })
       .order('reservation_time', { ascending: false })
-      .limit(200);
+      .limit(view === 'matrix' ? 1000 : 300);
+    // "__all" → no dealership filter, traer de todos
+    if (selectedDealership !== '__all') {
+      query = query.eq('dealership_id', selectedDealership);
+    }
     // Vendedor sees ONLY their own reservations/incidencias
     if (isVendedor && profile?.id) {
       query = query.eq('created_by_profile_id', profile.id);
+    }
+    // Matrix mode: fetch only the displayed month
+    if (view === 'matrix') {
+      const [y, m] = calendarMonth.split('-').map(Number);
+      const firstDay = `${calendarMonth}-01`;
+      const lastDayDate = new Date(y, m, 0);
+      const lastDay = `${lastDayDate.getFullYear()}-${String(lastDayDate.getMonth() + 1).padStart(2, '0')}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
+      query = query.gte('reservation_date', firstDay).lte('reservation_date', lastDay);
     }
     const { data } = await query;
     setReservations((data || []) as Reservation[]);
@@ -242,7 +263,7 @@ const DealershipReservas = () => {
     if (loadingAccess) return;
     if (selectedDealership) { fetchReservations(); }
     else { setLoading(false); }
-  }, [selectedDealership, loadingAccess]);
+  }, [selectedDealership, loadingAccess, view, calendarMonth]);
 
   useEffect(() => {
     (async () => {
@@ -332,12 +353,18 @@ const DealershipReservas = () => {
     if (!open) { try { localStorage.removeItem(DR_LS_KEY); } catch {} setEditingRes(null); }
   };
 
+  // Solo persistir en localStorage cuando es modo CREACIÓN (no edición de incidencia).
+  // En edición, editingRes vive solo en memoria React; si el usuario navega sin guardar,
+  // el diálogo NO se reabre para evitar crear duplicados al volver y hacer clic en Guardar.
   useEffect(() => {
-    if (!createOpen) return;
+    if (!createOpen || editingRes) {
+      try { localStorage.removeItem(DR_LS_KEY); } catch {}
+      return;
+    }
     try {
       localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, plateSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone }));
     } catch {}
-  }, [createOpen, plateSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone]);
+  }, [createOpen, editingRes, plateSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone]);
 
   const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
@@ -401,6 +428,11 @@ const DealershipReservas = () => {
   };
 
   const openCreate = () => {
+    // En modo "Todos los concesionarios", elegir el primero para poder crear
+    if (selectedDealership === '__all' && dealerships.length > 0) {
+      setSelectedDealership(dealerships[0].id);
+      toast.info(`Creando en ${dealerships[0].name}. Puede cambiar el concesionario después.`);
+    }
     resetNormalFields();
     resetIncidenciaFields();
     setFDate(hoy); setFTime('09:00'); setFService(''); setFMileage('0'); setFNotes(''); setFObs('');
@@ -453,9 +485,12 @@ const DealershipReservas = () => {
         incPayload.created_by_name = creatorName;
         incPayload.created_by_role = creatorRole;
         incPayload.created_by_profile_id = profile?.id || null;
-        const { error } = await supabase.from('reservations').insert(incPayload);
+        const { data: incInserted, error } = await supabase.from('reservations').insert(incPayload).select('id').single();
         if (error) { toast.error('Error al crear incidencia'); console.error(error); }
-        else { toast.success('Incidencia creada exitosamente'); setCreateOpen(false); fetchReservations(); }
+        else {
+          toast.success('Incidencia creada exitosamente'); setCreateOpen(false); fetchReservations();
+          if (incInserted?.id) createKommoReservation(incInserted.id).catch(console.error);
+        }
       }
       setSaving(false);
       return;
@@ -500,16 +535,23 @@ const DealershipReservas = () => {
       else { payload.walkin_client_name = fWalkinName.trim(); payload.walkin_client_phone = fWalkinPhone.trim() || null; payload.walkin_plate = plateSearch.trim().toUpperCase() || null; }
     }
 
-    const { error } = await supabase.from('reservations').insert(payload);
+    const { data: resInserted, error } = await supabase.from('reservations').insert(payload).select('id').single();
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
-    else { toast.success('Reserva creada exitosamente'); setCreateOpen(false); fetchReservations(); }
+    else {
+      toast.success('Reserva creada exitosamente'); setCreateOpen(false); fetchReservations();
+      if (resInserted?.id) createKommoReservation(resInserted.id).catch(console.error);
+    }
     setSaving(false);
   };
 
   const updateStatus = async (id: string, newStatus: string) => {
     const { error } = await supabase.from('reservations').update({ status: newStatus }).eq('id', id);
     if (error) { toast.error('Error al actualizar estado'); console.error(error); }
-    else { toast.success('Estado actualizado'); fetchReservations(); }
+    else {
+      toast.success('Estado actualizado'); fetchReservations();
+      const res = reservations.find(r => r.id === id);
+      if (res?.kommo_lead_id) updateKommoReservationStage(id, res.kommo_lead_id, newStatus).catch(console.error);
+    }
   };
 
   const startKmEdit = (r: Reservation) => {
@@ -556,6 +598,8 @@ const DealershipReservas = () => {
   };
 
   const openEditIncidencia = (r: Reservation) => {
+    // Limpiar cualquier estado de creación guardado para evitar confusión
+    try { localStorage.removeItem(DR_LS_KEY); } catch {}
     setEditingRes(r);
     setFService(r.service_type);
     setFDate(r.reservation_date);
@@ -596,8 +640,17 @@ const DealershipReservas = () => {
       technical_report_url: technicalReportUrl || null, completed_at: new Date().toISOString(),
     }).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
-    else { toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations(); }
+    else {
+      toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations();
+      if (completingRes.kommo_lead_id)
+        updateKommoReservationStage(completingRes.id, completingRes.kommo_lead_id, 'completada').catch(console.error);
+    }
     setCompleting(false);
+  };
+
+  const calendarStatusColors: Record<string, string> = {
+    ...Object.fromEntries(Object.entries(STATUS_CONFIG).map(([k, v]) => [k, v.color])),
+    ...Object.fromEntries(Object.entries(INCIDENCIA_STATUSES).map(([k, v]) => [k, v.color])),
   };
 
   return (
@@ -612,12 +665,35 @@ const DealershipReservas = () => {
         <div className="flex items-center gap-2">
           {showSelector && (
             <Select value={selectedDealership} onValueChange={setSelectedDealership}>
-              <SelectTrigger className="w-[180px] h-8 text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-[210px] h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="__all">Todos los concesionarios</SelectItem>
+                <SelectSeparator />
                 {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
               </SelectContent>
             </Select>
           )}
+          <div className="flex items-center border rounded-md overflow-hidden">
+            <Button
+              variant={view === 'table' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-8 rounded-none px-2.5 border-0"
+              onClick={() => setView('table')}
+              title="Vista lista"
+            >
+              <List className="w-3.5 h-3.5" />
+            </Button>
+            <div className="w-px h-5 bg-border" />
+            <Button
+              variant={view === 'matrix' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-8 rounded-none px-2.5 border-0"
+              onClick={() => setView('matrix')}
+              title="Vista calendario mensual"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </Button>
+          </div>
           <Button size="sm" onClick={openCreate} className="gac-gradient">
             <Plus className="w-3.5 h-3.5 mr-1" /> Nueva Reserva
           </Button>
@@ -665,6 +741,24 @@ const DealershipReservas = () => {
         </div>
       </div>
 
+      {view === 'matrix' ? (
+        <div className="border rounded-lg p-3 bg-card gac-shadow">
+          {loading ? (
+            <div className="p-8 text-center">
+              <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">Cargando reservas...</p>
+            </div>
+          ) : (
+            <MonthlyReservationsCalendar
+              reservations={reservations}
+              month={calendarMonth}
+              onMonthChange={m => setCalendarMonth(m)}
+              onReservationClick={r => openDetail(r as Reservation)}
+              statusColors={calendarStatusColors}
+            />
+          )}
+        </div>
+      ) : (
       <Card className="gac-shadow">
         {loading ? (
           <CardContent className="p-8 text-center">
@@ -683,6 +777,7 @@ const DealershipReservas = () => {
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                 <TableHead>Fecha / Hora</TableHead>
                 <TableHead>Estado Vzla</TableHead>
+                {selectedDealership === '__all' && <TableHead>Concesionario</TableHead>}
                 <TableHead>Cliente</TableHead>
                 <TableHead>Vehículo / Placa</TableHead>
                 <TableHead>Servicio</TableHead>
@@ -709,8 +804,13 @@ const DealershipReservas = () => {
                       <span className="text-[10px] text-muted-foreground">{r.reservation_time?.slice(0, 5) || '—'}</span>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-[11px]">
-                      {dealerships.find(d => d.id === selectedDealership)?.state || '—'}
+                      {r.dealerships?.state || dealerships.find(d => d.id === r.dealership_id)?.state || '—'}
                     </TableCell>
+                    {selectedDealership === '__all' && (
+                      <TableCell className="text-muted-foreground text-[11px]">
+                        {r.dealerships?.name || dealerships.find(d => d.id === r.dealership_id)?.name || '—'}
+                      </TableCell>
+                    )}
                     <TableCell>
                       <div>{clientName}</div>
                       {!r.clients && r.walkin_client_phone && <span className="text-[10px] text-muted-foreground">{r.walkin_client_phone}</span>}
@@ -808,6 +908,7 @@ const DealershipReservas = () => {
           </div>
         )}
       </Card>
+      )}
 
       {/* DETAIL DIALOG */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
