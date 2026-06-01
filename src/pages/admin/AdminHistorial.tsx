@@ -411,16 +411,38 @@ const AdminHistorial = () => {
                   </>
                 )}
 
-                {/* Warranty condition info */}
-                {warrantyCond && (
-                  <>
-                    <Separator />
-                    <div className="text-xs text-muted-foreground">
-                      <p className="font-semibold text-foreground mb-1 flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Condición de Garantía</p>
-                      <p>{warrantyCond.name}: {(warrantyCond.max_months / 12).toFixed(0)} años o {warrantyCond.max_km.toLocaleString()} km · Servicio cada {warrantyCond.service_interval_km.toLocaleString()} km</p>
-                    </div>
-                  </>
-                )}
+                {/* Warranty condition info: model-specific first, fall back to global */}
+                {(() => {
+                  const m = e.vehicles?.vehicle_models;
+                  const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);
+                  if (hasModelWarranty) {
+                    const intervalKm = m!.warranty_service_interval_km ?? warrantyCond?.service_interval_km;
+                    return (
+                      <>
+                        <Separator />
+                        <div className="text-xs text-muted-foreground">
+                          <p className="font-semibold text-foreground mb-1 flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Condición de Garantía</p>
+                          <p>
+                            {m!.brand} {m!.name}:
+                            {m!.warranty_months ? ` ${(m!.warranty_months / 12).toFixed(0)} años` : ''}
+                            {m!.warranty_km ? ` o ${m!.warranty_km.toLocaleString()} km` : ''}
+                            {intervalKm ? ` · Servicio cada ${intervalKm.toLocaleString()} km` : ''}
+                          </p>
+                        </div>
+                      </>
+                    );
+                  }
+                  if (!warrantyCond) return null;
+                  return (
+                    <>
+                      <Separator />
+                      <div className="text-xs text-muted-foreground">
+                        <p className="font-semibold text-foreground mb-1 flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Condición de Garantía</p>
+                        <p>{warrantyCond.name}: {(warrantyCond.max_months / 12).toFixed(0)} años o {warrantyCond.max_km.toLocaleString()} km · Servicio cada {warrantyCond.service_interval_km.toLocaleString()} km</p>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             );
           })()}

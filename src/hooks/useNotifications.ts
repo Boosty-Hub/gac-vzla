@@ -21,29 +21,35 @@ export const useNotifications = () => {
   const [unreadCount, setUnreadCount] = useState(0);
 
   const isAdmin = role?.name === 'superadmin' || role?.name === 'admin';
+  // Concesionario managers see all dealership-wide notifications (recipient_profile_id IS NULL) + their own.
+  // Vendedores only see notifications explicitly addressed to their profile_id.
+  const isConcesionario = role?.name === 'concesionario';
+
+  const applyFilter = useCallback((q: any): any => {
+    if (isAdmin) return q;
+    if (isConcesionario) return q.or(`recipient_profile_id.eq.${user!.id},recipient_profile_id.is.null`);
+    return q.eq('recipient_profile_id', user!.id);
+  }, [user, isAdmin, isConcesionario]);
 
   const fetchNotifications = useCallback(async () => {
     if (!user) { setLoading(false); return; }
     setLoading(true);
 
-    let query = supabase
-      .from('notifications')
-      .select('*')
+    const listQ = applyFilter(supabase.from('notifications').select('*'))
       .order('created_at', { ascending: false })
       .limit(50);
 
-    // Admin/superadmin: ven todas las notificaciones.
-    // Resto: solo las suyas (recipient_profile_id = su id) o las generales (recipient_profile_id IS NULL).
-    if (!isAdmin) {
-      query = query.or(`recipient_profile_id.eq.${user.id},recipient_profile_id.is.null`);
-    }
+    // Count query has no limit → badge shows the real total unread
+    const countQ = applyFilter(
+      supabase.from('notifications').select('*', { count: 'exact', head: true })
+    ).eq('is_read', false);
 
-    const { data } = await query;
-    const items = (data || []) as Notification[];
-    setNotifications(items);
-    setUnreadCount(items.filter(n => !n.is_read).length);
+    const [{ data }, { count }] = await Promise.all([listQ, countQ]);
+
+    setNotifications((data || []) as Notification[]);
+    setUnreadCount(count ?? 0);
     setLoading(false);
-  }, [user, isAdmin]);
+  }, [user, isAdmin, isConcesionario, applyFilter]);
 
   const markAsRead = useCallback(async (id: string) => {
     await supabase
@@ -57,15 +63,13 @@ export const useNotifications = () => {
   }, []);
 
   const markAllAsRead = useCallback(async () => {
-    const unreadIds = notifications.filter(n => !n.is_read).map(n => n.id);
-    if (unreadIds.length === 0) return;
-    await supabase
-      .from('notifications')
-      .update({ is_read: true })
-      .in('id', unreadIds);
+    if (unreadCount === 0) return;
+    await applyFilter(
+      supabase.from('notifications').update({ is_read: true }).eq('is_read', false)
+    );
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
     setUnreadCount(0);
-  }, [notifications]);
+  }, [unreadCount, applyFilter]);
 
   useEffect(() => {
     if (!user) return;
@@ -87,7 +91,12 @@ export const useNotifications = () => {
             const forSomeoneElse =
               newNotif.recipient_profile_id !== null &&
               newNotif.recipient_profile_id !== user.id;
+          if (isConcesionario) {
             if (forSomeoneElse) return;
+          } else {
+            // Vendedor: only their own
+            if (newNotif.recipient_profile_id !== user.id) return;
+          }
           }
 
           setNotifications(prev => [newNotif, ...prev].slice(0, 50));
@@ -99,7 +108,7 @@ export const useNotifications = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [fetchNotifications, user, isAdmin]);
+  }, [fetchNotifications, user, isAdmin, isConcesionario]);
 
   return { notifications, loading, unreadCount, markAsRead, markAllAsRead, fetchNotifications };
 };

@@ -63,6 +63,7 @@ interface Prospect {
   person_type: string | null;
   gender: string | null;
   age_range: string | null;
+  company_name: string | null;
   created_at: string;
   updated_at: string;
   dealerships: { name: string } | null;
@@ -87,10 +88,11 @@ const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
-type ColKey = 'concesionario' | 'nombre' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'showroom' | 'estado' | 'fecha';
+type ColKey = 'concesionario' | 'nombre' | 'empresa' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'showroom' | 'estado' | 'fecha';
 const COL_LABELS: Record<ColKey, string> = {
   concesionario: 'Concesionario',
   nombre: 'Nombre',
+  empresa: 'Empresa',
   telefono: 'Teléfono',
   email: 'Email',
   marca: 'Marca',
@@ -167,6 +169,7 @@ const AdminProspectos = () => {
   const [pName, setPName] = useState<string>(() => getSS().pName || '');
   const [pPhone, setPPhone] = useState<string>(() => getSS().pPhone || '');
   const [pEmail, setPEmail] = useState<string>(() => getSS().pEmail || '');
+  const [pCompanyName, setPCompanyName] = useState<string>(() => getSS().pCompanyName || '');
   const [pBrand, setPBrand] = useState<string>(() => getSS().pBrand || '');
   const [pModel, setPModel] = useState<string>(() => getSS().pModel || '');
   const [pSource, setPSource] = useState<string>(() => getSS().pSource || 'concesionario');
@@ -195,9 +198,9 @@ const AdminProspectos = () => {
       return;
     }
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pCompanyName, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
     } catch {}
-  }, [dialogOpen, editing, pDealership, pName, pPhone, pEmail, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
+  }, [dialogOpen, editing, pDealership, pName, pPhone, pEmail, pCompanyName, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -323,7 +326,7 @@ const AdminProspectos = () => {
   const resetForm = () => {
     setEditing(null);
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
-    setPName(''); setPPhone(''); setPEmail(''); setPBrand(''); setPModel('');
+    setPName(''); setPPhone(''); setPEmail(''); setPCompanyName(''); setPBrand(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setPEventName(''); setPEstadoVzla('');
     setPTestDrive(false); setPShowroom(false); setPPersonType(''); setPGender(''); setPAgeRange('');
@@ -342,6 +345,7 @@ const AdminProspectos = () => {
     setPName(p.name);
     setPPhone(p.phone || '');
     setPEmail(p.email || '');
+    setPCompanyName(p.company_name || '');
     // Extraer marca del model_interest si tiene formato "MARCA MODELO"
     const modelParts = (p.model_interest || '').split(' ');
     if (modelParts.length > 1 && ['GAC', 'DFSK'].includes(modelParts[0])) {
@@ -384,6 +388,7 @@ const AdminProspectos = () => {
     person_type: pPersonType || null,
     gender: pGender || null,
     age_range: pAgeRange || null,
+    company_name: pCompanyName.trim() || null,
   });
 
   const checkDuplicatePhone = async (phone: string, excludeId?: string): Promise<boolean> => {
@@ -1284,6 +1289,7 @@ const AdminProspectos = () => {
                       onChange={toggleSelectAll} />
                   </TableHead>
                   {visibleCols.has('nombre') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('name')}>Nombre<SortIcon field="name" /></TableHead>}
+                  {visibleCols.has('empresa') && <TableHead>Empresa</TableHead>}
                   {(visibleCols.has('telefono') || visibleCols.has('email')) && <TableHead>Contacto</TableHead>}
                   {visibleCols.has('marca') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('model_interest')}>Marca<SortIcon field="model_interest" /></TableHead>}
                   {visibleCols.has('modelo') && <TableHead>Modelo</TableHead>}
@@ -1313,6 +1319,7 @@ const AdminProspectos = () => {
                           checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} />
                       </TableCell>
                       {visibleCols.has('nombre') && <TableCell className="font-medium">{p.name}</TableCell>}
+                      {visibleCols.has('empresa') && <TableCell className="text-muted-foreground text-[11px]">{p.company_name || '-'}</TableCell>}
                       {(visibleCols.has('telefono') || visibleCols.has('email')) && (
                         <TableCell>
                           {visibleCols.has('telefono') && p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
@@ -1485,6 +1492,7 @@ const AdminProspectos = () => {
                 <div className="divide-y divide-border/50">
                   <Field label="Teléfono" icon={Phone} value={detailProspect.phone} />
                   <Field label="Email" icon={Mail} value={detailProspect.email} />
+                  {detailProspect.company_name && <Field label="Empresa" icon={Users} value={detailProspect.company_name} />}
                   <Field label="Modelo" icon={Car} value={detailProspect.model_interest} />
                   <Field label="Concesionario" icon={MapPin} value={detailProspect.dealerships?.name} />
                   <Field label="Vendedor" icon={User} value={detailProspect.salesperson} />
@@ -1674,6 +1682,10 @@ const AdminProspectos = () => {
               <div className="space-y-1">
                 <Label className="text-xs">Email</Label>
                 <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-9 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Nombre de Empresa</Label>
+                <Input value={pCompanyName} onChange={e => setPCompanyName(e.target.value)} placeholder="Empresa S.A." className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Marca</Label>

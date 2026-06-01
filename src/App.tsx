@@ -70,10 +70,18 @@ const App = () => (
               </ProtectedRoute>
             } />
 
-            {/* Concesionario routes with sidebar layout */}
+            {/* Concesionario routes — ALL modules accessible; visibility controlled by permissions */}
             <Route path="/concesionario" element={<DealershipRoute><DealershipDashboard /></DealershipRoute>} />
             <Route path="/concesionario/reservas" element={<DealershipRoute><DealershipReservas /></DealershipRoute>} />
             <Route path="/concesionario/prospectos" element={<DealershipRoute><DealershipProspectos /></DealershipRoute>} />
+            <Route path="/concesionario/garantias" element={<DealershipRoute><AdminGarantias /></DealershipRoute>} />
+            <Route path="/concesionario/historial" element={<DealershipRoute><AdminHistorial /></DealershipRoute>} />
+            <Route path="/concesionario/vehiculos" element={<DealershipRoute><AdminVehiculos /></DealershipRoute>} />
+            <Route path="/concesionario/modelos" element={<DealershipRoute><AdminModelos /></DealershipRoute>} />
+            <Route path="/concesionario/clientes" element={<DealershipRoute><AdminClientes /></DealershipRoute>} />
+            <Route path="/concesionario/concesionarios" element={<DealershipRoute><AdminConcesionarios /></DealershipRoute>} />
+            <Route path="/concesionario/usuarios" element={<DealershipRoute><AdminUsuarios /></DealershipRoute>} />
+            <Route path="/concesionario/roles" element={<DealershipRoute><AdminRoles /></DealershipRoute>} />
 
             {/* Admin routes with sidebar layout */}
             <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />

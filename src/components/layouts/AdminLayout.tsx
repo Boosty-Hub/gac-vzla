@@ -101,6 +101,25 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     navigate('/login');
   };
 
+  // No menu items → role exists but has no permissions assigned
+  if (allFilteredItems.length === 0) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-3">
+          <ShieldCheck className="w-12 h-12 text-muted-foreground mx-auto" />
+          <div>
+            <h2 className="text-lg font-semibold">Sin permisos asignados</h2>
+            <p className="text-sm text-muted-foreground">
+              Tu rol <span className="font-medium capitalize">"{role?.name}"</span> no tiene permisos configurados.
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">Contacta al administrador para que asigne permisos a tu rol.</p>
+          </div>
+          <Button onClick={handleSignOut} variant="outline" size="sm">Cerrar sesión</Button>
+        </div>
+      </div>
+    );
+  }
+
   const initials = profile?.full_name
     ? profile.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : profile?.email?.slice(0, 2).toUpperCase() || 'U';

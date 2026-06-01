@@ -261,9 +261,9 @@ Deno.serve(async (req) => {
         .single()
 
       if (!prospect) {
-        // Auto-create only when reaching "Demostracion" stage
-        const DEMOSTRACION_STAGE_ID = '101392719'
-        if (statusId === DEMOSTRACION_STAGE_ID) {
+        // Auto-create ONLY when the lead reaches "demostración".
+        // Any other stage change for an unknown lead is ignored.
+        if (statusId === '101392719') {
           await autoCreateProspectFromKommo(supabase, parseInt(statusLeadId), authHeaders, baseUrl)
         } else {
           await supabase.from('integration_logs').insert({
@@ -327,7 +327,7 @@ async function syncFieldsFromKommo(
 ) {
   const [prospectRes, leadRes] = await Promise.all([
     supabase.from('prospects').select('*').eq('id', prospectId).single(),
-    fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields`, { headers: authHeaders }),
+    fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields,companies`, { headers: authHeaders }),
   ])
 
   const prospect = prospectRes.data
@@ -378,7 +378,14 @@ async function syncFieldsFromKommo(
     if (modelInterest !== prospect.model_interest) updates.model_interest = modelInterest
   }
 
-  // Contact fields: name, phone, email, person_type, gender, age_range
+  // Company entity linked to the lead (from "Agregar Compañía" in Kommo)
+  const leadCompanies = ((lead._embedded as Record<string, unknown>)?.companies as Array<{ name?: string }>) || []
+  if (leadCompanies[0]?.name) {
+    const companyFromLead = leadCompanies[0].name.trim()
+    if (companyFromLead && companyFromLead !== prospect.company_name) updates.company_name = companyFromLead
+  }
+
+  // Contact fields: name, phone, email, person_type, gender, age_range, company_name
   const contacts = ((lead._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
   if (contacts[0]?.id) {
     const contactRes = await fetch(`${baseUrl}/contacts/${contacts[0].id}?with=custom_fields`, { headers: authHeaders })
@@ -419,6 +426,10 @@ async function syncFieldsFromKommo(
       // Rango de edad (text — must match constraint values)
       const rangoEdad = sanitizeAgeRange(getCFText(contactCFs, CONTACT_CF.rango_edad))
       if (rangoEdad !== null && rangoEdad !== prospect.age_range) updates.age_range = rangoEdad
+
+      // Nombre de empresa (company_name on the contact)
+      const cName = (contactData.company_name as string | null) ?? null
+      if (cName && cName !== prospect.company_name) updates.company_name = cName
     }
   }
 
@@ -500,6 +511,7 @@ async function autoCreateProspectFromKommo(
   authHeaders: Record<string, string>,
   baseUrl: string
 ) {
+  const initialStatus = 'demostracion'
   const leadRes = await fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields`, { headers: authHeaders })
   if (!leadRes.ok || leadRes.status === 204) {
     await supabase.from('integration_logs').insert({
@@ -534,7 +546,7 @@ async function autoCreateProspectFromKommo(
       .single()
     if (existing && !existing.kommo_lead_id) {
       await supabase.from('prospects')
-        .update({ kommo_lead_id: kommoLeadId, status: 'demostracion' })
+        .update({ kommo_lead_id: kommoLeadId, status: initialStatus })
         .eq('id', existingSupabaseId)
       await supabase.from('integration_logs').insert({
         integration_name: 'kommo', event_type: 'webhook_auto_linked',
@@ -555,6 +567,7 @@ async function autoCreateProspectFromKommo(
   let personType: string | null = null
   let gender: string | null = null
   let ageRange: string | null = null
+  let companyName: string | null = null
 
   if (contacts[0]?.id) {
     const contactRes = await fetch(`${baseUrl}/contacts/${contacts[0].id}?with=custom_fields`, { headers: authHeaders })
@@ -580,6 +593,7 @@ async function autoCreateProspectFromKommo(
         if (generoVal) gender = generoVal.toLowerCase()
 
         ageRange = sanitizeAgeRange(getCFText(cfs, CONTACT_CF.rango_edad))
+        companyName = (contactData.company_name as string | null) ?? null
       } catch { /* ignore */ }
     }
   }
@@ -622,7 +636,7 @@ async function autoCreateProspectFromKommo(
 
   const newProspect: Record<string, unknown> = {
     name: finalName,
-    status: 'demostracion',
+    status: initialStatus,
     kommo_lead_id: kommoLeadId,
     source,
     ...(phone && { phone }),
@@ -636,6 +650,7 @@ async function autoCreateProspectFromKommo(
     ...(personType && { person_type: personType }),
     ...(gender && { gender }),
     ...(ageRange && { age_range: ageRange }),
+    ...(companyName && { company_name: companyName }),
   }
 
   const { data: created, error } = await supabase

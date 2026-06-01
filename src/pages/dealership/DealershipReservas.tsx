@@ -235,8 +235,7 @@ const DealershipReservas = () => {
     let query = supabase
       .from('reservations')
       .select('*, kommo_lead_id, clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand)), dealerships(name, state)')
-      .order('reservation_date', { ascending: false })
-      .order('reservation_time', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(view === 'matrix' ? 1000 : 300);
     // "__all" → no dealership filter, traer de todos
     if (selectedDealership !== '__all') {
@@ -551,6 +550,7 @@ const DealershipReservas = () => {
       toast.success('Estado actualizado'); fetchReservations();
       const res = reservations.find(r => r.id === id);
       if (res?.kommo_lead_id) updateKommoReservationStage(id, res.kommo_lead_id, newStatus).catch(console.error);
+      else if (res?.id) createKommoReservation(res.id).catch(console.error);
     }
   };
 
@@ -644,6 +644,7 @@ const DealershipReservas = () => {
       toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations();
       if (completingRes.kommo_lead_id)
         updateKommoReservationStage(completingRes.id, completingRes.kommo_lead_id, 'completada').catch(console.error);
+      else createKommoReservation(completingRes.id).catch(console.error);
     }
     setCompleting(false);
   };

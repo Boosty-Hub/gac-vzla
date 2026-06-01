@@ -239,7 +239,7 @@ const AdminReservas = () => {
       query = query.eq('dealership_id', filtroConc);
     }
 
-    const { data, error } = await query.order('reservation_date', { ascending: false }).order('reservation_time');
+    const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
       console.error('Error fetching reservations:', error);
@@ -574,6 +574,7 @@ const AdminReservas = () => {
       toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations();
       if (completingRes.kommo_lead_id)
         updateKommoReservationStage(completingRes.id, completingRes.kommo_lead_id, 'completada').catch(console.error);
+      else createKommoReservation(completingRes.id).catch(console.error);
     }
     setCompleting(false);
   };
@@ -773,6 +774,7 @@ const AdminReservas = () => {
                           supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => {
                             fetchReservations();
                             if (r.kommo_lead_id) updateKommoReservationStage(r.id, r.kommo_lead_id, val).catch(console.error);
+                            else createKommoReservation(r.id).catch(console.error);
                           });
                         }
                       }}>
@@ -912,6 +914,7 @@ const AdminReservas = () => {
                                 supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => {
                                   fetchReservations();
                                   if (r.kommo_lead_id) updateKommoReservationStage(r.id, r.kommo_lead_id, val).catch(console.error);
+                            else createKommoReservation(r.id).catch(console.error);
                                 });
                               }
                             }}

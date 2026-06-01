@@ -525,15 +525,24 @@ Deno.serve(async (req) => {
       if (prospect.phone) contactFields.push({ field_code: 'PHONE', values: [{ value: prospect.phone, enum_code: 'WORK' }] })
       if (prospect.email) contactFields.push({ field_code: 'EMAIL', values: [{ value: prospect.email, enum_code: 'WORK' }] })
 
+      const contactPayload: Record<string, unknown> = { name: prospect.name, custom_fields_values: contactFields }
+      if (prospect.company_name) contactPayload.company_name = prospect.company_name
+
+      const embedded: Record<string, unknown> = {
+        contacts: [contactPayload],
+        tags: [{ name: 'Sistema Central' }],
+      }
+      // Also link company as entity (shows in "Agregar Compañía" section of the lead)
+      if (prospect.company_name) {
+        embedded.companies = [{ name: prospect.company_name }]
+      }
+
       const leadPayload = [{
         name: prospect.name,
         pipeline_id: config.pipeline_id,
         status_id: stageId,
         custom_fields_values: customFields,
-        _embedded: {
-          contacts: [{ name: prospect.name, custom_fields_values: contactFields }],
-          tags: [{ name: 'Sistema Central' }],
-        },
+        _embedded: embedded,
       }]
 
       const kommoRes = await fetch(`${baseUrl}/leads/complex`, {
@@ -554,17 +563,21 @@ Deno.serve(async (req) => {
       if (newLead?.id) {
         await supabase.from('prospects').update({ kommo_lead_id: newLead.id }).eq('id', prospect_id)
 
-        // PATCH contact with person_type, gender, age_range (not supported in leads/complex)
+        // PATCH contact with person_type, gender, age_range + company_name
         const contactCFs = buildContactCustomFields(prospect)
-        if (contactCFs.length > 0) {
+        const hasContactUpdates = contactCFs.length > 0 || !!prospect.company_name
+        if (hasContactUpdates) {
           const leadGet = await fetch(`${baseUrl}/leads/${newLead.id}?with=contacts`, { headers: authHeaders })
           if (leadGet.ok) {
             const leadData = await leadGet.json() as Record<string, unknown>
             const contacts = ((leadData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
             if (contacts[0]?.id) {
+              const contactPatch: Record<string, unknown> = {}
+              if (contactCFs.length > 0) contactPatch.custom_fields_values = contactCFs
+              if (prospect.company_name) contactPatch.company_name = prospect.company_name
               await fetch(`${baseUrl}/contacts/${contacts[0].id}`, {
                 method: 'PATCH', headers: authHeaders,
-                body: JSON.stringify({ custom_fields_values: contactCFs }),
+                body: JSON.stringify(contactPatch),
               })
             }
           }
@@ -656,10 +669,11 @@ Deno.serve(async (req) => {
           if (prospect.phone) allContactCFs.push({ field_code: 'PHONE', values: [{ value: prospect.phone, enum_code: 'WORK' }] })
           if (prospect.email) allContactCFs.push({ field_code: 'EMAIL', values: [{ value: prospect.email, enum_code: 'WORK' }] })
 
+          const contactPatchBody: Record<string, unknown> = { name: prospect.name, custom_fields_values: allContactCFs }
+          if (prospect.company_name) contactPatchBody.company_name = prospect.company_name
           await fetch(`${baseUrl}/contacts/${contactId}`, {
-            method: 'PATCH',
-            headers: authHeaders,
-            body: JSON.stringify({ name: prospect.name, custom_fields_values: allContactCFs }),
+            method: 'PATCH', headers: authHeaders,
+            body: JSON.stringify(contactPatchBody),
           })
           contactPatched = true
         }
@@ -710,6 +724,7 @@ Deno.serve(async (req) => {
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
           status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
+          client_id, kommo_lead_id,
           clients(full_name, phone, cedula),
           vehicles(plate, year, vehicle_models(name, brand)),
           dealerships(name)
@@ -718,6 +733,18 @@ Deno.serve(async (req) => {
         .single()
 
       if (!res) throw new Error('Reserva no encontrada')
+
+      // Guard: if reservation already has a Kommo lead, just update its stage (no duplicate)
+      if (res.kommo_lead_id) {
+        const existingStageId = POSTVENTA_STATUS_TO_STAGE[res.status] ?? POSTVENTA_STATUS_TO_STAGE.pendiente
+        await fetch(`${baseUrl}/leads/${res.kommo_lead_id}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({ status_id: existingStageId }),
+        })
+        return new Response(JSON.stringify({ success: true, kommo_lead_id: res.kommo_lead_id, already_existed: true }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
 
       const clientName =
         (res.clients as { full_name: string } | null)?.full_name
@@ -760,9 +787,59 @@ Deno.serve(async (req) => {
       if (res.notes) addResField(CF_RES.descripcion_inc, res.notes)
       addResEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
 
-      const contactFields: unknown[] = []
-      if (clientPhone)
-        contactFields.push({ field_code: 'PHONE', values: [{ value: clientPhone, enum_code: 'WORK' }] })
+      // ── Find existing Kommo contact to avoid duplicates ──────────────────
+      // Priority: 1) prospect with matching phone → get contact from their Ventas lead
+      //           2) search Kommo contacts by name
+      //           3) create new contact
+      let existingKommoContactId: number | null = null
+      const searchPhone = clientPhone
+
+      if (searchPhone) {
+        // Look for a prospect with the same phone that already has a kommo_lead_id
+        const { data: matchedProspect } = await supabase
+          .from('prospects')
+          .select('kommo_lead_id')
+          .eq('phone', searchPhone)
+          .not('kommo_lead_id', 'is', null)
+          .limit(1)
+          .maybeSingle()
+
+        if (matchedProspect?.kommo_lead_id) {
+          const ventasLeadRes = await fetch(
+            `${baseUrl}/leads/${matchedProspect.kommo_lead_id}?with=contacts`,
+            { headers: authHeaders }
+          )
+          if (ventasLeadRes.ok) {
+            const ventasLead = await ventasLeadRes.json() as Record<string, unknown>
+            const contacts = ((ventasLead._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
+            existingKommoContactId = contacts[0]?.id ?? null
+          }
+        }
+      }
+
+      // If not found by phone, search Kommo contacts by name
+      if (!existingKommoContactId && clientName && clientName !== 'Sin nombre') {
+        const contactSearch = await fetch(
+          `${baseUrl}/contacts?query=${encodeURIComponent(clientName)}&limit=5`,
+          { headers: authHeaders }
+        )
+        if (contactSearch.ok) {
+          const searchData = await contactSearch.json() as Record<string, unknown>
+          const foundContacts = ((searchData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number; name?: string }>) || []
+          // Exact name match preferred
+          const exactMatch = foundContacts.find(c => c.name?.trim().toLowerCase() === clientName.trim().toLowerCase())
+          existingKommoContactId = (exactMatch ?? foundContacts[0])?.id ?? null
+        }
+      }
+
+      const contactEntry: Record<string, unknown> = existingKommoContactId
+        ? { id: existingKommoContactId }
+        : {
+            name: clientName,
+            custom_fields_values: clientPhone
+              ? [{ field_code: 'PHONE', values: [{ value: clientPhone, enum_code: 'WORK' }] }]
+              : [],
+          }
 
       const leadPayload = [{
         name: leadName,
@@ -770,7 +847,7 @@ Deno.serve(async (req) => {
         status_id: stageId,
         custom_fields_values: resCFs,
         _embedded: {
-          contacts: [{ name: clientName, custom_fields_values: contactFields }],
+          contacts: [contactEntry],
           tags: [{ name: 'Post Venta' }],
         },
       }]
@@ -794,7 +871,12 @@ Deno.serve(async (req) => {
         await supabase.from('reservations').update({ kommo_lead_id: newLead.id }).eq('id', reservation_id)
         await supabase.from('integration_logs').insert({
           integration_name: 'kommo', event_type: 'create_reservation',
-          status: 'success', details: { lead_id: newLead.id, reservation_id, fields: resCFs.length },
+          status: 'success',
+          details: {
+            lead_id: newLead.id, reservation_id, fields: resCFs.length,
+            linked_contact: existingKommoContactId,
+            contact_source: existingKommoContactId ? 'existing' : 'new',
+          },
         })
       }
 

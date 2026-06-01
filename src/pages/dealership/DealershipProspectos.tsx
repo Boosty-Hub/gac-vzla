@@ -36,9 +36,10 @@ import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
-type ColKey = 'nombre' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'showroom' | 'estado' | 'fecha';
+type ColKey = 'nombre' | 'empresa' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'showroom' | 'estado' | 'fecha';
 const COL_LABELS: Record<ColKey, string> = {
   nombre: 'Nombre',
+  empresa: 'Empresa',
   telefono: 'Teléfono',
   email: 'Email',
   marca: 'Marca',
@@ -90,6 +91,7 @@ interface Prospect {
   person_type: string | null;
   gender: string | null;
   age_range: string | null;
+  company_name: string | null;
   created_at: string;
 }
 
@@ -141,6 +143,7 @@ const DealershipProspectos = () => {
   const [pName, setPName] = useState<string>(() => getSS().pName || '');
   const [pPhone, setPPhone] = useState<string>(() => getSS().pPhone || '');
   const [pEmail, setPEmail] = useState<string>(() => getSS().pEmail || '');
+  const [pCompanyName, setPCompanyName] = useState<string>(() => getSS().pCompanyName || '');
   const [pModel, setPModel] = useState<string>(() => getSS().pModel || '');
   const [pSource, setPSource] = useState<string>(() => getSS().pSource || 'concesionario');
   const [pStatus, setPStatus] = useState<string>(() => getSS().pStatus || 'nuevo');
@@ -169,9 +172,9 @@ const DealershipProspectos = () => {
       return;
     }
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pCompanyName, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
     } catch {}
-  }, [dialogOpen, editingProspect, pName, pPhone, pEmail, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
+  }, [dialogOpen, editingProspect, pName, pPhone, pEmail, pCompanyName, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
   // Import/Export
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -586,7 +589,7 @@ const DealershipProspectos = () => {
   };
 
   const resetForm = () => {
-    setPName(''); setPPhone(''); setPEmail(''); setPModel('');
+    setPName(''); setPPhone(''); setPEmail(''); setPCompanyName(''); setPModel('');
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
     setPSalesperson(autoSalesperson);
     setPEventName(''); setPEstadoVzla('');
@@ -605,6 +608,7 @@ const DealershipProspectos = () => {
     setPName(p.name);
     setPPhone(p.phone || '');
     setPEmail(p.email || '');
+    setPCompanyName(p.company_name || '');
     setPModel(p.model_interest || '');
     setPSource(p.source || 'concesionario');
     setPStatus(p.status || 'nuevo');
@@ -652,6 +656,7 @@ const DealershipProspectos = () => {
         person_type: pPersonType || null,
         gender: pGender || null,
         age_range: pAgeRange || null,
+        company_name: pCompanyName.trim() || null,
       } as any).eq('id', editingProspect.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
       else {
@@ -683,6 +688,7 @@ const DealershipProspectos = () => {
         person_type: pPersonType || null,
         gender: pGender || null,
         age_range: pAgeRange || null,
+        company_name: pCompanyName.trim() || null,
       } as any).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
       else {
@@ -1046,6 +1052,7 @@ const DealershipProspectos = () => {
                       onChange={toggleSelectAll} />
                   </TableHead>
                   {visibleCols.has('nombre') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('name')}>Nombre<SortIcon field="name" /></TableHead>}
+                  {visibleCols.has('empresa') && <TableHead>Empresa</TableHead>}
                   {(visibleCols.has('telefono') || visibleCols.has('email')) && <TableHead>Contacto</TableHead>}
                   {visibleCols.has('estadovzla') && <TableHead>Estado Vzla</TableHead>}
                   {visibleCols.has('marca') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('model_interest')}>Marca<SortIcon field="model_interest" /></TableHead>}
@@ -1073,6 +1080,7 @@ const DealershipProspectos = () => {
                           checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
                       </TableCell>
                       {visibleCols.has('nombre') && <TableCell className="font-medium">{p.name}</TableCell>}
+                      {visibleCols.has('empresa') && <TableCell className="text-muted-foreground text-[11px]">{p.company_name || '-'}</TableCell>}
                       {(visibleCols.has('telefono') || visibleCols.has('email')) && (
                         <TableCell>
                           {visibleCols.has('telefono') && p.phone && <div className="flex items-center gap-1 text-muted-foreground"><Phone className="w-2.5 h-2.5" />{p.phone}</div>}
@@ -1199,6 +1207,10 @@ const DealershipProspectos = () => {
               <div className="space-y-1">
                 <Label className="text-xs">Email</Label>
                 <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-9 text-xs" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Nombre de Empresa</Label>
+                <Input value={pCompanyName} onChange={e => setPCompanyName(e.target.value)} placeholder="Empresa S.A." className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Modelo de interés</Label>
