@@ -378,11 +378,15 @@ async function syncFieldsFromKommo(
     if (modelInterest !== prospect.model_interest) updates.model_interest = modelInterest
   }
 
-  // Company entity linked to the lead (from "Agregar Compañía" in Kommo)
-  const leadCompanies = ((lead._embedded as Record<string, unknown>)?.companies as Array<{ name?: string }>) || []
-  if (leadCompanies[0]?.name) {
-    const companyFromLead = leadCompanies[0].name.trim()
-    if (companyFromLead && companyFromLead !== prospect.company_name) updates.company_name = companyFromLead
+  // Company entity linked to the lead (_embedded.companies only has id+link, must fetch separately)
+  const leadCompanies = ((lead._embedded as Record<string, unknown>)?.companies as Array<{ id?: number }>) || []
+  if (leadCompanies[0]?.id) {
+    const companyRes = await fetch(`${baseUrl}/companies/${leadCompanies[0].id}`, { headers: authHeaders })
+    if (companyRes.ok) {
+      const companyData = await companyRes.json() as Record<string, unknown>
+      const companyName = String(companyData.name ?? '').trim() || null
+      if (companyName && companyName !== prospect.company_name) updates.company_name = companyName
+    }
   }
 
   // Contact fields: name, phone, email, person_type, gender, age_range, company_name
@@ -512,7 +516,7 @@ async function autoCreateProspectFromKommo(
   baseUrl: string
 ) {
   const initialStatus = 'demostracion'
-  const leadRes = await fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields`, { headers: authHeaders })
+  const leadRes = await fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields,companies`, { headers: authHeaders })
   if (!leadRes.ok || leadRes.status === 204) {
     await supabase.from('integration_logs').insert({
       integration_name: 'kommo', event_type: 'webhook_auto_create_failed',
@@ -593,9 +597,23 @@ async function autoCreateProspectFromKommo(
         if (generoVal) gender = generoVal.toLowerCase()
 
         ageRange = sanitizeAgeRange(getCFText(cfs, CONTACT_CF.rango_edad))
+        // company_name text field on the contact (fallback)
         companyName = (contactData.company_name as string | null) ?? null
       } catch { /* ignore */ }
     }
+  }
+
+  // Company entity linked to the lead: _embedded.companies only has {id, _links} — fetch full data
+  const autoLeadCompanies = ((lead._embedded as Record<string, unknown>)?.companies as Array<{ id?: number }>) || []
+  if (autoLeadCompanies[0]?.id) {
+    try {
+      const companyRes = await fetch(`${baseUrl}/companies/${autoLeadCompanies[0].id}`, { headers: authHeaders })
+      if (companyRes.ok) {
+        const companyData = await companyRes.json() as Record<string, unknown>
+        const entityName = String(companyData.name ?? '').trim()
+        if (entityName) companyName = entityName  // entity name takes priority over contact text field
+      }
+    } catch { /* ignore */ }
   }
 
   // Use contact name first, fall back to lead name, then generic placeholder
