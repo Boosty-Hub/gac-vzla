@@ -135,6 +135,36 @@ Antes de terminar una sesión larga, verificar:
 - [ ] Migraciones SQL aplicadas en Supabase
 - [ ] Memorias importantes guardadas en memory/
 - [ ] MEMORY.md actualizado con nuevas entradas
+- [ ] **Skills enriquecidas** con nuevos patrones, IDs, o soluciones descubiertos
+
+---
+
+## Política de enriquecimiento de skills
+
+**Las skills deben crecer junto con el proyecto.** Después de implementar algo significativo:
+
+### Cuándo enriquecer una skill
+- Se descubre un nuevo patrón que se repetirá (ej: cómo obtener company de Kommo)
+- Se corrige un pitfall o error frecuente
+- Se agrega una tabla/columna nueva a la DB
+- Se descubren nuevos IDs de Kommo (stages, campos, pipelines)
+- Se implementa un patrón de UI nuevo que se reutilizará
+- Se resuelve un bug con una solución no obvia
+
+### Qué agregar a cada skill
+
+**supabase-gac**: Tablas nuevas, columnas, triggers, funciones SQL, queries útiles
+**kommo-gac**: IDs nuevos, patrones de API, errores encontrados y cómo resolverlos
+**frontend-gac**: Patrones nuevos, componentes nuevos, pitfalls encontrados
+**requirements-gac**: Nuevos tipos de requerimientos y su workflow
+
+### Cuándo crear una skill nueva
+Si un área de trabajo se vuelve suficientemente compleja y recurrente para merecer su propia guía especializada (ej: sistema de garantías, dashboard widgets, importación Excel).
+
+### Cómo enriquecer
+Editar directamente el `SKILL.md` correspondiente en `.claude/skills/`.
+Commitear junto con los cambios del requerimiento o en un commit separado.
+No esperar a "terminar" — mejor agregar mientras el contexto está fresco.
 
 ---
 

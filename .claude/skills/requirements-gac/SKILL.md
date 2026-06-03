@@ -140,6 +140,25 @@ Resumen conciso de lo hecho:
 
 ---
 
+## Enriquecer skills después de implementar
+
+Después de resolver cada requerimiento significativo, actualizar la skill relevante:
+
+```
+# Patrón descubierto → supabase-gac
+# ID nuevo de Kommo → kommo-gac
+# Componente nuevo reutilizable → frontend-gac
+# Nuevo tipo de tarea recurrente → requirements-gac
+```
+
+**Dónde**: `.claude/skills/<skill-name>/SKILL.md`
+**Cuándo**: Al mismo tiempo que el commit de los cambios, o inmediatamente después
+**Por qué**: Las skills crecen junto con el proyecto — lo que aprendemos hoy sirve mañana sin tener que redescubrirlo
+
+Si el área de trabajo es nueva y compleja (no encaja en ninguna skill existente), crear una skill nueva.
+
+---
+
 ## Comunicación con el usuario
 
 **Al recibir una lista de requerimientos mezclados**:
