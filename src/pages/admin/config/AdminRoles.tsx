@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Shield, Plus, Pencil, Users, Eye, Trash2, KeyRound, AlertTriangle, Lock } from 'lucide-react';
+import { Shield, Plus, Pencil, Users, Eye, Trash2, KeyRound, AlertTriangle, Lock, Globe, Building } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -34,8 +34,11 @@ const MODULE_LABELS: Record<string, string> = {
   dashboard: 'Dashboard', clientes: 'Clientes', vehiculos: 'Vehículos',
   modelos: 'Modelos', concesionarios: 'Concesionarios', reservas: 'Reservas',
   garantias: 'Garantías', historial: 'Historial', prospectos: 'Prospectos',
-  usuarios: 'Usuarios', roles: 'Roles',
+  usuarios: 'Usuarios', roles: 'Roles', eventos: 'Eventos',
 };
+
+// Modules where scope (own vs all) applies — structural/global modules don't need scoping
+const SCOPEABLE_MODULES = new Set(['clientes', 'vehiculos', 'reservas', 'garantias', 'historial', 'prospectos', 'concesionarios', 'usuarios']);
 
 // Portal → name of the template role to copy permissions from when creating a new role
 const PORTAL_TEMPLATE_ROLE: Record<string, string> = {
@@ -47,8 +50,8 @@ const PORTAL_TEMPLATE_ROLE: Record<string, string> = {
 // Modules that have real pages per portal.
 // concesionario now has ALL modules — permissions determine what's visible, not the portal.
 const PORTAL_MODULES: Record<string, string[]> = {
-  admin:         ['dashboard','clientes','vehiculos','modelos','concesionarios','reservas','garantias','historial','prospectos','usuarios','roles'],
-  concesionario: ['dashboard','clientes','vehiculos','modelos','concesionarios','reservas','garantias','historial','prospectos','usuarios','roles'],
+  admin:         ['dashboard','clientes','vehiculos','modelos','concesionarios','reservas','garantias','historial','prospectos','usuarios','roles','eventos'],
+  concesionario: ['dashboard','clientes','vehiculos','modelos','concesionarios','reservas','garantias','historial','prospectos','usuarios','roles','eventos'],
   cliente:       ['reservas'],
 };
 
@@ -74,6 +77,7 @@ const AdminRoles = () => {
   const [permDialogOpen, setPermDialogOpen] = useState(false);
   const [permRole, setPermRole] = useState<Role | null>(null);
   const [permChecked, setPermChecked] = useState<Set<string>>(new Set());
+  const [moduleScopes, setModuleScopes] = useState<Record<string, 'own' | 'all'>>({});
   const [savingPerms, setSavingPerms] = useState(false);
 
   // Delete dialog
@@ -140,11 +144,25 @@ const AdminRoles = () => {
     setSaving(false);
   };
 
-  const openPermissions = (role: Role) => {
+  const openPermissions = async (role: Role) => {
     setPermRole(role);
     const currentPerms = rolePermissions.filter(rp => rp.role_id === role.id).map(rp => rp.permission_id);
     setPermChecked(new Set(currentPerms));
+    // Load module scopes for this role
+    const { data: scopes } = await supabase
+      .from('role_module_scopes' as any)
+      .select('module, scope')
+      .eq('role_id', role.id);
+    const scopeMap: Record<string, 'own' | 'all'> = {};
+    if (scopes) {
+      for (const s of scopes as any[]) scopeMap[s.module] = s.scope;
+    }
+    setModuleScopes(scopeMap);
     setPermDialogOpen(true);
+  };
+
+  const toggleScope = (mod: string) => {
+    setModuleScopes(prev => ({ ...prev, [mod]: prev[mod] === 'all' ? 'own' : 'all' }));
   };
 
   const openDelete = async (role: Role) => {
@@ -194,11 +212,24 @@ const AdminRoles = () => {
   const handleSavePerms = async () => {
     if (!permRole) return;
     setSavingPerms(true);
+
+    // Save role permissions
     await supabase.from('role_permissions').delete().eq('role_id', permRole.id);
     if (permChecked.size > 0) {
       const { error } = await supabase.from('role_permissions').insert([...permChecked].map(pid => ({ role_id: permRole.id, permission_id: pid })));
       if (error) { toast.error('Error al guardar'); setSavingPerms(false); return; }
     }
+
+    // Save module scopes (only for scopeable modules that have at least one permission active)
+    await supabase.from('role_module_scopes' as any).delete().eq('role_id', permRole.id);
+    const activeModules = [...new Set(permissions.filter(p => permChecked.has(p.id)).map(p => p.module))];
+    const scopeInserts = activeModules
+      .filter(mod => SCOPEABLE_MODULES.has(mod))
+      .map(mod => ({ role_id: permRole.id, module: mod, scope: moduleScopes[mod] ?? 'own' }));
+    if (scopeInserts.length > 0) {
+      await supabase.from('role_module_scopes' as any).insert(scopeInserts);
+    }
+
     toast.success('Permisos actualizados');
     setPermDialogOpen(false); fetchAll(); setSavingPerms(false);
   };
@@ -358,13 +389,21 @@ const AdminRoles = () => {
                   );
                 })}
                 <TableHead className="text-center w-[60px]">Todos</TableHead>
+                <TableHead className="text-center w-[110px]">
+                  <span title="Por defecto el rol ve solo los datos de su concesionario. 'Ver todo' le da acceso a todos los datos del sistema.">
+                    Alcance ⓘ
+                  </span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {modules.map(mod => {
                 const modPerms = permissions.filter(p => p.module === mod);
                 const allChecked = modPerms.every(p => permChecked.has(p.id));
+                const hasAnyPerm = modPerms.some(p => permChecked.has(p.id));
                 const notInPortal = portalMods.length > 0 && !portalMods.includes(mod);
+                const isScopeable = SCOPEABLE_MODULES.has(mod);
+                const scope = moduleScopes[mod] ?? 'own';
                 return (
                   <TableRow key={mod} className={cn("[&>td]:py-2", notInPortal && "bg-muted/40")}>
                     <TableCell className="font-medium">
@@ -390,6 +429,27 @@ const AdminRoles = () => {
                     })}
                     <TableCell className="text-center">
                       <Checkbox checked={allChecked} onCheckedChange={() => toggleModule(mod)} className="mx-auto" />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {isScopeable && hasAnyPerm ? (
+                        <button
+                          onClick={() => toggleScope(mod)}
+                          className={cn(
+                            "text-[10px] px-2 py-0.5 rounded-full border font-medium inline-flex items-center gap-1 transition-colors",
+                            scope === 'all'
+                              ? "bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100"
+                              : "bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100"
+                          )}
+                          title={scope === 'all' ? 'Ver todo el sistema — clic para restringir' : 'Solo su concesionario — clic para dar acceso total'}
+                        >
+                          {scope === 'all'
+                            ? <><Globe className="w-2.5 h-2.5" /> Ver todo</>
+                            : <><Building className="w-2.5 h-2.5" /> Solo propio</>
+                          }
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground/30">—</span>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

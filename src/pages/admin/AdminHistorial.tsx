@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
-import { Search, ClipboardList, Car, MapPin, CalendarDays, Clock, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText } from 'lucide-react';
+import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText, X } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 
@@ -58,16 +61,29 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 };
 
 const AdminHistorial = () => {
+  const { profile, role, getModuleScope } = useAuth();
+  const { selectedDealership: myDealershipId } = useDealershipAccess();
+  const roleName = role?.name?.toLowerCase() ?? '';
+  const isAdmin = roleName === 'superadmin' || roleName === 'admin';
+  const isVendedor = roleName === 'vendedor';
+  // enforceScope: si el scope es 'own' y no es admin → forzar filtro por su concesionario
+  const enforceScope = !isAdmin && getModuleScope('historial') === 'own';
+
   const [entries, setEntries] = useState<ServiceEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
-  const [statusFilter, setStatusFilter] = useState('completada');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [dealershipFilter, setDealershipFilter] = useState('all');
+  const [serviceTypeFilter, setServiceTypeFilter] = useState('all');
+  const [warrantyFilter, setWarrantyFilter] = useState('all');
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
   const [totalCount, setTotalCount] = useState(0);
   const [warrantyCond, setWarrantyCond] = useState<WarrantyCondition | null>(null);
+  const [dealerships, setDealerships] = useState<{ id: string; name: string }[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<string[]>([]);
 
-  // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<ServiceEntry | null>(null);
   const [vehServiceCount, setVehServiceCount] = useState(0);
@@ -79,6 +95,21 @@ const AdminHistorial = () => {
       .eq('is_active', true)
       .limit(1)
       .then(({ data }) => { if (data && data.length > 0) setWarrantyCond(data[0] as WarrantyCondition); });
+
+    supabase
+      .from('dealerships')
+      .select('id, name')
+      .order('name')
+      .then(({ data }) => setDealerships((data || []) as { id: string; name: string }[]));
+
+    supabase
+      .from('reservations')
+      .select('service_type')
+      .eq('status', 'completada')
+      .then(({ data }) => {
+        const types = [...new Set((data || []).map(d => d.service_type).filter(Boolean))].sort();
+        setServiceTypes(types as string[]);
+      });
   }, []);
 
   const fetchEntries = async () => {
@@ -89,15 +120,24 @@ const AdminHistorial = () => {
       .select(
         'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km))',
         { count: 'exact' }
-      );
+      )
+      .eq('status', 'completada');
 
-    if (statusFilter !== 'all') {
-      query = query.eq('status', statusFilter);
+    if (isVendedor && profile?.id) {
+      // Vendedor siempre ve solo sus propios registros
+      query = query.eq('created_by_profile_id', profile.id);
+    } else if (enforceScope && myDealershipId) {
+      // Scope 'own': concesionario ve solo su propio concesionario
+      query = query.eq('dealership_id', myDealershipId);
+    } else if (!enforceScope && dealershipFilter !== 'all') {
+      // Scope 'all' o admin: usar el selector de concesionario
+      query = query.eq('dealership_id', dealershipFilter);
     }
 
-    if (busqueda.trim()) {
-      query = query.or(`service_type.ilike.%${busqueda}%,notes.ilike.%${busqueda}%,service_notes.ilike.%${busqueda}%`);
-    }
+    if (dateFrom) query = query.gte('reservation_date', dateFrom);
+    if (dateTo) query = query.lte('reservation_date', dateTo);
+    if (dealershipFilter !== 'all') query = query.eq('dealership_id', dealershipFilter);
+    if (serviceTypeFilter !== 'all') query = query.eq('service_type', serviceTypeFilter);
 
     const { data, error, count } = await query
       .order('reservation_date', { ascending: false })
@@ -112,8 +152,8 @@ const AdminHistorial = () => {
     setLoading(false);
   };
 
-  useEffect(() => { setPage(0); }, [busqueda, statusFilter, pageSize]);
-  useEffect(() => { fetchEntries(); }, [page, busqueda, statusFilter, pageSize]);
+  useEffect(() => { setPage(0); }, [busqueda, dateFrom, dateTo, dealershipFilter, serviceTypeFilter, warrantyFilter, pageSize]);
+  useEffect(() => { fetchEntries(); }, [page, dateFrom, dateTo, dealershipFilter, serviceTypeFilter, pageSize, profile?.id, isVendedor, enforceScope, myDealershipId]);
 
   const openDetail = async (entry: ServiceEntry) => {
     setDetail(entry);
@@ -129,7 +169,7 @@ const AdminHistorial = () => {
     }
   };
 
-  const evaluateWarranty = (entry: ServiceEntry): { active: boolean; reason: string | null } => {
+  const evaluateWarranty = useCallback((entry: ServiceEntry): { active: boolean; reason: string | null } => {
     if (!entry.vehicles) return { active: false, reason: null };
     const v = entry.vehicles;
     const m = v.vehicle_models;
@@ -144,10 +184,41 @@ const AdminHistorial = () => {
       if (months > maxMonths) reasons.push(`Tiempo excedido (${months} / ${maxMonths} meses)`);
     }
     return { active: reasons.length === 0 && v.warranty_active, reason: reasons.length > 0 ? reasons.join('; ') : null };
+  }, [warrantyCond]);
+
+  const filteredEntries = useMemo(() => {
+    let result = entries;
+    if (busqueda.trim()) {
+      const q = busqueda.toLowerCase();
+      result = result.filter(e =>
+        e.vehicles?.plate?.toLowerCase().includes(q) ||
+        e.clients?.full_name?.toLowerCase().includes(q) ||
+        e.service_type?.toLowerCase().includes(q) ||
+        e.notes?.toLowerCase().includes(q) ||
+        e.service_notes?.toLowerCase().includes(q)
+      );
+    }
+    if (warrantyFilter !== 'all') {
+      result = result.filter(e => {
+        const w = evaluateWarranty(e);
+        return warrantyFilter === 'active' ? w.active : !w.active;
+      });
+    }
+    return result;
+  }, [entries, busqueda, warrantyFilter, evaluateWarranty]);
+
+  const hasActiveFilters = !!(busqueda || dateFrom || dateTo || dealershipFilter !== 'all' || serviceTypeFilter !== 'all' || warrantyFilter !== 'all');
+
+  const clearFilters = () => {
+    setBusqueda('');
+    setDateFrom('');
+    setDateTo('');
+    setDealershipFilter('all');
+    setServiceTypeFilter('all');
+    setWarrantyFilter('all');
   };
 
   const totalPages = Math.ceil(totalCount / pageSize);
-  const completedCount = entries.filter(e => e.status === 'completada').length;
 
   return (
     <div className="space-y-3">
@@ -160,27 +231,72 @@ const AdminHistorial = () => {
         </div>
       </div>
 
+      {/* Fila 1: búsqueda + fechas */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 max-w-sm">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
-            placeholder="Buscar servicio, notas..."
+            placeholder="Placa, cliente, notas..."
             className="pl-8 h-8 text-xs"
             value={busqueda}
             onChange={e => setBusqueda(e.target.value)}
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px] h-8 text-xs">
-            <SelectValue placeholder="Estado" />
+        <Input
+          type="date"
+          className="w-[140px] h-8 text-xs"
+          value={dateFrom}
+          onChange={e => setDateFrom(e.target.value)}
+          title="Fecha desde"
+        />
+        <Input
+          type="date"
+          className="w-[140px] h-8 text-xs"
+          value={dateTo}
+          onChange={e => setDateTo(e.target.value)}
+          title="Fecha hasta"
+        />
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 px-2 text-xs gap-1">
+            <X className="w-3 h-3" /> Limpiar
+          </Button>
+        )}
+      </div>
+
+      {/* Fila 2: dropdowns */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Select value={serviceTypeFilter} onValueChange={setServiceTypeFilter}>
+          <SelectTrigger className="w-[170px] h-8 text-xs">
+            <SelectValue placeholder="Tipo de servicio" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Todos</SelectItem>
-            <SelectItem value="completada">Completados</SelectItem>
-            <SelectItem value="pendiente">Pendientes</SelectItem>
-            <SelectItem value="confirmada">Confirmados</SelectItem>
-            <SelectItem value="en_proceso">En Proceso</SelectItem>
-            <SelectItem value="cancelada">Cancelados</SelectItem>
+            <SelectItem value="all">Todos los servicios</SelectItem>
+            {serviceTypes.map(t => (
+              <SelectItem key={t} value={t}>{t}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {!enforceScope && !isVendedor && (
+          <Select value={dealershipFilter} onValueChange={setDealershipFilter}>
+            <SelectTrigger className="w-[190px] h-8 text-xs">
+              <SelectValue placeholder="Concesionario" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los concesionarios</SelectItem>
+              {dealerships.map(d => (
+                <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <Select value={warrantyFilter} onValueChange={setWarrantyFilter}>
+          <SelectTrigger className="w-[145px] h-8 text-xs">
+            <SelectValue placeholder="Garantía" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toda garantía</SelectItem>
+            <SelectItem value="active">Con garantía</SelectItem>
+            <SelectItem value="inactive">Sin garantía</SelectItem>
           </SelectContent>
         </Select>
         <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
@@ -201,7 +317,7 @@ const AdminHistorial = () => {
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">Cargando historial...</p>
           </CardContent>
-        ) : entries.length === 0 ? (
+        ) : filteredEntries.length === 0 ? (
           <CardContent className="p-8 text-center">
             <ClipboardList className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No se encontraron registros</p>
@@ -212,31 +328,27 @@ const AdminHistorial = () => {
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                 <TableHead>Fecha</TableHead>
                 <TableHead>Hora</TableHead>
+                <TableHead>Placa</TableHead>
                 <TableHead>Vehículo</TableHead>
                 <TableHead>Cliente</TableHead>
                 <TableHead>Servicio</TableHead>
                 <TableHead>Concesionario</TableHead>
                 <TableHead>Km</TableHead>
                 <TableHead>Garantía</TableHead>
-                <TableHead>Estado</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {entries.map(e => {
+              {filteredEntries.map(e => {
                 const w = evaluateWarranty(e);
-                const sc = STATUS_CONFIG[e.status] || { label: e.status, color: 'bg-muted' };
                 return (
                   <TableRow key={e.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(e)}>
                     <TableCell className="font-medium">{e.reservation_date}</TableCell>
                     <TableCell>{e.reservation_time?.slice(0, 5)}</TableCell>
+                    <TableCell className="font-mono">{e.vehicles?.plate || '-'}</TableCell>
                     <TableCell>
-                      <div>
-                        <span className="font-medium">{e.vehicles?.vehicle_models?.brand} {e.vehicles?.vehicle_models?.name} {e.vehicles?.year}</span>
-                        <br />
-                        <span className="text-muted-foreground font-mono">{e.vehicles?.plate || '-'}</span>
-                      </div>
+                      {e.vehicles?.vehicle_models?.brand} {e.vehicles?.vehicle_models?.name} {e.vehicles?.year}
                     </TableCell>
-                    <TableCell className="max-w-[140px] truncate" title={e.clients?.full_name || ''}>
+                    <TableCell className="max-w-[130px] truncate" title={e.clients?.full_name || ''}>
                       {e.clients?.full_name || '-'}
                     </TableCell>
                     <TableCell>{e.service_type}</TableCell>
@@ -247,9 +359,6 @@ const AdminHistorial = () => {
                         {w.active ? <ShieldCheck className="w-2.5 h-2.5" /> : <ShieldX className="w-2.5 h-2.5" />}
                         {w.active ? 'Sí' : 'No'}
                       </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={cn("text-[10px] px-1.5 py-0", sc.color)}>{sc.label}</Badge>
                     </TableCell>
                   </TableRow>
                 );
@@ -286,7 +395,6 @@ const AdminHistorial = () => {
             const sc = STATUS_CONFIG[e.status] || { label: e.status, color: 'bg-muted' };
             return (
               <div className="space-y-4">
-                {/* Status & Service */}
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-display font-bold text-sm">{e.service_type}</h3>
@@ -295,7 +403,6 @@ const AdminHistorial = () => {
                   <Badge className={cn("text-xs", sc.color)}>{sc.label}</Badge>
                 </div>
 
-                {/* Vehicle info */}
                 {e.vehicles && (
                   <Card className={cn("border-l-4", w.active ? "border-l-green-500" : "border-l-red-500")}>
                     <CardContent className="p-3 space-y-2">
@@ -333,7 +440,6 @@ const AdminHistorial = () => {
                   </Card>
                 )}
 
-                {/* Client info */}
                 {e.clients && (
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2">
@@ -364,7 +470,6 @@ const AdminHistorial = () => {
                   </div>
                 )}
 
-                {/* Dealership */}
                 {e.dealerships && (
                   <div className="flex items-center gap-2 text-xs bg-muted/50 rounded-md p-2">
                     <MapPin className="w-3.5 h-3.5 text-muted-foreground" />
@@ -375,7 +480,6 @@ const AdminHistorial = () => {
                   </div>
                 )}
 
-                {/* Notes */}
                 {e.notes && (
                   <>
                     <Separator />
@@ -386,7 +490,6 @@ const AdminHistorial = () => {
                   </>
                 )}
 
-                {/* Service notes (completed work) */}
                 {e.service_notes && (
                   <>
                     <Separator />
@@ -400,7 +503,6 @@ const AdminHistorial = () => {
                   </>
                 )}
 
-                {/* Technical report PDF */}
                 {e.technical_report_url && (
                   <>
                     <Separator />
@@ -411,7 +513,6 @@ const AdminHistorial = () => {
                   </>
                 )}
 
-                {/* Warranty condition info: model-specific first, fall back to global */}
                 {(() => {
                   const m = e.vehicles?.vehicle_models;
                   const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);

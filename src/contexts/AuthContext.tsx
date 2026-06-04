@@ -28,11 +28,13 @@ interface AuthContextType {
   profile: Profile | null;
   role: RoleData | null;
   permissions: string[];
+  moduleScopes: Record<string, 'own' | 'all'>;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
+  getModuleScope: (module: string) => 'own' | 'all';
   refreshProfile: () => Promise<void>;
 }
 
@@ -85,10 +87,25 @@ async function loadUserProfile(userId: string) {
     }
   }
 
+  // 4. Load module scopes for this role (own = solo lo del concesionario, all = ver todo)
+  const moduleScopes: Record<string, 'own' | 'all'> = {};
+  if (roleData?.id) {
+    const { data: scopes } = await supabase
+      .from('role_module_scopes' as any)
+      .select('module, scope')
+      .eq('role_id', roleData.id);
+    if (scopes) {
+      for (const s of scopes as any[]) {
+        moduleScopes[s.module] = s.scope;
+      }
+    }
+  }
+
   return {
     profile: profileOnly as Profile,
     role: roleData as RoleData | null,
     permissions: permNames,
+    moduleScopes,
   };
 }
 
@@ -106,6 +123,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [role, setRole] = useState<RoleData | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [moduleScopes, setModuleScopes] = useState<Record<string, 'own' | 'all'>>({});
   const [loading, setLoading] = useState(true);
 
   const applyProfile = useCallback((data: Awaited<ReturnType<typeof loadUserProfile>>) => {
@@ -113,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(data.profile);
       setRole(data.role);
       setPermissions(data.permissions);
+      setModuleScopes(data.moduleScopes);
     }
   }, []);
 
@@ -120,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setRole(null);
     setPermissions([]);
+    setModuleScopes({});
   }, []);
 
   // Refs to expose latest user/applyProfile to realtime callbacks without stale closures
@@ -269,6 +289,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return permissions.includes(permission);
   };
 
+  const getModuleScope = (module: string): 'own' | 'all' => {
+    if (role?.name === 'superadmin' || role?.name === 'admin') return 'all';
+    return moduleScopes[module] ?? 'own';
+  };
+
   const refreshProfile = async () => {
     if (user) {
       const data = await loadUserProfile(user.id);
@@ -284,11 +309,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         profile,
         role,
         permissions,
+        moduleScopes,
         loading,
         signIn,
         signUp,
         signOut,
         hasPermission,
+        getModuleScope,
         refreshProfile,
       }}
     >

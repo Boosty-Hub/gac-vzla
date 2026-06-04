@@ -82,6 +82,7 @@ const App = () => (
             <Route path="/concesionario/concesionarios" element={<DealershipRoute><AdminConcesionarios /></DealershipRoute>} />
             <Route path="/concesionario/usuarios" element={<DealershipRoute><AdminUsuarios /></DealershipRoute>} />
             <Route path="/concesionario/roles" element={<DealershipRoute><AdminRoles /></DealershipRoute>} />
+            <Route path="/concesionario/eventos" element={<DealershipRoute><AdminEventos /></DealershipRoute>} />
 
             {/* Admin routes with sidebar layout */}
             <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />

@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import {
   CalendarDays, LogOut, Users, LayoutDashboard, ShieldCheck, ClipboardList,
-  Car, BookOpen, MapPin, UserCheck, KeyRound,
+  Car, BookOpen, MapPin, UserCheck, KeyRound, CalendarCheck,
 } from 'lucide-react';
 import imbLogo from '@/assets/imb-logo.png';
 
@@ -39,6 +39,7 @@ const menuGroups = [
     group: 'Ventas',
     items: [
       { label: 'Prospectos',           icon: Users,           path: '/concesionario/prospectos',  module: 'prospectos'     },
+      { label: 'Eventos',              icon: CalendarCheck,   path: '/concesionario/eventos',     module: 'eventos'        },
     ],
   },
   {
@@ -72,7 +73,9 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
   const filteredGroups = menuGroups
     .map(group => ({
       ...group,
-      items: group.items.filter(item => isAdmin || hasPermission(`${item.module}.view`)),
+      items: group.items.filter(item =>
+        isAdmin || ['view', 'create', 'edit', 'delete'].some(a => hasPermission(`${item.module}.${a}`))
+      ),
     }))
     .filter(group => group.items.length > 0);
 

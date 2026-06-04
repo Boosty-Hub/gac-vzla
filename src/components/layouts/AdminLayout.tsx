@@ -84,9 +84,10 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       ...group,
       items: group.items.filter(item => {
         if (item.module === 'configuracion') {
-          return role?.name === 'superadmin' || role?.name === 'admin' || hasPermission('roles.view') || hasPermission('usuarios.view');
+          return role?.name === 'superadmin' || role?.name === 'admin' ||
+            ['roles', 'usuarios'].some(m => ['view','create','edit','delete'].some(a => hasPermission(`${m}.${a}`)));
         }
-        return hasPermission(`${item.module}.view`);
+        return ['view', 'create', 'edit', 'delete'].some(a => hasPermission(`${item.module}.${a}`));
       }),
     }))
     .filter(group => group.items.length > 0);
