@@ -149,14 +149,14 @@ const CONCESIONARIO_KOMMO = [
   { id: 7832502, kw: ['rosal', 'street boutique'] }, { id: 7832504, kw: ['valencia'] },
   { id: 7832506, kw: ['barquisimeto'] }, { id: 7832508, kw: ['florida'] },
   { id: 7832510, kw: ['castellana'] }, { id: 8039476, kw: ['guarenas'] },
-  { id: 8134449, kw: ['lecher'] }, { id: 8159325, kw: ['cerro verde'] },
+  { id: 8134449, kw: ['lecher'] }, { id: 8159325, kw: ['techno', 'tecnho'] },
 ]
 
 const CONCESIONARIO_KEYWORD: Record<number, string> = {
   7832490: 'harbin', 7832492: 'garzas', 7832494: 'hobby', 7832496: 'meta car',
   7832498: 'palma', 7832502: 'rosal', 7832504: 'valencia', 7832506: 'barquisimeto',
   7832508: 'florida', 7832510: 'castellana', 8039476: 'guarenas', 8134449: 'lecher',
-  8159325: 'cerro verde',
+  8159325: 'techno',
 }
 
 type CFValue = { field_id: number; values: Array<{ value?: unknown; enum_id?: number }> }
@@ -641,15 +641,27 @@ async function autoCreateProspectFromKommo(
   // Resolve dealership_id from concesionario enum
   let dealershipId: string | null = null
   const concEnumId = getCFEnum(cfValues, CF.concesionario)
-  if (concEnumId && CONCESIONARIO_KEYWORD[concEnumId]) {
-    const keyword = CONCESIONARIO_KEYWORD[concEnumId]
-    const { data: dealership } = await supabase
-      .from('dealerships')
-      .select('id')
-      .ilike('name', `%${keyword}%`)
-      .limit(1)
-      .single()
-    if (dealership) dealershipId = dealership.id
+  if (concEnumId) {
+    const entry = CONCESIONARIO_KOMMO.find(c => c.id === concEnumId)
+    if (entry) {
+      for (const kw of entry.kw) {
+        const { data: dealership } = await supabase
+          .from('dealerships')
+          .select('id')
+          .ilike('name', `%${kw}%`)
+          .limit(1)
+          .single()
+        if (dealership) { dealershipId = dealership.id; break }
+      }
+    }
+    if (!dealershipId) {
+      // Log unresolved concesionario enum so it can be added to the mapping
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'webhook_dealership_unresolved',
+        kommo_lead_id: kommoLeadId, status: 'warning',
+        details: { concesionario_enum_id: concEnumId, lead_name: finalName },
+      })
+    }
   }
 
   const newProspect: Record<string, unknown> = {
