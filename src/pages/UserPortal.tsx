@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
-import { MapPin, Phone, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Mail, IdCard, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink, Search } from 'lucide-react';
+import { MapPin, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink, Search } from 'lucide-react';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
@@ -1251,9 +1251,6 @@ const UserPortal = () => {
         {vista === 'mis-vehiculos' && !selectedVehDetail && (
           <div className="space-y-4">
             <h2 className="text-xl font-display font-bold">Mis Vehículos</h2>
-            {warrantyCond && (
-              <p className="text-xs text-muted-foreground">{warrantyCond.name}: {(warrantyCond.max_months / 12).toFixed(0)} años o {warrantyCond.max_km.toLocaleString()} km</p>
-            )}
             {vehicles.length === 0 ? (
               <Card className="gac-shadow">
                 <CardContent className="p-8 text-center">
@@ -1421,7 +1418,7 @@ const UserPortal = () => {
           <div className="space-y-4">
             <h2 className="text-xl font-display font-bold">Mi Perfil</h2>
 
-            {/* Client info */}
+            {/* Client info — datos sensibles ocultos: el ingreso es solo con placa */}
             <Card className="gac-shadow">
               <CardContent className="p-4 space-y-3">
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto">
@@ -1429,42 +1426,7 @@ const UserPortal = () => {
                 </div>
                 <div className="text-center">
                   <h3 className="font-semibold">{clientData?.full_name || profile?.full_name || 'Sin nombre'}</h3>
-                  <p className="text-sm text-muted-foreground">{clientData?.email || profile?.email}</p>
                 </div>
-                {clientData && (
-                  <div className="space-y-2 pt-2 border-t text-sm">
-                    {clientData.cedula && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <IdCard className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span>{clientData.cedula}</span>
-                      </div>
-                    )}
-                    {clientData.phone && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Phone className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span>{clientData.phone}</span>
-                      </div>
-                    )}
-                    {clientData.email && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Mail className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span>{clientData.email}</span>
-                      </div>
-                    )}
-                    {(clientData.city || clientData.state) && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <Building className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span>{[clientData.city, clientData.state].filter(Boolean).join(', ')}</span>
-                      </div>
-                    )}
-                    {clientData.address && (
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
-                        <span>{clientData.address}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
               </CardContent>
             </Card>
 

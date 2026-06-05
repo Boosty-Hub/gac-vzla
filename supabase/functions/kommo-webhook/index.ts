@@ -48,6 +48,8 @@ const KOMMO_EVENT_ID_TO_NAME: Record<number, string> = {
   8158302: 'Cerro Verde 2026',
   8161259: 'Exhibición Acarigua Mango Center 2026',
   8161682: 'Plastic Show Valencia',
+  8164423: 'Expo - Cerro Verde',
+  8164999: 'Expo ISP 2026',
 }
 
 const KOMMO_TO_PERSON_TYPE: Record<number, string> = {
@@ -76,10 +78,14 @@ const SOURCE_TO_KOMMO: Record<string, number> = {
 }
 const BRAND_TO_KOMMO: Record<string, number> = { GAC: 7832208, DFSK: 7832206, SHINERAY: 7857650 }
 
+// El orden importa: las variantes más específicas van primero porque eventNameToKommoEnumId
+// devuelve el PRIMER match por substring ("Expo - Cerro Verde" contiene "cerro verde").
 const EVENT_NAME_ENUMS = [
-  { id: 8158302, keywords: ['cerro verde'] },
+  { id: 8164999, keywords: ['expo isp', 'isp 2026'] },
+  { id: 8164423, keywords: ['expo - cerro verde', 'expo cerro verde'] },
   { id: 8161259, keywords: ['acarigua', 'mango center'] },
   { id: 8161682, keywords: ['plastic show'] },
+  { id: 8158302, keywords: ['cerro verde'] },
 ]
 
 function eventNameToKommoEnumId(eventName: string): number | null {
@@ -157,6 +163,136 @@ const CONCESIONARIO_KEYWORD: Record<number, string> = {
   7832498: 'palma', 7832502: 'rosal', 7832504: 'valencia', 7832506: 'barquisimeto',
   7832508: 'florida', 7832510: 'castellana', 8039476: 'guarenas', 8134449: 'lecher',
   8159325: 'techno',
+}
+
+// ─── Dynamic dealership resolution (label-based, no redeploy needed) ───────────
+// Normaliza para comparar nombres: minúsculas, sin acentos, solo alfanumérico.
+function normalizeText(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+// Distancia de edición con transposiciones (OSA) — tolera typos como "tecnho"/"techno"
+// (una transposición = distancia 1, no 2 como en Levenshtein clásico).
+function editDistance(a: string, b: string): number {
+  const m = a.length, n = b.length
+  if (!m) return n
+  if (!n) return m
+  const d: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
+  for (let i = 0; i <= m; i++) d[i][0] = i
+  for (let j = 0; j <= n; j++) d[0][j] = j
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
+      }
+    }
+  }
+  return d[m][n]
+}
+
+// Palabras genéricas que NO distinguen un concesionario de otro (marca, forma jurídica,
+// tipo de entidad, ciudad/estado que aparecen en muchos labels). Si las contáramos,
+// "GAC Valencia" haría match con "GAC Lecherías" sólo por compartir "gac".
+const GENERIC_TOKENS = new Set([
+  'gac', 'dfsk', 'shineray', 'shinerey', 'motor', 'motors', 'motores',
+  'automotores', 'auto', 'car', 'cars', 'group', 'grupo', 'centro', 'de', 'del',
+  'servicio', 'servicios', 'la', 'el', 'los', 'las', 'ca', 'sa', 'soy',
+  'exhibicion', 'exhibition', 'concesionario', 'caracas', 'anzoategui',
+])
+
+// Tokens distintivos de un nombre: normalizados, sin duplicados y sin palabras genéricas.
+// Si tras quitar las genéricas no queda nada, se usan todos los tokens (caso degenerado).
+function distinctiveTokens(s: string): string[] {
+  const all = [...new Set(normalizeText(s).split(' ').filter(Boolean))]
+  const distinctive = all.filter(t => !GENERIC_TOKENS.has(t))
+  return distinctive.length ? distinctive : all
+}
+
+// Dos tokens "iguales" si coinciden exacto o difieren por un typo (≥4 chars, distancia ≤1).
+function tokensMatch(x: string, y: string): boolean {
+  if (x === y) return true
+  return Math.min(x.length, y.length) >= 4 && editDistance(x, y) <= 1
+}
+
+// Score de similitud 0..1 entre dos nombres, basado SÓLO en tokens distintivos.
+// Denominador = min(#tokens) para premiar cuando el label es un superconjunto del nombre
+// (ej. "GAC Valencia (Valencia) - GAC" vs "GAC Valencia"). Requiere ≥1 token distintivo en común.
+function nameMatchScore(a: string, b: string): number {
+  const ta = distinctiveTokens(a), tb = distinctiveTokens(b)
+  if (!ta.length || !tb.length) return 0
+  let shared = 0
+  for (const x of ta) if (tb.some(y => tokensMatch(x, y))) shared++
+  if (shared === 0) return 0
+  return shared / Math.min(ta.length, tb.length)
+}
+
+// Resuelve el dealership_id desde el enum_id de Kommo:
+//  1. Pide a Kommo el label real del enum (campo Concesionario).
+//  2. Lo matchea (fuzzy) contra dealerships existentes.
+//  3. Si no existe en Supabase → lo crea y asocia.
+//  4. Fallback: mapeo hardcodeado por keyword.
+//  5. Si nada resuelve → log webhook_dealership_unresolved.
+async function resolveDealershipId(
+  supabase: ReturnType<typeof createClient>,
+  baseUrl: string,
+  authHeaders: Record<string, string>,
+  concEnumId: number,
+  kommoLeadId: number,
+): Promise<string | null> {
+  // 1. Label humano del enum desde la metadata del campo en Kommo
+  let label: string | null = null
+  try {
+    const res = await fetch(`${baseUrl}/leads/custom_fields/${CF.concesionario}`, { headers: authHeaders })
+    if (res.ok) {
+      const field = await res.json() as { enums?: Array<{ id: number; value: string }> }
+      const opt = (field.enums || []).find(e => e.id === concEnumId)
+      if (opt?.value) label = String(opt.value).trim()
+    }
+  } catch { /* ignore */ }
+
+  // 2. Match fuzzy contra dealerships existentes
+  if (label) {
+    const { data: dealerships } = await supabase.from('dealerships').select('id, name')
+    let best: { id: string; score: number } | null = null
+    for (const d of (dealerships as Array<{ id: string; name: string }> | null) || []) {
+      const score = nameMatchScore(label, d.name || '')
+      if (score >= 0.5 && (!best || score > best.score)) best = { id: d.id, score }
+    }
+    if (best) return best.id
+
+    // 3. No existe → crear dealership y asociar
+    const { data: created } = await supabase.from('dealerships')
+      .insert({ name: label }).select('id').single()
+    if (created) {
+      const newId = (created as { id: string }).id
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'webhook_dealership_autocreated',
+        kommo_lead_id: kommoLeadId, status: 'success',
+        details: { concesionario_enum_id: concEnumId, dealership_name: label, dealership_id: newId },
+      })
+      return newId
+    }
+  }
+
+  // 4. Fallback: mapeo hardcodeado por keyword
+  const entry = CONCESIONARIO_KOMMO.find(c => c.id === concEnumId)
+  if (entry) {
+    for (const kw of entry.kw) {
+      const { data } = await supabase.from('dealerships').select('id').ilike('name', `%${kw}%`).limit(1).single()
+      if (data) return (data as { id: string }).id
+    }
+  }
+
+  // 5. No resuelto
+  await supabase.from('integration_logs').insert({
+    integration_name: 'kommo', event_type: 'webhook_dealership_unresolved',
+    kommo_lead_id: kommoLeadId, status: 'warning',
+    details: { concesionario_enum_id: concEnumId, label },
+  })
+  return null
 }
 
 type CFValue = { field_id: number; values: Array<{ value?: unknown; enum_id?: number }> }
@@ -638,30 +774,11 @@ async function autoCreateProspectFromKommo(
     modelInterest = modelName ? `${brandName} ${modelName}` : brandName
   }
 
-  // Resolve dealership_id from concesionario enum
+  // Resolve dealership_id from concesionario enum (dynamic label match + auto-create)
   let dealershipId: string | null = null
   const concEnumId = getCFEnum(cfValues, CF.concesionario)
   if (concEnumId) {
-    const entry = CONCESIONARIO_KOMMO.find(c => c.id === concEnumId)
-    if (entry) {
-      for (const kw of entry.kw) {
-        const { data: dealership } = await supabase
-          .from('dealerships')
-          .select('id')
-          .ilike('name', `%${kw}%`)
-          .limit(1)
-          .single()
-        if (dealership) { dealershipId = dealership.id; break }
-      }
-    }
-    if (!dealershipId) {
-      // Log unresolved concesionario enum so it can be added to the mapping
-      await supabase.from('integration_logs').insert({
-        integration_name: 'kommo', event_type: 'webhook_dealership_unresolved',
-        kommo_lead_id: kommoLeadId, status: 'warning',
-        details: { concesionario_enum_id: concEnumId, lead_name: finalName },
-      })
-    }
+    dealershipId = await resolveDealershipId(supabase, baseUrl, authHeaders, concEnumId, kommoLeadId)
   }
 
   const newProspect: Record<string, unknown> = {

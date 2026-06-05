@@ -248,11 +248,6 @@ const DealershipProspectos = () => {
   const fetchProspects = async () => {
     if (!selectedDealership) return;
     setLoading(true);
-    let query = supabase
-      .from('prospects')
-      .select('*')
-      .eq('dealership_id', selectedDealership)
-      .order('created_at', { ascending: false });
 
     // Determine the salesperson name to filter by:
     // 1. Linked salespersons record takes priority
@@ -263,12 +258,24 @@ const DealershipProspectos = () => {
         ? profile.full_name
         : null;
 
-    if (salespersonName) {
-      query = query.eq('salesperson', salespersonName);
+    // Supabase devuelve máx. 1000 filas por request; traemos TODOS en lotes para que
+    // los filtros (evento, etc.) no pierdan registros cuando el concesionario supere 1000.
+    const pageSize = 1000;
+    const all: Prospect[] = [];
+    for (let from = 0; ; from += pageSize) {
+      let query = supabase
+        .from('prospects')
+        .select('*')
+        .eq('dealership_id', selectedDealership)
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (salespersonName) query = query.eq('salesperson', salespersonName);
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) break;
+      all.push(...(data as Prospect[]));
+      if (data.length < pageSize) break;
     }
-
-    const { data } = await query;
-    setProspects((data || []) as Prospect[]);
+    setProspects(all);
     setLoading(false);
   };
 

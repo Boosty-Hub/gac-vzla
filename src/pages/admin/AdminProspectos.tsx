@@ -271,11 +271,21 @@ const AdminProspectos = () => {
 
   const fetchProspects = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('prospects')
-      .select('*, dealerships(name)')
-      .order('created_at', { ascending: false });
-    setProspects((data || []) as Prospect[]);
+    // Supabase devuelve máx. 1000 filas por request; traemos TODOS los prospectos en lotes
+    // para que filtros como "evento" no pierdan registros antiguos (fuera de los 1000 recientes).
+    const pageSize = 1000;
+    const all: Prospect[] = [];
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from('prospects')
+        .select('*, dealerships(name)')
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error || !data || data.length === 0) break;
+      all.push(...(data as Prospect[]));
+      if (data.length < pageSize) break;
+    }
+    setProspects(all);
     setLoading(false);
   };
 
