@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
-import { MapPin, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink, Search } from 'lucide-react';
+import { MapPin, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink, Search, KeyRound } from 'lucide-react';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
@@ -187,6 +187,11 @@ const UserPortal = () => {
   const [loadingVehHistory, setLoadingVehHistory] = useState(false);
   const [vehServiceCounts, setVehServiceCounts] = useState<Record<string, number>>({});
 
+  // PIN de acceso (gestionado sobre profiles.pin_code del propio usuario)
+  const [pinSaved, setPinSaved] = useState<string | null>(null);
+  const [pinInput, setPinInput] = useState('');
+  const [pinSaving, setPinSaving] = useState(false);
+
   // Views
   const validVistas = ['inicio', 'reservar', 'mis-reservas', 'mis-vehiculos', 'perfil'] as const;
   type Vista = typeof validVistas[number];
@@ -353,6 +358,41 @@ const UserPortal = () => {
     };
     load();
   }, [user]);
+
+  // Cargar el PIN de acceso actual del propio usuario
+  useEffect(() => {
+    if (!user) return;
+    supabase.from('profiles').select('pin_code').eq('id', user.id).maybeSingle()
+      .then(({ data }) => setPinSaved(((data?.pin_code as string | null) || null)));
+  }, [user]);
+
+  const savePin = async () => {
+    if (!user) return;
+    if (!/^\d{4}$/.test(pinInput)) { toast.error('El PIN debe ser de 4 dígitos'); return; }
+    setPinSaving(true);
+    const { error } = await supabase.from('profiles').update({ pin_code: pinInput }).eq('id', user.id);
+    setPinSaving(false);
+    if (error) {
+      toast.error((error as { code?: string }).code === '23505'
+        ? 'Ese PIN ya está en uso, elige otro'
+        : 'No se pudo guardar el PIN');
+      return;
+    }
+    setPinSaved(pinInput);
+    setPinInput('');
+    toast.success('PIN guardado');
+  };
+
+  const removePin = async () => {
+    if (!user) return;
+    setPinSaving(true);
+    const { error } = await supabase.from('profiles').update({ pin_code: null }).eq('id', user.id);
+    setPinSaving(false);
+    if (error) { toast.error('No se pudo quitar el PIN'); return; }
+    setPinSaved(null);
+    setPinInput('');
+    toast.success('PIN eliminado');
+  };
 
   // Fetch completed service counts per vehicle for warranty evaluation
   useEffect(() => {
@@ -1430,6 +1470,49 @@ const UserPortal = () => {
               </CardContent>
             </Card>
 
+            {/* PIN de acceso */}
+            <Card className="gac-shadow">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-primary" />
+                  <h3 className="font-semibold text-sm">PIN de acceso</h3>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Crea un PIN de 4 dígitos para entrar al portal sin tu placa.
+                  {pinSaved ? '' : ' Aún no tienes un PIN configurado.'}
+                </p>
+
+                {pinSaved && (
+                  <div className="flex items-center justify-between rounded-md bg-muted/50 p-2.5">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">PIN actual</p>
+                      <p className="font-mono font-bold tracking-[0.3em] text-lg">{pinSaved}</p>
+                    </div>
+                    <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={removePin} disabled={pinSaving}>
+                      <XCircle className="w-3.5 h-3.5 mr-1" /> Quitar
+                    </Button>
+                  </div>
+                )}
+
+                <div className="flex items-end gap-2">
+                  <div className="flex-1 space-y-1">
+                    <Label className="text-xs">{pinSaved ? 'Cambiar PIN' : 'Nuevo PIN'}</Label>
+                    <Input
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={pinInput}
+                      onChange={e => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      placeholder="••••"
+                      className="font-mono tracking-[0.3em] text-lg h-10"
+                    />
+                  </div>
+                  <Button size="sm" className="h-10" onClick={savePin} disabled={pinSaving || pinInput.length !== 4}>
+                    {pinSaving ? '...' : 'Guardar'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Vehicles */}
             <Card className="gac-shadow">
               <CardContent className="p-4">
@@ -1437,7 +1520,9 @@ const UserPortal = () => {
                 {vehicles.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No tienes vehículos registrados</p>
                 ) : (
-                  vehicles.map(v => (
+                  vehicles.map(v => {
+                    const w = evaluateVehicleWarranty(v);
+                    return (
                     <div key={v.id} className="flex items-center gap-3 py-2.5 border-b last:border-0">
                       <div className="p-2 rounded-lg bg-primary/10">
                         <Car className="w-6 h-6 text-primary" />
@@ -1449,11 +1534,13 @@ const UserPortal = () => {
                           {v.color ? ` · ${v.color}` : ''}
                         </p>
                       </div>
-                      {v.warranty_active && (
-                        <Badge className="text-[10px] bg-green-100 text-green-800 px-1.5 py-0">Garantía</Badge>
-                      )}
+                      <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                        {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                        {w.active ? 'Garantía' : 'Vencida'}
+                      </Badge>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </CardContent>
             </Card>

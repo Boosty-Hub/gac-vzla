@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
@@ -80,6 +80,8 @@ interface Client {
   state: string | null;
   is_active: boolean;
   created_at: string;
+  profile_id: string | null;
+  profiles: { pin_code: string | null } | null;
   vehicles: ClientVehicleInfo[];
   client_users: { count: number }[];
 }
@@ -115,6 +117,7 @@ const AdminClientes = () => {
   const [formCity, setFormCity] = useState('');
   const [formState, setFormState] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
+  const [formPin, setFormPin] = useState('');
 
   // Vehicles
   const [expandedClient, setExpandedClient] = useState<string | null>(null);
@@ -179,7 +182,7 @@ const AdminClientes = () => {
     setLoading(true);
     let query = supabase
       .from('clients')
-      .select('*, vehicles(id, warranty_active, vehicle_models(brand)), client_users(count)', { count: 'exact' });
+      .select('*, vehicles(id, warranty_active, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)', { count: 'exact' });
 
     if (busqueda.trim()) {
       query = query.or(`full_name.ilike.%${busqueda}%,cedula.ilike.%${busqueda}%,email.ilike.%${busqueda}%,phone.ilike.%${busqueda}%`);
@@ -264,6 +267,7 @@ const AdminClientes = () => {
     setEditingClient(null);
     setFormName(''); setFormCedula(''); setFormPhone(''); setFormEmail('');
     setFormAddress(''); setFormCity(''); setFormState(''); setFormIsActive(true);
+    setFormPin('');
     setClientDialogOpen(true);
   };
 
@@ -277,12 +281,18 @@ const AdminClientes = () => {
     setFormCity(client.city || '');
     setFormState(client.state || '');
     setFormIsActive(client.is_active);
+    setFormPin(client.profiles?.pin_code || '');
     setClientDialogOpen(true);
   };
 
   const handleSaveClient = async () => {
     if (!formName.trim()) {
       toast.error('El nombre es requerido');
+      return;
+    }
+    const newPin = formPin.trim();
+    if (editingClient?.profile_id && newPin && !/^\d{4}$/.test(newPin)) {
+      toast.error('El PIN debe ser de 4 dígitos');
       return;
     }
     setSaving(true);
@@ -300,8 +310,22 @@ const AdminClientes = () => {
 
     if (editingClient) {
       const { error } = await supabase.from('clients').update(payload).eq('id', editingClient.id);
-      if (error) { toast.error('Error al actualizar cliente'); console.error(error); }
-      else { toast.success('Cliente actualizado'); setClientDialogOpen(false); fetchClients(); }
+      if (error) { toast.error('Error al actualizar cliente'); console.error(error); setSaving(false); return; }
+
+      // PIN de acceso: vive en profiles, solo si el cliente tiene cuenta (profile_id)
+      if (editingClient.profile_id && newPin !== (editingClient.profiles?.pin_code || '')) {
+        const { error: pinErr } = await supabase.from('profiles')
+          .update({ pin_code: newPin || null })
+          .eq('id', editingClient.profile_id);
+        if (pinErr) {
+          toast.error((pinErr as { code?: string }).code === '23505'
+            ? 'Ese PIN ya está en uso por otro usuario'
+            : 'Cliente guardado, pero no se pudo actualizar el PIN');
+          setClientDialogOpen(false); fetchClients(); setSaving(false); return;
+        }
+      }
+
+      toast.success('Cliente actualizado'); setClientDialogOpen(false); fetchClients();
     } else {
       const { error } = await supabase.from('clients').insert(payload);
       if (error) { toast.error('Error al crear cliente'); console.error(error); }
@@ -924,6 +948,37 @@ const AdminClientes = () => {
               </div>
               <Switch checked={formIsActive} onCheckedChange={setFormIsActive} />
             </div>
+
+            {editingClient && (
+              <div className="space-y-2 rounded-lg border p-3">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="w-4 h-4 text-primary" />
+                  <Label className="font-medium">PIN de acceso del cliente</Label>
+                </div>
+                {editingClient.profile_id ? (
+                  <>
+                    <div className="flex items-end gap-2">
+                      <Input
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={formPin}
+                        onChange={e => setFormPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                        placeholder="4 dígitos"
+                        className="font-mono tracking-[0.3em] text-lg flex-1"
+                      />
+                      {formPin && (
+                        <Button type="button" variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => setFormPin('')}>
+                          Quitar
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Con este PIN el cliente ingresa al portal. Debe ser único; se guarda al presionar "Guardar Cambios".</p>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">El cliente aún no tiene cuenta. Podrá tener un PIN cuando ingrese por primera vez con su placa.</p>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter className="flex-row gap-2">
             <Button variant="outline" className="flex-1" onClick={() => setClientDialogOpen(false)}>Cancelar</Button>
