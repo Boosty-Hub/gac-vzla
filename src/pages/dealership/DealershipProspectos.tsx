@@ -103,8 +103,10 @@ const DealershipProspectos = () => {
   const { salespersons } = useSalespersons();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
-  const { profile, role } = useAuth();
+  const { profile, role, hasPermission } = useAuth();
   const isVendedor = role?.name?.toLowerCase() === 'vendedor';
+  const canCreate = hasPermission('prospectos.create');
+  const canEdit = hasPermission('prospectos.edit');
   const isMobile = useIsMobile();
   const { models: prospectModels, brands: prospectBrands } = useProspectModels();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -351,6 +353,7 @@ const DealershipProspectos = () => {
   };
 
   const handleBulkApply = async () => {
+    if (!canEdit) return;
     if (!bulkAction) return;
     let payload: Record<string, any> = {};
     switch (bulkAction) {
@@ -723,6 +726,7 @@ const DealershipProspectos = () => {
   };
 
   const updateStatus = async (id: string, newStatus: string) => {
+    if (!canEdit) return;
     const { error } = await supabase.from('prospects').update({ status: newStatus }).eq('id', id);
     if (error) { toast.error('Error al actualizar estado'); console.error(error); }
     else {
@@ -733,6 +737,7 @@ const DealershipProspectos = () => {
   };
 
   const toggleProspectFlag = async (id: string, field: 'test_drive' | 'visited_showroom', value: boolean) => {
+    if (!canEdit) return;
     // Optimistic update
     setProspects(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
     const { error } = await supabase.from('prospects').update({ [field]: value } as any).eq('id', id);
@@ -753,25 +758,31 @@ const DealershipProspectos = () => {
         <CardContent className="p-3 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-start gap-2 flex-1 min-w-0">
-              <input type="checkbox" className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 accent-primary cursor-pointer shrink-0"
-                checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
+              {canEdit && (
+                <input type="checkbox" className="h-3.5 w-3.5 mt-0.5 rounded border-gray-300 accent-primary cursor-pointer shrink-0"
+                  checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
+              )}
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold truncate">{p.name}</p>
                 {!isSalesperson && p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
               </div>
             </div>
-            <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
-              <SelectTrigger className="h-6 w-auto text-[10px] px-1.5 py-0 border-0 bg-transparent shrink-0">
-                <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
-              </SelectTrigger>
-              <SelectContent>
-                {PROSPECT_STATUSES.map(s => (
-                  <SelectItem key={s.name} value={s.name}>
-                    <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {canEdit ? (
+              <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
+                <SelectTrigger className="h-6 w-auto text-[10px] px-1.5 py-0 border-0 bg-transparent shrink-0">
+                  <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
+                </SelectTrigger>
+                <SelectContent>
+                  {PROSPECT_STATUSES.map(s => (
+                    <SelectItem key={s.name} value={s.name}>
+                      <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Badge className={cn("text-[10px] px-1.5 py-0 shrink-0", st?.color)}>{st?.label}</Badge>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             {p.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{p.phone}</span>}
@@ -793,9 +804,11 @@ const DealershipProspectos = () => {
             <button onClick={() => setUpdatesSidebarProspect(p)} title="Ver actualizaciones" className="text-primary hover:text-primary/80">
               <Activity className="w-3.5 h-3.5" />
             </button>
-            <button onClick={() => openEditDialog(p)} title="Editar prospecto" className="text-muted-foreground hover:text-foreground">
-              <Pencil className="w-3.5 h-3.5" />
-            </button>
+            {canEdit && (
+              <button onClick={() => openEditDialog(p)} title="Editar prospecto" className="text-muted-foreground hover:text-foreground">
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -830,13 +843,17 @@ const DealershipProspectos = () => {
           <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1" title="Descargar plantilla de importación">
             <FileText className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Plantilla</span>
           </Button>
-          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1" title="Importar prospectos desde XLSX">
-            <Upload className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Importar</span>
-          </Button>
+          {canCreate && (
+            <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1" title="Importar prospectos desde XLSX">
+              <Upload className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Importar</span>
+            </Button>
+          )}
           <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) parseXLSX(f); e.target.value = ''; }} />
-          <Button size="sm" onClick={openDialog} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 sm:mr-1" /> <span className="hidden sm:inline">Nuevo Prospecto</span>
-          </Button>
+          {canCreate && (
+            <Button size="sm" onClick={openDialog} className="gac-gradient">
+              <Plus className="w-3.5 h-3.5 sm:mr-1" /> <span className="hidden sm:inline">Nuevo Prospecto</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1054,9 +1071,11 @@ const DealershipProspectos = () => {
               <TableHeader>
                 <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                   <TableHead className="w-8 pl-3">
-                    <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
-                      checked={paginatedProspects.length > 0 && paginatedProspects.every(p => selectedIds.has(p.id))}
-                      onChange={toggleSelectAll} />
+                    {canEdit && (
+                      <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                        checked={paginatedProspects.length > 0 && paginatedProspects.every(p => selectedIds.has(p.id))}
+                        onChange={toggleSelectAll} />
+                    )}
                   </TableHead>
                   {visibleCols.has('nombre') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('name')}>Nombre<SortIcon field="name" /></TableHead>}
                   {visibleCols.has('empresa') && <TableHead>Empresa</TableHead>}
@@ -1083,8 +1102,10 @@ const DealershipProspectos = () => {
                   return (
                     <TableRow key={p.id} className="[&>td]:py-1.5">
                       <TableCell className="pl-3">
-                        <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
-                          checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
+                        {canEdit && (
+                          <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
+                            checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
+                        )}
                       </TableCell>
                       {visibleCols.has('nombre') && <TableCell className="font-medium">{p.name}</TableCell>}
                       {visibleCols.has('empresa') && <TableCell className="text-muted-foreground text-[11px]">{p.company_name || '-'}</TableCell>}
@@ -1112,46 +1133,66 @@ const DealershipProspectos = () => {
                       )}
                       {visibleCols.has('estado') && (
                         <TableCell>
-                          <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
-                            <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent">
-                              <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PROSPECT_STATUSES.map(s => (
-                                <SelectItem key={s.name} value={s.name}>
-                                  <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          {canEdit ? (
+                            <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
+                              <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent">
+                                <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
+                              </SelectTrigger>
+                              <SelectContent>
+                                {PROSPECT_STATUSES.map(s => (
+                                  <SelectItem key={s.name} value={s.name}>
+                                    <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
+                          )}
                         </TableCell>
                       )}
                       {visibleCols.has('testdrive') && (
                         <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => toggleProspectFlag(p.id, 'test_drive', !p.test_drive)}
-                            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-muted transition-colors"
-                            title={p.test_drive ? 'Quitar Test Drive' : 'Marcar Test Drive'}
-                          >
-                            {p.test_drive
-                              ? <CheckCircle2 className="w-4 h-4 text-green-600" />
-                              : <div className="w-3.5 h-3.5 border border-muted-foreground/40 rounded-sm" />}
-                          </button>
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleProspectFlag(p.id, 'test_drive', !p.test_drive)}
+                              className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-muted transition-colors"
+                              title={p.test_drive ? 'Quitar Test Drive' : 'Marcar Test Drive'}
+                            >
+                              {p.test_drive
+                                ? <CheckCircle2 className="w-4 h-4 text-green-600" />
+                                : <div className="w-3.5 h-3.5 border border-muted-foreground/40 rounded-sm" />}
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center justify-center h-5 w-5">
+                              {p.test_drive
+                                ? <CheckCircle2 className="w-4 h-4 text-green-600" />
+                                : <div className="w-3.5 h-3.5 border border-muted-foreground/40 rounded-sm" />}
+                            </span>
+                          )}
                         </TableCell>
                       )}
                       {visibleCols.has('showroom') && (
                         <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => toggleProspectFlag(p.id, 'visited_showroom', !p.visited_showroom)}
-                            className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-muted transition-colors"
-                            title={p.visited_showroom ? 'Quitar visita Show Room' : 'Marcar visitó Show Room'}
-                          >
-                            {p.visited_showroom
-                              ? <CheckCircle2 className="w-4 h-4 text-blue-600" />
-                              : <div className="w-3.5 h-3.5 border border-muted-foreground/40 rounded-sm" />}
-                          </button>
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleProspectFlag(p.id, 'visited_showroom', !p.visited_showroom)}
+                              className="inline-flex items-center justify-center h-5 w-5 rounded hover:bg-muted transition-colors"
+                              title={p.visited_showroom ? 'Quitar visita Show Room' : 'Marcar visitó Show Room'}
+                            >
+                              {p.visited_showroom
+                                ? <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                                : <div className="w-3.5 h-3.5 border border-muted-foreground/40 rounded-sm" />}
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center justify-center h-5 w-5">
+                              {p.visited_showroom
+                                ? <CheckCircle2 className="w-4 h-4 text-blue-600" />
+                                : <div className="w-3.5 h-3.5 border border-muted-foreground/40 rounded-sm" />}
+                            </span>
+                          )}
                         </TableCell>
                       )}
                       {visibleCols.has('tipopersona') && <TableCell className="text-muted-foreground capitalize">{p.person_type || '-'}</TableCell>}
@@ -1171,9 +1212,11 @@ const DealershipProspectos = () => {
                           <button onClick={(e) => { e.stopPropagation(); setUpdatesSidebarProspect(p); }} title="Ver actualizaciones" className="text-primary hover:text-primary/80 shrink-0">
                             <Activity className="w-3.5 h-3.5" />
                           </button>
-                          <button onClick={(e) => { e.stopPropagation(); openEditDialog(p); }} title="Editar prospecto" className="text-muted-foreground hover:text-foreground shrink-0">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
+                          {canEdit && (
+                            <button onClick={(e) => { e.stopPropagation(); openEditDialog(p); }} title="Editar prospecto" className="text-muted-foreground hover:text-foreground shrink-0">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1467,7 +1510,7 @@ const DealershipProspectos = () => {
       )}
 
       {/* FLOATING BULK ACTION BAR */}
-      {selectedIds.size > 0 && (
+      {canEdit && selectedIds.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
           <div className="flex items-center gap-1 bg-gray-900 text-white rounded-2xl shadow-2xl px-3 py-2 border border-gray-700 max-w-[calc(100vw-2rem)] overflow-x-auto">
             <span className="text-xs font-bold whitespace-nowrap text-primary bg-primary/20 px-2 py-0.5 rounded-full shrink-0">

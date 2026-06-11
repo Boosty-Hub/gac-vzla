@@ -137,7 +137,10 @@ const getDrLS = () => { try { return JSON.parse(localStorage.getItem(DR_LS_KEY) 
 
 const DealershipReservas = () => {
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
-  const { profile, role } = useAuth();
+  const { profile, role, hasPermission } = useAuth();
+  const canCreate = hasPermission('reservas.create');
+  const canEdit = hasPermission('reservas.edit');
+  const canDelete = hasPermission('reservas.delete');
   const { salesperson: currentSalesperson } = useCurrentSalesperson();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
@@ -184,25 +187,20 @@ const DealershipReservas = () => {
   const [createOpen, setCreateOpenRaw] = useState<boolean>(() => getDrLS().createOpen === true);
   const [saving, setSaving] = useState(false);
 
-  // Normal reservation — search mode
-  const [searchMode, setSearchMode] = useState<'placa' | 'nombre'>('nombre');
-
-  // Normal reservation — plate search
-  const [plateSearch, setPlateSearch] = useState<string>(() => getDrLS().plateSearch || '');
+  // Normal reservation — unified search (name or plate)
+  const [unifiedSearch, setUnifiedSearch] = useState<string>(() => getDrLS().unifiedSearch || '');
   const [plateResult, setPlateResult] = useState<PlateResult | null>(() => getDrLS().plateResult || null);
   const [plateSearched, setPlateSearched] = useState<boolean>(() => getDrLS().plateSearched === true);
-  const [searchingPlate, setSearchingPlate] = useState(false);
-
-  // Normal reservation — client name search
-  const [normalNameSearch, setNormalNameSearch] = useState('');
-  const [normalNameResults, setNormalNameResults] = useState<ClientResult[]>([]);
-  const [normalNameClientId, setNormalNameClientId] = useState('');
-  const [normalNameClientName, setNormalNameClientName] = useState('');
-  const [normalNameDropdown, setNormalNameDropdown] = useState(false);
-  const [normalNameVehicles, setNormalNameVehicles] = useState<VehicleResult[]>([]);
-  const [normalNameVehicleId, setNormalNameVehicleId] = useState('');
-  const [loadingNormalVehicle, setLoadingNormalVehicle] = useState(false);
-  const normalNameRef = useRef<HTMLDivElement>(null);
+  const [unifiedResults, setUnifiedResults] = useState<Array<{kind: 'vehicle'; data: PlateResult} | {kind: 'client'; id: string; full_name: string}>>([]);
+  const [unifiedDropdown, setUnifiedDropdown] = useState(false);
+  const [unifiedSearching, setUnifiedSearching] = useState(false);
+  const [unifiedSearched, setUnifiedSearched] = useState(false);
+  const [unifiedClientId, setUnifiedClientId] = useState('');
+  const [unifiedClientName, setUnifiedClientName] = useState('');
+  const [unifiedClientVehicles, setUnifiedClientVehicles] = useState<VehicleResult[]>([]);
+  const [unifiedClientVehicleId, setUnifiedClientVehicleId] = useState('');
+  const [loadingUnifiedVehicle, setLoadingUnifiedVehicle] = useState(false);
+  const unifiedRef = useRef<HTMLDivElement>(null);
 
   // Normal reservation — common fields
   const [fDate, setFDate] = useState<string>(() => getDrLS().fDate || '');
@@ -213,6 +211,9 @@ const DealershipReservas = () => {
   const [fObs, setFObs] = useState<string>('');
   const [fWalkinName, setFWalkinName] = useState<string>(() => getDrLS().fWalkinName || '');
   const [fWalkinPhone, setFWalkinPhone] = useState<string>(() => getDrLS().fWalkinPhone || '');
+  const [fWalkinPlate, setFWalkinPlate] = useState<string>(() => getDrLS().fWalkinPlate || '');
+  // True while prefilling an edit, to suppress implicit single-vehicle auto-select.
+  const prefillingEditRef = useRef(false);
 
   // Incidencia form fields
   const [fClientSearch, setFClientSearch] = useState('');
@@ -223,6 +224,7 @@ const DealershipReservas = () => {
   const [fIncVehicleId, setFIncVehicleId] = useState('');
   const [fIncVehicles, setFIncVehicles] = useState<VehicleResult[]>([]);
   const [fIncMediaUrls, setFIncMediaUrls] = useState<string | null>(null);
+  const fIncPreselectedVehicleIdRef = useRef<string | null>(null);
   const clientSearchRef = useRef<HTMLDivElement>(null);
 
   const hoy = new Date().toISOString().split('T')[0];
@@ -277,55 +279,94 @@ const DealershipReservas = () => {
   }, []);
 
   // Normal form: client name autocomplete
+  // Normal reservation — unified debounced search: plate + name
   useEffect(() => {
-    if (!normalNameSearch.trim() || normalNameClientId) {
-      setNormalNameResults([]);
-      setNormalNameDropdown(false);
+    if (!unifiedSearch.trim() || plateResult || unifiedClientId) {
+      setUnifiedResults([]);
+      setUnifiedDropdown(false);
       return;
     }
+    setUnifiedSearched(false);
+    const q = unifiedSearch.trim();
     const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from('clients')
-        .select('id, full_name')
-        .ilike('full_name', `%${normalNameSearch.trim()}%`)
-        .limit(8);
-      setNormalNameResults((data || []) as ClientResult[]);
-      setNormalNameDropdown(true);
+      setUnifiedSearching(true);
+      const [vehicleRes, clientRes] = await Promise.all([
+        supabase
+          .from('vehicles')
+          .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
+          .ilike('plate', `%${q}%`)
+          .limit(4),
+        supabase
+          .from('clients')
+          .select('id, full_name')
+          .ilike('full_name', `%${q}%`)
+          .limit(5),
+      ]);
+      const results: Array<{kind: 'vehicle'; data: PlateResult} | {kind: 'client'; id: string; full_name: string}> = [];
+      (vehicleRes.data || []).forEach(v => results.push({ kind: 'vehicle', data: v as any }));
+      (clientRes.data || []).forEach(c => results.push({ kind: 'client', id: c.id, full_name: c.full_name }));
+      setUnifiedResults(results);
+      setUnifiedDropdown(results.length > 0);
+      setUnifiedSearched(true);
+      setUnifiedSearching(false);
+      // On create, when nothing matches, the typed term is the walk-in plate.
+      if (results.length === 0 && !editingRes) setFWalkinPlate(q.toUpperCase());
     }, 300);
     return () => clearTimeout(timer);
-  }, [normalNameSearch, normalNameClientId]);
+  }, [unifiedSearch, plateResult, unifiedClientId]);
 
-  // Normal form: fetch client vehicles after client selected by name
+  // Normal reservation — fetch vehicles after client selected by name
   useEffect(() => {
-    if (!normalNameClientId) { setNormalNameVehicles([]); setNormalNameVehicleId(''); return; }
+    if (!unifiedClientId) { setUnifiedClientVehicles([]); setUnifiedClientVehicleId(''); return; }
     (async () => {
       const { data } = await supabase
         .from('vehicles')
         .select('id, plate, year, vehicle_models(name, brand)')
-        .eq('client_id', normalNameClientId);
+        .eq('client_id', unifiedClientId);
       const fetched = (data || []) as unknown as VehicleResult[];
-      setNormalNameVehicles(fetched);
-      // No plate hint on the Nombre tab — only auto-select when exactly one vehicle.
+      setUnifiedClientVehicles(fetched);
+      // When prefilling an edit of a reservation that had no vehicle, never attach one implicitly.
+      if (prefillingEditRef.current) { prefillingEditRef.current = false; return; }
       const autoMatch = resolveAutoVehicle(
         (fetched as Array<{ id: string; plate?: string | null }>),
         null,
       );
-      if (autoMatch) handleNormalNameVehicleSelect(autoMatch.id);
+      if (autoMatch) handleUnifiedClientVehicleSelect(autoMatch.id);
     })();
-  }, [normalNameClientId]);
+  }, [unifiedClientId]);
 
-  // Incidencia form: client name autocomplete
+  // Incidencia form: unified name + plate autocomplete
   useEffect(() => {
     if (!fClientSearch.trim() || fClientId) {
       setFClientResults([]);
       setFClientDropdown(false);
       return;
     }
+    const q = fClientSearch.trim();
     const timer = setTimeout(async () => {
+      // Try exact plate match first — if found, auto-select client + vehicle
+      const { data: vData } = await supabase
+        .from('vehicles')
+        .select('id, plate, year, vehicle_models(name, brand), clients(id, full_name)')
+        .ilike('plate', q)
+        .limit(1);
+      if (vData && vData.length > 0) {
+        const v = vData[0] as any;
+        if (v.clients) {
+          fIncPreselectedVehicleIdRef.current = v.id;
+          setFClientId(v.clients.id);
+          setFClientName(v.clients.full_name);
+          setFClientSearch(v.clients.full_name);
+          setFClientDropdown(false);
+          setFClientResults([]);
+          return;
+        }
+      }
+      // Fall back to name search
       const { data } = await supabase
         .from('clients')
         .select('id, full_name')
-        .ilike('full_name', `%${fClientSearch.trim()}%`)
+        .ilike('full_name', `%${q}%`)
         .limit(8);
       setFClientResults((data || []) as ClientResult[]);
       setFClientDropdown(true);
@@ -335,13 +376,18 @@ const DealershipReservas = () => {
 
   // Incidencia form: fetch vehicles when client selected
   useEffect(() => {
-    if (!fClientId) { setFIncVehicles([]); setFIncVehicleId(''); return; }
+    if (!fClientId) { setFIncVehicles([]); setFIncVehicleId(''); fIncPreselectedVehicleIdRef.current = null; return; }
     (async () => {
       const { data } = await supabase
         .from('vehicles')
         .select('id, plate, year, vehicle_models(name, brand)')
         .eq('client_id', fClientId);
-      setFIncVehicles((data || []) as unknown as VehicleResult[]);
+      const fetched = (data || []) as unknown as VehicleResult[];
+      setFIncVehicles(fetched);
+      if (fIncPreselectedVehicleIdRef.current) {
+        setFIncVehicleId(fIncPreselectedVehicleIdRef.current);
+        fIncPreselectedVehicleIdRef.current = null;
+      }
     })();
   }, [fClientId]);
 
@@ -349,7 +395,7 @@ const DealershipReservas = () => {
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (clientSearchRef.current && !clientSearchRef.current.contains(e.target as Node)) setFClientDropdown(false);
-      if (normalNameRef.current && !normalNameRef.current.contains(e.target as Node)) setNormalNameDropdown(false);
+      if (unifiedRef.current && !unifiedRef.current.contains(e.target as Node)) setUnifiedDropdown(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -369,9 +415,9 @@ const DealershipReservas = () => {
       return;
     }
     try {
-      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, plateSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone }));
+      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone, fWalkinPlate }));
     } catch {}
-  }, [createOpen, editingRes, plateSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone]);
+  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone, fWalkinPlate]);
 
   const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
@@ -390,48 +436,41 @@ const DealershipReservas = () => {
     return true;
   });
 
-  const handlePlateSearch = async () => {
-    if (!plateSearch.trim()) return;
-    setSearchingPlate(true); setPlateResult(null); setPlateSearched(true);
-    const { data } = await supabase
-      .from('vehicles')
-      .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
-      .ilike('plate', plateSearch.trim())
-      .limit(1);
-    if (data && data.length > 0) setPlateResult(data[0] as any);
-    setSearchingPlate(false);
-  };
-
-  // When vehicle is chosen in name-search mode, populate plateResult for reuse in save logic
-  const handleNormalNameVehicleSelect = async (vehicleId: string) => {
-    setLoadingNormalVehicle(true);
-    setNormalNameVehicleId(vehicleId);
+  // When vehicle is chosen in client-name path, populate plateResult for save logic
+  const handleUnifiedClientVehicleSelect = async (vehicleId: string) => {
+    setLoadingUnifiedVehicle(true);
+    setUnifiedClientVehicleId(vehicleId);
     const { data } = await supabase
       .from('vehicles')
       .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
       .eq('id', vehicleId)
       .single();
     if (data) { setPlateResult(data as any); setPlateSearched(true); }
-    setLoadingNormalVehicle(false);
+    setLoadingUnifiedVehicle(false);
   };
 
-  const resetNameSearch = () => {
-    setNormalNameSearch(''); setNormalNameResults([]); setNormalNameClientId('');
-    setNormalNameClientName(''); setNormalNameDropdown(false);
-    setNormalNameVehicles([]); setNormalNameVehicleId('');
+  const clearUnifiedSearch = () => {
+    setUnifiedSearch(''); setUnifiedResults([]); setUnifiedDropdown(false);
+    setUnifiedSearched(false); setUnifiedClientId(''); setUnifiedClientName('');
+    setUnifiedClientVehicles([]); setUnifiedClientVehicleId('');
     setPlateResult(null); setPlateSearched(false);
   };
 
   const resetIncidenciaFields = () => {
     setFClientSearch(''); setFClientResults([]); setFClientId(''); setFClientName('');
     setFClientDropdown(false); setFIncVehicleId(''); setFIncVehicles([]); setFIncMediaUrls(null);
+    fIncPreselectedVehicleIdRef.current = null;
   };
 
   const resetNormalFields = () => {
-    setPlateSearch(''); setPlateResult(null); setPlateSearched(false);
-    setFWalkinName(''); setFWalkinPhone('');
-    resetNameSearch();
-    setSearchMode('nombre');
+    setUnifiedSearch(''); setUnifiedResults([]); setUnifiedDropdown(false);
+    setUnifiedSearched(false); setUnifiedSearching(false);
+    setUnifiedClientId(''); setUnifiedClientName('');
+    setUnifiedClientVehicles([]); setUnifiedClientVehicleId('');
+    setLoadingUnifiedVehicle(false);
+    setPlateResult(null); setPlateSearched(false);
+    setFWalkinName(''); setFWalkinPhone(''); setFWalkinPlate('');
+    prefillingEditRef.current = false;
   };
 
   const openCreate = () => {
@@ -458,12 +497,6 @@ const DealershipReservas = () => {
     setFIncVehicleId(''); setFIncVehicles([]);
   };
 
-  const clearNormalNameClient = () => {
-    setNormalNameClientId(''); setNormalNameClientName(''); setNormalNameSearch('');
-    setNormalNameResults([]); setNormalNameDropdown(false);
-    setNormalNameVehicles([]); setNormalNameVehicleId('');
-    setPlateResult(null); setPlateSearched(false);
-  };
 
   const handleSave = async () => {
     if (isIncidencia) {
@@ -482,7 +515,8 @@ const DealershipReservas = () => {
         technical_report_url: fIncMediaUrls || null,
       };
       if (editingRes) {
-        const { error } = await supabase.from('reservations').update(incPayload).eq('id', editingRes.id);
+        // An incidencia never carries walk-in data; clear it in case this row was converted from a walk-in reservation.
+        const { error } = await supabase.from('reservations').update({ ...incPayload, walkin_client_name: null, walkin_client_phone: null, walkin_plate: null }).eq('id', editingRes.id);
         if (error) { toast.error('Error al actualizar incidencia'); console.error(error); }
         else { toast.success('Incidencia actualizada'); setCreateOpen(false); setEditingRes(null); fetchReservations(); }
       } else {
@@ -505,14 +539,34 @@ const DealershipReservas = () => {
 
     if (!fDate || !fTime || !fService) { toast.error('Fecha, hora y servicio son requeridos'); return; }
 
-    // Validate client/vehicle presence based on search mode
-    if (searchMode === 'nombre') {
-      if (!normalNameClientId) { toast.error('Busque y seleccione un cliente'); return; }
-    } else {
-      if (!plateResult && !fWalkinName.trim()) { toast.error('Ingrese el nombre del cliente'); return; }
-    }
+    if (!plateResult && !unifiedClientId && !fWalkinName.trim()) { toast.error('Busque y seleccione un cliente'); return; }
 
     setSaving(true);
+
+    // Resolved client/vehicle assignment, shared by create and edit.
+    // Setting one representation clears the others so reassigning is consistent.
+    const assign = plateResult
+      ? { vehicle_id: plateResult.id, client_id: plateResult.client_id, walkin_client_name: null, walkin_client_phone: null, walkin_plate: null }
+      : unifiedClientId
+      ? { vehicle_id: null, client_id: unifiedClientId, walkin_client_name: null, walkin_client_phone: null, walkin_plate: null }
+      : { vehicle_id: null, client_id: null, walkin_client_name: fWalkinName.trim(), walkin_client_phone: fWalkinPhone.trim() || null, walkin_plate: fWalkinPlate.trim().toUpperCase() || null };
+
+    if (editingRes) {
+      const updatePayload = {
+        dealership_id: selectedDealership,
+        reservation_date: fDate, reservation_time: fTime, service_type: fService,
+        current_mileage: parseInt(fMileage) || 0,
+        notes: [fNotes.trim(), fObs.trim()].filter(Boolean).join('\n') || null,
+        technical_report_url: createTechReportUrl || null,
+        ...assign,
+      };
+      const { error } = await supabase.from('reservations').update(updatePayload).eq('id', editingRes.id);
+      if (error) { toast.error('Error al actualizar reserva'); console.error(error); }
+      else { toast.success('Reserva actualizada'); setCreateOpen(false); setEditingRes(null); fetchReservations(); }
+      setSaving(false);
+      return;
+    }
+
     const creatorName = currentSalesperson?.name || profile?.full_name || null;
     const creatorRole = role?.name || null;
     const payload: any = {
@@ -525,22 +579,8 @@ const DealershipReservas = () => {
       created_by_name: creatorName,
       created_by_role: creatorRole,
       created_by_profile_id: profile?.id || null,
+      ...assign,
     };
-
-    if (searchMode === 'nombre') {
-      if (plateResult) {
-        // Vehicle selected from name search
-        payload.vehicle_id = plateResult.id;
-        payload.client_id = plateResult.client_id;
-      } else {
-        // Only client selected, no vehicle
-        payload.client_id = normalNameClientId;
-      }
-    } else {
-      // Plate mode
-      if (plateResult) { payload.vehicle_id = plateResult.id; payload.client_id = plateResult.client_id; }
-      else { payload.walkin_client_name = fWalkinName.trim(); payload.walkin_client_phone = fWalkinPhone.trim() || null; payload.walkin_plate = plateSearch.trim().toUpperCase() || null; }
-    }
 
     const { data: resInserted, error } = await supabase.from('reservations').insert(payload).select('id').single();
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
@@ -626,6 +666,45 @@ const DealershipReservas = () => {
     setCreateOpen(true);
   };
 
+  const openEditReservation = async (r: Reservation) => {
+    // Limpiar cualquier estado de creación guardado para evitar confusión
+    try { localStorage.removeItem(DR_LS_KEY); } catch {}
+    resetNormalFields();
+    resetIncidenciaFields();
+    setEditingRes(r);
+    setFService(r.service_type);
+    setFDate(r.reservation_date);
+    setFTime(r.reservation_time?.slice(0, 5) || '09:00');
+    setFMileage(String(r.current_mileage || 0));
+    setFNotes(r.notes || '');
+    setFObs('');
+    setCreateTechReportUrl(r.technical_report_url || null);
+    // Open the dialog up front so it reacts instantly, even if the vehicle fetch is slow.
+    setDetailOpen(false);
+    setCreateOpen(true);
+    if (r.vehicle_id) {
+      const { data } = await supabase
+        .from('vehicles')
+        .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
+        .eq('id', r.vehicle_id)
+        .single();
+      if (data) { setPlateResult(data as any); setPlateSearched(true); setUnifiedSearch((data as any).plate || ''); }
+    } else if (r.client_id) {
+      // Skip the single-vehicle auto-select: this reservation deliberately had no vehicle.
+      prefillingEditRef.current = true;
+      setUnifiedClientId(r.client_id);
+      setUnifiedClientName(r.clients?.full_name || '');
+      setUnifiedSearch(r.clients?.full_name || '');
+    } else if (r.walkin_client_name) {
+      // Walk-in: keep the plate in its own field, do NOT push it into the search box
+      // (that would re-trigger the search and hide the prefilled fields).
+      setFWalkinName(r.walkin_client_name);
+      setFWalkinPhone(r.walkin_client_phone || '');
+      setFWalkinPlate(r.walkin_plate || '');
+      setUnifiedSearched(true);
+    }
+  };
+
   const deleteReservation = async (id: string) => {
     const { error } = await supabase.from('reservations').delete().eq('id', id);
     if (error) { toast.error('Error al eliminar'); }
@@ -703,9 +782,11 @@ const DealershipReservas = () => {
               <LayoutGrid className="w-3.5 h-3.5" />
             </Button>
           </div>
-          <Button size="sm" onClick={openCreate} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Nueva Reserva
-          </Button>
+          {canCreate && (
+            <Button size="sm" onClick={openCreate} className="gac-gradient">
+              <Plus className="w-3.5 h-3.5 mr-1" /> Nueva Reserva
+            </Button>
+          )}
         </div>
       </div>
 
@@ -848,7 +929,9 @@ const DealershipReservas = () => {
                       ) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
-                      {editingKmRowId === r.id ? (
+                      {!canEdit ? (
+                        <span>{r.current_mileage > 0 ? r.current_mileage.toLocaleString() : '—'}</span>
+                      ) : editingKmRowId === r.id ? (
                         <div className="flex items-center gap-1">
                           <Input
                             type="number"
@@ -875,22 +958,26 @@ const DealershipReservas = () => {
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
-                        <Select
-                          value={r.status}
-                          onValueChange={val => {
-                            if (!isInc && val === 'completada') { openComplete(r); }
-                            else { updateStatus(r.id, val); }
-                          }}
-                        >
-                          <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[110px]', st.color)}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {Object.entries(statusMap).map(([k, v]) => (
-                              <SelectItem key={k} value={k} className="text-xs">{v.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        {canEdit ? (
+                          <Select
+                            value={r.status}
+                            onValueChange={val => {
+                              if (!isInc && val === 'completada') { openComplete(r); }
+                              else { updateStatus(r.id, val); }
+                            }}
+                          >
+                            <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[110px]', st.color)}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(statusMap).map(([k, v]) => (
+                                <SelectItem key={k} value={k} className="text-xs">{v.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Badge className={cn('h-6 text-[10px] px-2 py-0 font-medium', st.color)}>{st.label}</Badge>
+                        )}
                         {!isInc && r.status === 'confirmada' && (r.clients?.phone || r.walkin_client_phone) && (() => {
                           const phone = r.clients?.phone || r.walkin_client_phone || '';
                           const name = r.clients?.full_name || r.walkin_client_name || 'Cliente';
@@ -986,21 +1073,32 @@ const DealershipReservas = () => {
                   )}
                   {isInc ? (
                     <div className="flex justify-end gap-2 pt-2">
-                      <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => openEditIncidencia(detailRes)}>
-                        <Pencil className="w-3 h-3" /> Editar
-                      </Button>
-                      <Button size="sm" variant="ghost" className="text-xs text-destructive gap-1" onClick={() => { setDeletingResIsInc(true); setDeletingResId(detailRes.id); }}>
-                        <Trash2 className="w-3 h-3" /> Eliminar
-                      </Button>
+                      {canEdit && (
+                        <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => openEditIncidencia(detailRes)}>
+                          <Pencil className="w-3 h-3" /> Editar
+                        </Button>
+                      )}
+                      {canDelete && (
+                        <Button size="sm" variant="ghost" className="text-xs text-destructive gap-1" onClick={() => { setDeletingResIsInc(true); setDeletingResId(detailRes.id); }}>
+                          <Trash2 className="w-3 h-3" /> Eliminar
+                        </Button>
+                      )}
                     </div>
                   ) : (
                     <div className="flex justify-end gap-2 pt-2">
-                      {detailRes.status === 'pendiente' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'confirmada'); }}>Confirmar</Button>}
-                      {detailRes.status === 'confirmada' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'en_proceso'); }}>Iniciar</Button>}
-                      {detailRes.status === 'en_proceso' && <Button size="sm" className="text-xs gac-gradient gap-1" onClick={() => { setDetailOpen(false); openComplete(detailRes); }}><ClipboardCheck className="w-3 h-3" /> Completar</Button>}
-                      <Button size="sm" variant="ghost" className="text-xs text-destructive gap-1" onClick={() => { setDeletingResIsInc(false); setDeletingResId(detailRes.id); }}>
-                        <Trash2 className="w-3 h-3" /> Eliminar
-                      </Button>
+                      {canEdit && (
+                        <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => openEditReservation(detailRes)}>
+                          <Pencil className="w-3 h-3" /> Editar
+                        </Button>
+                      )}
+                      {canEdit && detailRes.status === 'pendiente' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'confirmada'); }}>Confirmar</Button>}
+                      {canEdit && detailRes.status === 'confirmada' && <Button size="sm" variant="outline" className="text-xs" onClick={() => { setDetailOpen(false); updateStatus(detailRes.id, 'en_proceso'); }}>Iniciar</Button>}
+                      {canEdit && detailRes.status === 'en_proceso' && <Button size="sm" className="text-xs gac-gradient gap-1" onClick={() => { setDetailOpen(false); openComplete(detailRes); }}><ClipboardCheck className="w-3 h-3" /> Completar</Button>}
+                      {canDelete && (
+                        <Button size="sm" variant="ghost" className="text-xs text-destructive gap-1" onClick={() => { setDeletingResIsInc(false); setDeletingResId(detailRes.id); }}>
+                          <Trash2 className="w-3 h-3" /> Eliminar
+                        </Button>
+                      )}
                     </div>
                   )}
                 </TabsContent>
@@ -1131,7 +1229,7 @@ const DealershipReservas = () => {
             <DialogTitle className="font-display flex items-center gap-2">
               {isIncidencia
               ? <><AlertTriangle className="w-4 h-4 text-amber-500" /> {editingRes ? 'Editar Incidencia' : 'Nueva Incidencia'}</>
-              : 'Nueva Reserva'}
+              : (editingRes ? 'Editar Reserva' : 'Nueva Reserva')}
             </DialogTitle>
           </DialogHeader>
 
@@ -1188,7 +1286,7 @@ const DealershipReservas = () => {
                     <Input
                       value={fClientSearch}
                       onChange={e => { setFClientSearch(e.target.value); if (fClientId) { setFClientId(''); setFClientName(''); } }}
-                      placeholder="Buscar por nombre..."
+                      placeholder="Buscar por nombre o placa..."
                       className="h-8 text-xs"
                       disabled={!!fClientId}
                     />
@@ -1257,101 +1355,90 @@ const DealershipReservas = () => {
           {/* FORMA RESERVA NORMAL */}
           {!isIncidencia && (
             <>
-              {/* Cliente: tabs Placa / Nombre */}
-              <div className="space-y-2">
+              {/* Cliente: búsqueda unificada por nombre o placa */}
+              <div className="space-y-2" ref={unifiedRef}>
                 <Label className="text-xs font-semibold">Buscar cliente</Label>
-                <Tabs value={searchMode} onValueChange={v => { setSearchMode(v as 'placa' | 'nombre'); if (v === 'placa') resetNameSearch(); else { setPlateSearch(''); setPlateResult(null); setPlateSearched(false); } }}>
-                  <TabsList className="h-7 text-xs">
-                    <TabsTrigger value="placa" className="text-xs h-6 px-3">Por placa</TabsTrigger>
-                    <TabsTrigger value="nombre" className="text-xs h-6 px-3">Por nombre</TabsTrigger>
-                  </TabsList>
-
-                  {/* PLACA */}
-                  <TabsContent value="placa" className="mt-2 space-y-2">
-                    <div className="flex gap-2">
-                      <Input value={plateSearch} onChange={e => { setPlateSearch(e.target.value.toUpperCase()); setPlateSearched(false); setPlateResult(null); }} placeholder="Ej: ABC123" className="h-8 text-xs uppercase" onKeyDown={e => e.key === 'Enter' && handlePlateSearch()} />
-                      <Button size="sm" variant="outline" onClick={handlePlateSearch} disabled={searchingPlate || !plateSearch.trim()}>
-                        <Search className="w-3.5 h-3.5 mr-1" /> Buscar
+                <div className="relative">
+                  <div className="flex items-center gap-1">
+                    <Input
+                      value={unifiedSearch}
+                      onChange={e => { setUnifiedSearch(e.target.value); if (plateResult || unifiedClientId) clearUnifiedSearch(); }}
+                      placeholder="Buscar por nombre o placa..."
+                      className="h-8 text-xs"
+                      disabled={!!(plateResult || unifiedClientId)}
+                    />
+                    {(plateResult || unifiedClientId) && (
+                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 shrink-0" onClick={clearUnifiedSearch}>
+                        <X className="w-3.5 h-3.5" />
                       </Button>
-                    </div>
-                    {plateSearched && (
-                      <div className={cn("rounded-md border p-3", plateResult ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200")}>
-                        {plateResult ? (
-                          <div className="flex items-start gap-2">
-                            <CheckCircle className="w-4 h-4 text-green-600 mt-0.5 shrink-0" />
-                            <div className="text-xs space-y-1 flex-1 min-w-0">
-                              <p className="font-semibold text-green-800">Vehículo encontrado</p>
-                              <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span>{plateResult.color && <span className="text-muted-foreground">· {plateResult.color}</span>}</div>
-                              <div className="flex items-center gap-2"><User className="w-3 h-3" /><span>{plateResult.clients?.full_name}</span>{plateResult.clients?.cedula && <span className="text-muted-foreground">· {plateResult.clients.cedula}</span>}</div>
-                              <div className="pt-1"><WarrantyChip vehicleId={plateResult.id} /></div>
+                    )}
+                    {unifiedSearching && <Search className="w-3.5 h-3.5 text-muted-foreground animate-pulse shrink-0" />}
+                  </div>
+                  {unifiedDropdown && unifiedResults.length > 0 && (
+                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-56 overflow-y-auto">
+                      {unifiedResults.map(r =>
+                        r.kind === 'vehicle' ? (
+                          <div
+                            key={`v-${r.data.id}`}
+                            className="px-3 py-2 text-xs cursor-pointer hover:bg-accent flex items-start gap-2"
+                            onMouseDown={() => {
+                              setPlateResult(r.data);
+                              setPlateSearched(true);
+                              setUnifiedSearch(r.data.plate);
+                              setUnifiedDropdown(false);
+                              setUnifiedResults([]);
+                            }}
+                          >
+                            <Car className="w-3 h-3 mt-0.5 shrink-0 text-muted-foreground" />
+                            <div>
+                              <span className="font-medium">{r.data.plate}</span>
+                              <span className="text-muted-foreground ml-1">· {r.data.vehicle_models?.brand} {r.data.vehicle_models?.name} {r.data.year}</span>
+                              <br />
+                              <span className="text-muted-foreground">{r.data.clients?.full_name}</span>
                             </div>
                           </div>
                         ) : (
-                          <div className="flex items-start gap-2">
-                            <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                            <div className="text-xs">
-                              <p className="font-semibold text-amber-800">Placa no encontrada</p>
-                              <p className="text-amber-700">Ingrese los datos del cliente manualmente abajo.</p>
-                            </div>
+                          <div
+                            key={`c-${r.id}`}
+                            className="px-3 py-2 text-xs cursor-pointer hover:bg-accent flex items-center gap-2"
+                            onMouseDown={() => {
+                              setUnifiedClientId(r.id);
+                              setUnifiedClientName(r.full_name);
+                              setUnifiedSearch(r.full_name);
+                              setUnifiedDropdown(false);
+                              setUnifiedResults([]);
+                            }}
+                          >
+                            <User className="w-3 h-3 shrink-0 text-muted-foreground" />
+                            <span>{r.full_name}</span>
                           </div>
-                        )}
-                      </div>
-                    )}
-                    {plateSearched && !plateResult && (
-                      <div className="space-y-2 pt-1">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="space-y-1"><Label className="text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-8 text-xs" /></div>
-                          <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412..." className="h-8 text-xs" /></div>
-                        </div>
-                      </div>
-                    )}
-                  </TabsContent>
-
-                  {/* NOMBRE */}
-                  <TabsContent value="nombre" className="mt-2 space-y-2" ref={normalNameRef}>
-                    <div className="relative">
-                      <div className="flex items-center gap-1">
-                        <Input
-                          value={normalNameSearch}
-                          onChange={e => { setNormalNameSearch(e.target.value); if (normalNameClientId) clearNormalNameClient(); }}
-                          placeholder="Escriba el nombre del cliente..."
-                          className="h-8 text-xs"
-                          disabled={!!normalNameClientId}
-                        />
-                        {normalNameClientId && (
-                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0 shrink-0" onClick={clearNormalNameClient}>
-                            <X className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                      </div>
-                      {normalNameDropdown && normalNameResults.length > 0 && (
-                        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-48 overflow-y-auto">
-                          {normalNameResults.map(c => (
-                            <div
-                              key={c.id}
-                              className="px-3 py-2 text-xs cursor-pointer hover:bg-accent"
-                              onMouseDown={() => {
-                                setNormalNameClientId(c.id);
-                                setNormalNameClientName(c.full_name);
-                                setNormalNameSearch(c.full_name);
-                                setNormalNameDropdown(false);
-                                setNormalNameResults([]);
-                              }}
-                            >{c.full_name}</div>
-                          ))}
-                        </div>
+                        )
                       )}
                     </div>
-                    {normalNameClientId && (
-                      <p className="text-[10px] text-green-700 flex items-center gap-1"><User className="w-3 h-3" /> {normalNameClientName} seleccionado</p>
-                    )}
-                    {normalNameClientId && normalNameVehicles.length > 0 && (
+                  )}
+                </div>
+
+                {/* Vehículo resuelto */}
+                {plateResult && (
+                  <div className="rounded-md bg-green-50 border border-green-200 p-3 text-xs space-y-1">
+                    <p className="font-semibold text-green-800 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Vehículo encontrado</p>
+                    <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span>{plateResult.color && <span className="text-muted-foreground">· {plateResult.color}</span>}</div>
+                    <div className="flex items-center gap-2"><User className="w-3 h-3" /><span>{plateResult.clients?.full_name}</span>{plateResult.clients?.cedula && <span className="text-muted-foreground">· {plateResult.clients.cedula}</span>}</div>
+                    <div className="pt-1"><WarrantyChip vehicleId={plateResult.id} /></div>
+                  </div>
+                )}
+
+                {/* Cliente seleccionado sin vehículo → mostrar selector */}
+                {unifiedClientId && !plateResult && (
+                  <>
+                    <p className="text-[10px] text-green-700 flex items-center gap-1"><User className="w-3 h-3" /> {unifiedClientName} seleccionado</p>
+                    {unifiedClientVehicles.length > 0 && (
                       <div className="space-y-1">
                         <Label className="text-xs">Vehículo del cliente</Label>
-                        <Select value={normalNameVehicleId} onValueChange={handleNormalNameVehicleSelect} disabled={loadingNormalVehicle}>
+                        <Select value={unifiedClientVehicleId} onValueChange={handleUnifiedClientVehicleSelect} disabled={loadingUnifiedVehicle}>
                           <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vehículo (opcional)" /></SelectTrigger>
                           <SelectContent>
-                            {normalNameVehicles.map(v => (
+                            {unifiedClientVehicles.map(v => (
                               <SelectItem key={v.id} value={v.id} className="text-xs">
                                 {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}{v.plate ? ` · ${v.plate}` : ''}
                               </SelectItem>
@@ -1360,18 +1447,29 @@ const DealershipReservas = () => {
                         </Select>
                       </div>
                     )}
-                    {normalNameClientId && normalNameVehicles.length === 0 && (
+                    {unifiedClientVehicles.length === 0 && (
                       <p className="text-[10px] text-muted-foreground">Este cliente no tiene vehículos registrados</p>
                     )}
-                    {plateResult && normalNameVehicleId && (
-                      <div className="rounded-md bg-green-50 border border-green-200 p-2.5 text-xs space-y-1">
-                        <p className="font-semibold text-green-800 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Vehículo seleccionado</p>
-                        <div className="flex items-center gap-2"><Car className="w-3 h-3" /><span>{plateResult.vehicle_models?.brand} {plateResult.vehicle_models?.name} {plateResult.year}</span></div>
-                        <WarrantyChip vehicleId={plateResult.id} />
+                  </>
+                )}
+
+                {/* Walk-in: cliente sin registrar (búsqueda sin resultados o edición de walk-in) */}
+                {unifiedSearched && unifiedResults.length === 0 && !plateResult && !unifiedClientId && (
+                  <div className="space-y-2">
+                    <div className="rounded-md bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-start gap-2">
+                      <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="font-semibold text-amber-800">{editingRes ? 'Cliente sin registrar' : 'No encontrado'}</p>
+                        <p className="text-amber-700">Ingrese los datos del cliente manualmente.</p>
                       </div>
-                    )}
-                  </TabsContent>
-                </Tabs>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1"><Label className="text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-8 text-xs" /></div>
+                      <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412..." className="h-8 text-xs" /></div>
+                      <div className="space-y-1"><Label className="text-xs">Placa</Label><Input value={fWalkinPlate} onChange={e => setFWalkinPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="h-8 text-xs uppercase" /></div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <Separator />
@@ -1405,7 +1503,7 @@ const DealershipReservas = () => {
             <Button onClick={handleSave} disabled={saving} className="gac-gradient">
               {saving
                 ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                : isIncidencia ? (editingRes ? 'Actualizar Incidencia' : 'Crear Incidencia') : 'Crear Reserva'
+                : isIncidencia ? (editingRes ? 'Actualizar Incidencia' : 'Crear Incidencia') : (editingRes ? 'Actualizar Reserva' : 'Crear Reserva')
               }
             </Button>
           </DialogFooter>
