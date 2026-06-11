@@ -14,6 +14,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { createKommoReservation } from '@/lib/kommo';
 
 interface VehicleResult {
   id: string;
@@ -165,7 +166,7 @@ const PublicReserva = () => {
     if (!vehicle) return;
     setSaving(true);
 
-    const { error } = await supabase.from('reservations').insert({
+    const { data: publicInserted, error } = await supabase.from('reservations').insert({
       dealership_id: selectedDealership,
       client_id: vehicle.clients?.id || null,
       vehicle_id: vehicle.id,
@@ -177,12 +178,16 @@ const PublicReserva = () => {
       notes: notes.trim() || null,
       created_by_name: vehicle.clients?.full_name || 'Cliente',
       created_by_role: 'Cliente',
-    });
+    }).select('id').single();
 
     if (error) {
       toast.error('Error al crear la reserva. Intente de nuevo.');
       console.error(error);
     } else {
+      // NOTE: kommo-api requires JWT by default (not listed in config.toml with verify_jwt=false).
+      // PublicReserva has no authenticated session, so this call will 401 until kommo-api
+      // is redeployed with --no-verify-jwt. The .catch() prevents the 401 from surfacing to the user.
+      if (publicInserted?.id) createKommoReservation(publicInserted.id).catch(console.error);
       setStep('success');
     }
     setSaving(false);

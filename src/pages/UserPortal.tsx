@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
-import { MapPin, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink, Search, KeyRound } from 'lucide-react';
+import { MapPin, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink, Search, KeyRound, Eye, EyeOff } from 'lucide-react';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
+import { createKommoReservation } from '@/lib/kommo';
 
 interface ClientData {
   id: string;
@@ -191,6 +192,7 @@ const UserPortal = () => {
   const [pinSaved, setPinSaved] = useState<string | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [pinSaving, setPinSaving] = useState(false);
+  const [showPin, setShowPin] = useState(false);
 
   // Views
   const validVistas = ['inicio', 'reservar', 'mis-reservas', 'mis-vehiculos', 'perfil'] as const;
@@ -380,6 +382,7 @@ const UserPortal = () => {
     }
     setPinSaved(pinInput);
     setPinInput('');
+    setShowPin(false);
     toast.success('PIN guardado');
   };
 
@@ -391,6 +394,7 @@ const UserPortal = () => {
     if (error) { toast.error('No se pudo quitar el PIN'); return; }
     setPinSaved(null);
     setPinInput('');
+    setShowPin(false);
     toast.success('PIN eliminado');
   };
 
@@ -467,7 +471,7 @@ const UserPortal = () => {
   const confirmarReserva = async () => {
     if (!clientData || !selectedVehicle || !selectedDealership || !selectedDate || !selectedTime || !selectedService) return;
     setSaving(true);
-    const { error } = await supabase.from('reservations').insert({
+    const { data: clientInserted, error } = await supabase.from('reservations').insert({
       dealership_id: selectedDealership,
       client_id: clientData.id,
       vehicle_id: selectedVehicle,
@@ -481,9 +485,10 @@ const UserPortal = () => {
       created_by_name: clientData.full_name || 'Cliente',
       created_by_role: 'Cliente',
       created_by_profile_id: user?.id || null,
-    });
+    }).select('id').single();
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
     else {
+      if (clientInserted?.id) createKommoReservation(clientInserted.id).catch(console.error);
       try { localStorage.removeItem(UP_LS_KEY); } catch {}
       setReservaConfirmada(true);
       setPaso(4);
@@ -1486,7 +1491,19 @@ const UserPortal = () => {
                   <div className="flex items-center justify-between rounded-md bg-muted/50 p-2.5">
                     <div>
                       <p className="text-[10px] text-muted-foreground">PIN actual</p>
-                      <p className="font-mono font-bold tracking-[0.3em] text-lg">{pinSaved}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="font-mono font-bold tracking-[0.3em] text-lg">
+                          {showPin ? pinSaved : '•'.repeat(pinSaved.length)}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowPin((v) => !v)}
+                          className="text-muted-foreground hover:text-foreground transition-colors"
+                          aria-label={showPin ? 'Ocultar PIN' : 'Mostrar PIN'}
+                        >
+                          {showPin ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
                     </div>
                     <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={removePin} disabled={pinSaving}>
                       <XCircle className="w-3.5 h-3.5 mr-1" /> Quitar
