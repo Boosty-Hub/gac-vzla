@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { DashboardDateRange, rangeDescription, last30From, todayIso } from '@/components/DashboardDateRange';
 
 interface Prospect {
   id: string;
@@ -75,33 +76,36 @@ const DealershipDashboard = () => {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Date range filter — default últimos 30 días (empty range = todo el historial)
+  const [fechaDesde, setFechaDesde] = useState<string>(last30From);
+  const [fechaHasta, setFechaHasta] = useState<string>(todayIso);
+
   useEffect(() => {
     if (loadingAccess) return;
     if (!selectedDealership) { setLoading(false); return; }
 
     const load = async () => {
       setLoading(true);
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const since = thirtyDaysAgo.toISOString();
+      const since = fechaDesde ? `${fechaDesde}T00:00:00` : undefined;
+      const until = fechaHasta ? `${fechaHasta}T23:59:59` : undefined;
 
-      const [pRes, rRes] = await Promise.all([
-        supabase.from('prospects')
-          .select('id, status, source, salesperson, created_at, event_name')
-          .eq('dealership_id', selectedDealership)
-          .gte('created_at', since),
-        supabase.from('reservations')
-          .select('id, status, reservation_date, service_type, created_at')
-          .eq('dealership_id', selectedDealership)
-          .gte('created_at', since),
-      ]);
+      let pq: any = supabase.from('prospects')
+        .select('id, status, source, salesperson, created_at, event_name')
+        .eq('dealership_id', selectedDealership);
+      let rq: any = supabase.from('reservations')
+        .select('id, status, reservation_date, service_type, created_at')
+        .eq('dealership_id', selectedDealership);
+      if (since) { pq = pq.gte('created_at', since); rq = rq.gte('created_at', since); }
+      if (until) { pq = pq.lte('created_at', until); rq = rq.lte('created_at', until); }
+
+      const [pRes, rRes] = await Promise.all([pq, rq]);
 
       setProspects((pRes.data || []) as Prospect[]);
       setReservations((rRes.data || []) as Reservation[]);
       setLoading(false);
     };
     load();
-  }, [selectedDealership, loadingAccess]);
+  }, [selectedDealership, loadingAccess, fechaDesde, fechaHasta]);
 
   // ─── KPIs ───
   const totalProspects = prospects.length;
@@ -231,9 +235,18 @@ const DealershipDashboard = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
-        <p className="text-xs sm:text-sm text-muted-foreground">Últimos 30 días — Datos de este concesionario</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            <span className="font-medium text-foreground/80">{rangeDescription(fechaDesde, fechaHasta)}</span> — Datos de este concesionario
+          </p>
+        </div>
+        <DashboardDateRange
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          onChange={(d, h) => { setFechaDesde(d); setFechaHasta(h); }}
+        />
       </div>
 
       {/* KPI Cards */}

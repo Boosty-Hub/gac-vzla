@@ -3,14 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
   MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
-  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles, X,
+  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -20,6 +17,7 @@ import {
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useIsMobile } from '@/hooks/use-mobile';
 import CustomWidgetsSection from '@/components/dashboard/CustomWidgetsSection';
+import { DashboardDateRange, rangeDescription, last30From, todayIso } from '@/components/DashboardDateRange';
 
 interface Prospect {
   id: string;
@@ -67,31 +65,9 @@ const AdminDashboard = () => {
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Date range filter — default últimos 30 días
-  const defaultDesde = (() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); })();
-  const defaultHasta = new Date().toISOString().slice(0, 10);
-  const [fechaDesde, setFechaDesde] = useState<string>(defaultDesde);
-  const [fechaHasta, setFechaHasta] = useState<string>(defaultHasta);
-  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
-
-  const isDefaultRange = fechaDesde === defaultDesde && fechaHasta === defaultHasta;
-
-  const applyLast30 = () => { setFechaDesde(defaultDesde); setFechaHasta(defaultHasta); };
-  const applyThisMonth = () => {
-    const t = new Date(); const y = t.getFullYear(), m = t.getMonth();
-    setFechaDesde(new Date(y, m, 1).toISOString().slice(0, 10));
-    setFechaHasta(new Date(y, m + 1, 0).toISOString().slice(0, 10));
-  };
-  const applyLastMonth = () => {
-    const t = new Date(); const y = t.getFullYear(), m = t.getMonth();
-    setFechaDesde(new Date(y, m - 1, 1).toISOString().slice(0, 10));
-    setFechaHasta(new Date(y, m, 0).toISOString().slice(0, 10));
-  };
-  const applyYTD = () => {
-    const y = new Date().getFullYear();
-    setFechaDesde(`${y}-01-01`);
-    setFechaHasta(defaultHasta);
-  };
+  // Date range filter — default últimos 30 días (empty range = todo el historial)
+  const [fechaDesde, setFechaDesde] = useState<string>(last30From);
+  const [fechaHasta, setFechaHasta] = useState<string>(todayIso);
 
   useEffect(() => {
     const load = async () => {
@@ -314,49 +290,21 @@ const AdminDashboard = () => {
     );
   }
 
-  const rangeLabel = isDefaultRange
-    ? 'Últimos 30 días'
-    : `${new Date(fechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })} – ${new Date(fechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}`;
-
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">{rangeLabel} — Resumen general del sistema</p>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            <span className="font-medium text-foreground/80">{rangeDescription(fechaDesde, fechaHasta)}</span> — Resumen general del sistema
+          </p>
         </div>
-        <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className={cn("h-9 text-xs gap-1.5", !isDefaultRange && "border-primary text-primary")}>
-              <CalendarDays className="w-3.5 h-3.5" />
-              {isDefaultRange ? 'Últimos 30 días' : `${new Date(fechaDesde + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })} – ${new Date(fechaHasta + 'T00:00:00').toLocaleDateString('es-VE', { day: '2-digit', month: 'short' })}`}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-72 p-3 space-y-3" align="end">
-            <div className="grid grid-cols-2 gap-1.5">
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyLast30}>Últimos 30 días</Button>
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyThisMonth}>Este mes</Button>
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyLastMonth}>Mes pasado</Button>
-              <Button variant="outline" size="sm" className="h-7 text-xs" onClick={applyYTD}>Año actual</Button>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <span className="text-[11px] text-muted-foreground">Desde</span>
-                <Input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)} className="h-8 text-xs" />
-              </div>
-              <div className="space-y-1">
-                <span className="text-[11px] text-muted-foreground">Hasta</span>
-                <Input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)} className="h-8 text-xs" />
-              </div>
-            </div>
-            {!isDefaultRange && (
-              <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground gap-1" onClick={applyLast30}>
-                <X className="w-3 h-3" />Restablecer (30 días)
-              </Button>
-            )}
-          </PopoverContent>
-        </Popover>
+        <DashboardDateRange
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          onChange={(d, h) => { setFechaDesde(d); setFechaHasta(h); }}
+        />
       </div>
 
       {/* ╔════ SECCIÓN: VISTA GENERAL ════╗ */}
