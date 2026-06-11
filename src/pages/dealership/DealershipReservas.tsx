@@ -23,6 +23,7 @@ import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 import { createKommoReservation, updateKommoReservationStage } from '@/lib/kommo';
+import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { List, LayoutGrid } from 'lucide-react';
 
 // Service types that trigger the incidencia form
@@ -302,7 +303,14 @@ const DealershipReservas = () => {
         .from('vehicles')
         .select('id, plate, year, vehicle_models(name, brand)')
         .eq('client_id', normalNameClientId);
-      setNormalNameVehicles((data || []) as unknown as VehicleResult[]);
+      const fetched = (data || []) as unknown as VehicleResult[];
+      setNormalNameVehicles(fetched);
+      // No plate hint on the Nombre tab — only auto-select when exactly one vehicle.
+      const autoMatch = resolveAutoVehicle(
+        (fetched as Array<{ id: string; plate?: string | null }>),
+        null,
+      );
+      if (autoMatch) handleNormalNameVehicleSelect(autoMatch.id);
     })();
   }, [normalNameClientId]);
 

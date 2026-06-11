@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,6 +18,7 @@ import { WarrantyChip } from '@/components/WarrantyChip';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
+import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { createKommoReservation, updateKommoReservationStage } from '@/lib/kommo';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
@@ -202,6 +203,9 @@ const AdminReservas = () => {
   const [clientResults, setClientResults] = useState<ClientOption[]>([]);
   const [clientVehicles, setClientVehicles] = useState<VehicleOption[]>([]);
   const [searchingClients, setSearchingClients] = useState(false);
+  // Carries the raw search term typed before selectClient overwrites fClientSearch,
+  // so the vehicle-fetch effect can use it to auto-select the matching vehicle.
+  const plateHintRef = useRef<string>('');
 
   const fetchDealerships = async () => {
     const { data } = await supabase
@@ -318,7 +322,16 @@ const AdminReservas = () => {
         .select('id, plate, year, vehicle_models(name, brand)')
         .eq('client_id', fClientId)
         .eq('is_active', true);
-      setClientVehicles((data || []) as VehicleOption[]);
+      const fetched = (data || []) as VehicleOption[];
+      setClientVehicles(fetched);
+      // Auto-select vehicle: exact plate match wins; otherwise pick the only vehicle.
+      const hint = plateHintRef.current;
+      plateHintRef.current = '';
+      const autoMatch = resolveAutoVehicle(
+        fetched.map((v) => ({ id: v.id, plate: v.plate })),
+        hint,
+      );
+      if (autoMatch) setFVehicleId(autoMatch.id);
     })();
   }, [fClientId]);
 
@@ -475,6 +488,9 @@ const AdminReservas = () => {
   };
 
   const selectClient = (c: ClientOption) => {
+    // Preserve the typed search term before overwriting it with the client name,
+    // so the vehicle-fetch effect can use it as a plate hint for auto-selection.
+    plateHintRef.current = fClientSearch;
     setFClientId(c.id);
     setFClientSearch(c.full_name);
     setClientResults([]);
