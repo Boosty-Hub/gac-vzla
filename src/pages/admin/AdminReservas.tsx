@@ -122,7 +122,7 @@ const AdminReservas = () => {
   const { hasPermission, role, profile } = useAuth();
   const canCreate = hasPermission('reservas.create');
   const canEdit = hasPermission('reservas.edit');
-  const canDelete = role?.name === 'superadmin' || role?.name === 'admin';
+  const canDelete = hasPermission('reservas.delete');
 
   // Delete
   const [deleteTarget, setDeleteTarget] = useState<Reservation | null>(null);
