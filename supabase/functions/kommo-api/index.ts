@@ -836,9 +836,9 @@ Deno.serve(async (req) => {
         ? { id: existingKommoContactId }
         : {
             name: clientName,
-            custom_fields_values: clientPhone
-              ? [{ field_code: 'PHONE', values: [{ value: clientPhone, enum_code: 'WORK' }] }]
-              : [],
+            ...(clientPhone
+              ? { custom_fields_values: [{ field_code: 'PHONE', values: [{ value: clientPhone, enum_code: 'WORK' }] }] }
+              : {}),
           }
 
       const leadPayload = [{
