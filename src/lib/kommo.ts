@@ -48,6 +48,21 @@ export async function updateKommoReservationStage(
   if (error) console.error('[Kommo] Error actualizando etapa de reserva:', error)
 }
 
+// Re-push all reservation custom fields to the Post Venta lead in Kommo (call after editing a reservation)
+export async function updateKommoReservationFields(
+  reservationId: string,
+  kommoLeadId: number
+): Promise<void> {
+  const { error } = await supabase.functions.invoke('kommo-api', {
+    body: {
+      action: 'update_reservation_fields',
+      reservation_id: reservationId,
+      kommo_lead_id: kommoLeadId,
+    },
+  })
+  if (error) console.error('[Kommo] Error actualizando campos de reserva:', error)
+}
+
 // Overwrite all matching fields in Kommo with current GAC values (true bidirectional sync)
 export async function updateKommoLeadFields(
   prospectId: string,

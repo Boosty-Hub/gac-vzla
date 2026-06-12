@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 import { resolveAutoVehicle } from '@/lib/vehicleSelection';
-import { createKommoReservation, updateKommoReservationStage } from '@/lib/kommo';
+import { createKommoReservation, updateKommoReservationStage, updateKommoReservationFields } from '@/lib/kommo';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 
@@ -526,7 +526,10 @@ const AdminReservas = () => {
     if (editingRes) {
       const { error } = await supabase.from('reservations').update(payload).eq('id', editingRes.id);
       if (error) { toast.error('Error al actualizar reserva'); console.error(error); }
-      else { toast.success('Reserva actualizada'); setDialogOpen(false); fetchReservations(); }
+      else {
+        toast.success('Reserva actualizada'); setDialogOpen(false); fetchReservations();
+        if (editingRes.kommo_lead_id) updateKommoReservationFields(editingRes.id, editingRes.kommo_lead_id).catch(console.error);
+      }
     } else {
       payload.created_by_name = profile?.full_name || role?.name || 'Admin';
       payload.created_by_role = role?.name || 'admin';

@@ -149,6 +149,20 @@ const POSTVENTA_STAGE_TO_STATUS: Record<string, string> = {
   '104022408': 'cancelada',
 }
 
+// Custom fields for Post Venta leads (mirrored from kommo-api)
+const CF_RES = {
+  supabase_id:        3192400,
+  estado_cita:        3417651,
+  fecha_cita:         3417653,
+  hora_cita:          3417655,
+  servicio_cita:      3417657,
+  vehiculo_cita:      3417659,
+  placa_vehiculo:     3417661,
+  concesionario_cita: 3417663,
+  km_vehiculo:        3417665,
+  descripcion_inc:    3017690,
+}
+
 const CONCESIONARIO_KOMMO = [
   { id: 7832490, kw: ['harbin'] }, { id: 7832492, kw: ['garzas'] }, { id: 7832494, kw: ['hobby'] },
   { id: 7832496, kw: ['meta car', 'zulia'] }, { id: 7832498, kw: ['palma'] },
@@ -368,15 +382,20 @@ Deno.serve(async (req) => {
             .from('reservations')
             .select('id, status')
             .eq('kommo_lead_id', parseInt(statusLeadId))
-            .single()
+            .maybeSingle()
 
-          if (reservation && reservation.status !== ourStatus) {
-            await supabase.from('reservations').update({ status: ourStatus }).eq('id', reservation.id)
-            await supabase.from('integration_logs').insert({
-              integration_name: 'kommo', event_type: 'webhook_reservation_status_update',
-              kommo_lead_id: parseInt(statusLeadId), status: 'success',
-              details: { reservation_id: reservation.id, old_status: reservation.status, new_status: ourStatus },
-            })
+          if (reservation) {
+            if (reservation.status !== ourStatus) {
+              await supabase.from('reservations').update({ status: ourStatus }).eq('id', reservation.id)
+              await supabase.from('integration_logs').insert({
+                integration_name: 'kommo', event_type: 'webhook_reservation_status_update',
+                kommo_lead_id: parseInt(statusLeadId), status: 'success',
+                details: { reservation_id: reservation.id, old_status: reservation.status, new_status: ourStatus },
+              })
+            }
+          } else {
+            // No matching reservation — auto-create from this Kommo Post Venta lead
+            await autoCreateReservationFromKommo(supabase, parseInt(statusLeadId), ourStatus, authHeaders, baseUrl)
           }
         }
         return new Response('OK', { status: 200 })
@@ -431,11 +450,24 @@ Deno.serve(async (req) => {
     const updateLeadId = params.get('leads[update][0][id]')
 
     if (updateLeadId) {
+      // Check Post Venta reservations first
+      const { data: reservation } = await supabase
+        .from('reservations')
+        .select('id')
+        .eq('kommo_lead_id', parseInt(updateLeadId))
+        .maybeSingle()
+
+      if (reservation) {
+        await syncReservationFieldsFromKommo(supabase, reservation.id, parseInt(updateLeadId), authHeaders, baseUrl)
+        return new Response('OK', { status: 200 })
+      }
+
+      // Fall through to prospects pipeline
       const { data: prospect } = await supabase
         .from('prospects')
         .select('id')
         .eq('kommo_lead_id', parseInt(updateLeadId))
-        .single()
+        .maybeSingle()
 
       if (prospect) {
         // Sync Kommo → GAC (overwrite if different) then push any GAC-only fields back
@@ -642,6 +674,194 @@ async function syncFieldsToKommo(
       body: JSON.stringify({ custom_fields_values: newFields }),
     })
   }
+}
+
+// ─── syncReservationFieldsFromKommo: write Kommo field changes back to GAC ────
+async function syncReservationFieldsFromKommo(
+  supabase: ReturnType<typeof createClient>,
+  reservationId: string,
+  kommoLeadId: number,
+  authHeaders: Record<string, string>,
+  baseUrl: string
+) {
+  const [resResult, leadRes] = await Promise.all([
+    supabase.from('reservations')
+      .select('reservation_date, reservation_time, service_type, current_mileage')
+      .eq('id', reservationId)
+      .single(),
+    fetch(`${baseUrl}/leads/${kommoLeadId}?with=custom_fields`, { headers: authHeaders }),
+  ])
+
+  const reservation = resResult.data
+  if (!reservation || !leadRes.ok) return
+
+  const lead = await leadRes.json() as Record<string, unknown>
+  const cfValues = (lead.custom_fields_values as CFValue[]) || []
+
+  const updates: Record<string, unknown> = {}
+
+  const fechaCita = getCFText(cfValues, CF_RES.fecha_cita)
+  if (fechaCita && fechaCita !== reservation.reservation_date) updates.reservation_date = fechaCita
+
+  const horaCita = getCFText(cfValues, CF_RES.hora_cita)
+  if (horaCita && horaCita !== reservation.reservation_time) updates.reservation_time = horaCita
+
+  const servicioCita = getCFText(cfValues, CF_RES.servicio_cita)
+  if (servicioCita && servicioCita !== reservation.service_type) updates.service_type = servicioCita
+
+  const kmText = getCFText(cfValues, CF_RES.km_vehiculo)
+  if (kmText) {
+    const km = parseInt(kmText, 10)
+    if (!isNaN(km) && km !== reservation.current_mileage) updates.current_mileage = km
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await supabase.from('reservations').update(updates).eq('id', reservationId)
+    await supabase.from('integration_logs').insert({
+      integration_name: 'kommo', event_type: 'webhook_reservation_fields_update',
+      kommo_lead_id: kommoLeadId, status: 'success',
+      details: { reservation_id: reservationId, fields_updated: Object.keys(updates) },
+    })
+  }
+}
+
+// ─── autoCreateReservationFromKommo: create GAC reservation from Kommo lead ───
+async function autoCreateReservationFromKommo(
+  supabase: ReturnType<typeof createClient>,
+  kommoLeadId: number,
+  initialStatus: string,
+  authHeaders: Record<string, string>,
+  baseUrl: string
+) {
+  const leadRes = await fetch(`${baseUrl}/leads/${kommoLeadId}?with=contacts,custom_fields`, { headers: authHeaders })
+  if (!leadRes.ok) return
+
+  let lead: Record<string, unknown>
+  try { lead = await leadRes.json() as Record<string, unknown> } catch { return }
+
+  const cfValues = (lead.custom_fields_values as CFValue[]) || []
+
+  // If supabase_id CF is already set → just link and update status (no duplicate)
+  const existingSupabaseId = getCFText(cfValues, CF_RES.supabase_id)
+  if (existingSupabaseId) {
+    const { data: existing } = await supabase
+      .from('reservations')
+      .select('id, kommo_lead_id')
+      .eq('id', existingSupabaseId)
+      .maybeSingle()
+    if (existing && !existing.kommo_lead_id) {
+      await supabase.from('reservations')
+        .update({ kommo_lead_id: kommoLeadId, status: initialStatus })
+        .eq('id', existingSupabaseId)
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'webhook_reservation_auto_linked',
+        kommo_lead_id: kommoLeadId, status: 'success',
+        details: { reservation_id: existingSupabaseId, method: 'supabase_id_cf_match' },
+      })
+    }
+    return
+  }
+
+  // Extract CFs
+  const fechaCita = getCFText(cfValues, CF_RES.fecha_cita)
+  const horaCita = getCFText(cfValues, CF_RES.hora_cita) || '09:00:00'
+  const servicioCita = getCFText(cfValues, CF_RES.servicio_cita) || 'Servicio'
+  const placaVehiculo = getCFText(cfValues, CF_RES.placa_vehiculo)
+  const kmText = getCFText(cfValues, CF_RES.km_vehiculo)
+  const km = kmText ? (parseInt(kmText, 10) || null) : null
+  const concesionarioCita = getCFText(cfValues, CF_RES.concesionario_cita)
+
+  // Resolve dealership from text CF (populated by create_reservation)
+  let dealershipId: string | null = null
+  if (concesionarioCita) {
+    const { data: dealer } = await supabase
+      .from('dealerships').select('id').ilike('name', `%${concesionarioCita}%`).limit(1).maybeSingle()
+    if (dealer) dealershipId = (dealer as { id: string }).id
+  }
+
+  // Resolve client and vehicle from contact phone
+  let clientId: string | null = null
+  let vehicleId: string | null = null
+  let walkinName: string | null = null
+  let walkinPhone: string | null = null
+
+  const contacts = ((lead._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
+  if (contacts[0]?.id) {
+    const contactRes = await fetch(`${baseUrl}/contacts/${contacts[0].id}?with=custom_fields`, { headers: authHeaders })
+    if (contactRes.ok) {
+      try {
+        const contactData = await contactRes.json() as Record<string, unknown>
+        const cfs = (contactData.custom_fields_values as CFValue[]) || []
+        const phoneCF = cfs.find(f => (f as unknown as { field_code?: string }).field_code === 'PHONE')
+        const phone = phoneCF?.values?.[0]?.value ? String(phoneCF.values[0].value).trim() : null
+        const contactName = String(contactData.name ?? '').trim() || (lead.name as string) || null
+
+        if (phone) {
+          const { data: client } = await supabase
+            .from('clients').select('id').eq('phone', phone).limit(1).maybeSingle()
+          if (client) {
+            clientId = (client as { id: string }).id
+            if (placaVehiculo) {
+              const { data: vehicle } = await supabase
+                .from('vehicles').select('id')
+                .eq('client_id', clientId).ilike('plate', placaVehiculo)
+                .limit(1).maybeSingle()
+              if (vehicle) vehicleId = (vehicle as { id: string }).id
+            }
+          } else {
+            walkinPhone = phone
+            walkinName = contactName
+          }
+        } else {
+          walkinName = contactName
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  const newReservation: Record<string, unknown> = {
+    status: initialStatus,
+    kommo_lead_id: kommoLeadId,
+    reservation_date: fechaCita || new Date().toISOString().slice(0, 10),
+    reservation_time: horaCita,
+    service_type: servicioCita,
+    ...(clientId && { client_id: clientId }),
+    ...(vehicleId && { vehicle_id: vehicleId }),
+    ...(!clientId && walkinName && { walkin_client_name: walkinName }),
+    ...(!clientId && walkinPhone && { walkin_client_phone: walkinPhone }),
+    ...(!clientId && placaVehiculo && { walkin_plate: placaVehiculo }),
+    ...(km && { current_mileage: km }),
+    ...(dealershipId && { dealership_id: dealershipId }),
+  }
+
+  const { data: created, error } = await supabase
+    .from('reservations').insert(newReservation).select('id').single()
+
+  if (error || !created) {
+    await supabase.from('integration_logs').insert({
+      integration_name: 'kommo', event_type: 'webhook_reservation_auto_create_failed',
+      kommo_lead_id: kommoLeadId, status: 'error',
+      details: { reason: error?.message, reservation_date: fechaCita },
+    })
+    return
+  }
+
+  // Write supabase_id back to Kommo so future stage changes find this reservation
+  await fetch(`${baseUrl}/leads/${kommoLeadId}`, {
+    method: 'PATCH', headers: authHeaders,
+    body: JSON.stringify({
+      custom_fields_values: [{ field_id: CF_RES.supabase_id, values: [{ value: created.id }] }],
+    }),
+  })
+
+  await supabase.from('integration_logs').insert({
+    integration_name: 'kommo', event_type: 'webhook_reservation_auto_created',
+    kommo_lead_id: kommoLeadId, status: 'success',
+    details: {
+      reservation_id: created.id, status: initialStatus,
+      client_id: clientId, vehicle_id: vehicleId, dealership_id: dealershipId,
+    },
+  })
 }
 
 // ─── autoCreateProspectFromKommo: create GAC prospect from Kommo lead ─────────

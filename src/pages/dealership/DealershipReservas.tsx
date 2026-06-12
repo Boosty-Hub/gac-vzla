@@ -22,7 +22,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
-import { createKommoReservation, updateKommoReservationStage } from '@/lib/kommo';
+import { createKommoReservation, updateKommoReservationStage, updateKommoReservationFields } from '@/lib/kommo';
 import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { resolveReservationAssignment } from '@/lib/reservationAssignment';
 import { List, LayoutGrid } from 'lucide-react';
@@ -441,7 +441,10 @@ const DealershipReservas = () => {
       if (editingRes) {
         const { error } = await supabase.from('reservations').update(incPayload).eq('id', editingRes.id);
         if (error) { toast.error('Error al actualizar incidencia'); console.error(error); }
-        else { toast.success('Incidencia actualizada'); setCreateOpen(false); setEditingRes(null); fetchReservations(); }
+        else {
+          toast.success('Incidencia actualizada'); setCreateOpen(false); setEditingRes(null); fetchReservations();
+          if (editingRes.kommo_lead_id) updateKommoReservationFields(editingRes.id, editingRes.kommo_lead_id).catch(console.error);
+        }
       } else {
         const creatorName = currentSalesperson?.name || profile?.full_name || null;
         const creatorRole = role?.name || null;
@@ -484,7 +487,10 @@ const DealershipReservas = () => {
       };
       const { error } = await supabase.from('reservations').update(updatePayload).eq('id', editingRes.id);
       if (error) { toast.error('Error al actualizar reserva'); console.error(error); }
-      else { toast.success('Reserva actualizada'); setCreateOpen(false); setEditingRes(null); fetchReservations(); }
+      else {
+        toast.success('Reserva actualizada'); setCreateOpen(false); setEditingRes(null); fetchReservations();
+        if (editingRes.kommo_lead_id) updateKommoReservationFields(editingRes.id, editingRes.kommo_lead_id).catch(console.error);
+      }
       setSaving(false);
       return;
     }

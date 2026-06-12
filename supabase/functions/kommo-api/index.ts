@@ -885,6 +885,77 @@ Deno.serve(async (req) => {
       })
     }
 
+    // ── Update reservation fields in Post Venta pipeline ─────────────────────
+    // Called after editing a reservation in GAC to keep Kommo in sync.
+    if (action === 'update_reservation_fields') {
+      if (!reservation_id || !kommo_lead_id) throw new Error('Faltan parámetros')
+
+      const { data: res } = await supabase
+        .from('reservations')
+        .select(`
+          id, reservation_date, reservation_time, service_type, current_mileage,
+          status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
+          clients(full_name, phone),
+          vehicles(plate, vehicle_models(name, brand)),
+          dealerships(name)
+        `)
+        .eq('id', reservation_id)
+        .single()
+
+      if (!res) throw new Error('Reserva no encontrada')
+
+      const clientName =
+        (res.clients as { full_name: string } | null)?.full_name
+        || res.walkin_client_name
+        || 'Sin nombre'
+      const plate =
+        (res.vehicles as { plate: string | null } | null)?.plate
+        || res.walkin_plate
+        || null
+      const vehicleModel =
+        (res.vehicles as { vehicle_models: { name: string; brand: string } | null } | null)?.vehicle_models
+      const vehicleStr = vehicleModel ? `${vehicleModel.brand} ${vehicleModel.name}` : ''
+      const dealershipName = (res.dealerships as { name: string } | null)?.name || ''
+
+      const resCFs: unknown[] = []
+      const addField = (field_id: number, value: unknown) => {
+        if (value !== null && value !== undefined && value !== '')
+          resCFs.push({ field_id, values: [{ value }] })
+      }
+      const addEnum = (field_id: number, enum_id: number | null) => {
+        if (enum_id !== null) resCFs.push({ field_id, values: [{ enum_id }] })
+      }
+
+      addField(CF_RES.supabase_id, res.id)
+      addField(CF_RES.estado_cita, res.status)
+      addField(CF_RES.fecha_cita, res.reservation_date)
+      addField(CF_RES.hora_cita, res.reservation_time)
+      addField(CF_RES.servicio_cita, res.service_type)
+      addField(CF_RES.vehiculo_cita, vehicleStr)
+      addField(CF_RES.placa_vehiculo, plate)
+      addField(CF_RES.concesionario_cita, dealershipName)
+      if (res.current_mileage) addField(CF_RES.km_vehiculo, String(res.current_mileage))
+      if (res.notes) addField(CF_RES.descripcion_inc, res.notes)
+      addEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
+
+      const leadName = `${clientName} - ${res.service_type} ${res.reservation_date}`
+
+      const kommoRes = await fetch(`${baseUrl}/leads/${kommo_lead_id}`, {
+        method: 'PATCH', headers: authHeaders,
+        body: JSON.stringify({ name: leadName, custom_fields_values: resCFs }),
+      })
+
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'update_reservation_fields',
+        status: kommoRes.ok ? 'success' : 'error',
+        details: { reservation_id, kommo_lead_id, fields: resCFs.length, lead_status: kommoRes.status },
+      })
+
+      return new Response(JSON.stringify({ success: kommoRes.ok }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     // ── Update reservation stage in Post Venta pipeline ──────────────────────
     if (action === 'update_reservation_stage') {
       if (!kommo_lead_id || !new_status) throw new Error('Faltan parámetros')
