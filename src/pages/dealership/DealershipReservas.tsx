@@ -24,6 +24,7 @@ import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 import { createKommoReservation, updateKommoReservationStage } from '@/lib/kommo';
 import { resolveAutoVehicle } from '@/lib/vehicleSelection';
+import { resolveReservationAssignment } from '@/lib/reservationAssignment';
 import { List, LayoutGrid } from 'lucide-react';
 
 // Service types that trigger the incidencia form
@@ -215,17 +216,8 @@ const DealershipReservas = () => {
   // True while prefilling an edit, to suppress implicit single-vehicle auto-select.
   const prefillingEditRef = useRef(false);
 
-  // Incidencia form fields
-  const [fClientSearch, setFClientSearch] = useState('');
-  const [fClientResults, setFClientResults] = useState<ClientResult[]>([]);
-  const [fClientId, setFClientId] = useState('');
-  const [fClientName, setFClientName] = useState('');
-  const [fClientDropdown, setFClientDropdown] = useState(false);
-  const [fIncVehicleId, setFIncVehicleId] = useState('');
-  const [fIncVehicles, setFIncVehicles] = useState<VehicleResult[]>([]);
+  // Incidencia form fields (client/vehicle now come from the shared unified search)
   const [fIncMediaUrls, setFIncMediaUrls] = useState<string | null>(null);
-  const fIncPreselectedVehicleIdRef = useRef<string | null>(null);
-  const clientSearchRef = useRef<HTMLDivElement>(null);
 
   const hoy = new Date().toISOString().split('T')[0];
   const isIncidencia = INCIDENCIA_TYPES.has(fService);
@@ -335,66 +327,9 @@ const DealershipReservas = () => {
     })();
   }, [unifiedClientId]);
 
-  // Incidencia form: unified name + plate autocomplete
-  useEffect(() => {
-    if (!fClientSearch.trim() || fClientId) {
-      setFClientResults([]);
-      setFClientDropdown(false);
-      return;
-    }
-    const q = fClientSearch.trim();
-    const timer = setTimeout(async () => {
-      // Try exact plate match first — if found, auto-select client + vehicle
-      const { data: vData } = await supabase
-        .from('vehicles')
-        .select('id, plate, year, vehicle_models(name, brand), clients(id, full_name)')
-        .ilike('plate', q)
-        .limit(1);
-      if (vData && vData.length > 0) {
-        const v = vData[0] as any;
-        if (v.clients) {
-          fIncPreselectedVehicleIdRef.current = v.id;
-          setFClientId(v.clients.id);
-          setFClientName(v.clients.full_name);
-          setFClientSearch(v.clients.full_name);
-          setFClientDropdown(false);
-          setFClientResults([]);
-          return;
-        }
-      }
-      // Fall back to name search
-      const { data } = await supabase
-        .from('clients')
-        .select('id, full_name')
-        .ilike('full_name', `%${q}%`)
-        .limit(8);
-      setFClientResults((data || []) as ClientResult[]);
-      setFClientDropdown(true);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [fClientSearch, fClientId]);
-
-  // Incidencia form: fetch vehicles when client selected
-  useEffect(() => {
-    if (!fClientId) { setFIncVehicles([]); setFIncVehicleId(''); fIncPreselectedVehicleIdRef.current = null; return; }
-    (async () => {
-      const { data } = await supabase
-        .from('vehicles')
-        .select('id, plate, year, vehicle_models(name, brand)')
-        .eq('client_id', fClientId);
-      const fetched = (data || []) as unknown as VehicleResult[];
-      setFIncVehicles(fetched);
-      if (fIncPreselectedVehicleIdRef.current) {
-        setFIncVehicleId(fIncPreselectedVehicleIdRef.current);
-        fIncPreselectedVehicleIdRef.current = null;
-      }
-    })();
-  }, [fClientId]);
-
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (clientSearchRef.current && !clientSearchRef.current.contains(e.target as Node)) setFClientDropdown(false);
       if (unifiedRef.current && !unifiedRef.current.contains(e.target as Node)) setUnifiedDropdown(false);
     };
     document.addEventListener('mousedown', handler);
@@ -457,9 +392,7 @@ const DealershipReservas = () => {
   };
 
   const resetIncidenciaFields = () => {
-    setFClientSearch(''); setFClientResults([]); setFClientId(''); setFClientName('');
-    setFClientDropdown(false); setFIncVehicleId(''); setFIncVehicles([]); setFIncMediaUrls(null);
-    fIncPreselectedVehicleIdRef.current = null;
+    setFIncMediaUrls(null);
   };
 
   const resetNormalFields = () => {
@@ -486,18 +419,6 @@ const DealershipReservas = () => {
     setCreateOpen(true);
   };
 
-  const selectClient = (client: ClientResult) => {
-    setFClientId(client.id); setFClientName(client.full_name);
-    setFClientSearch(client.full_name); setFClientDropdown(false); setFClientResults([]);
-  };
-
-  const clearClient = () => {
-    setFClientId(''); setFClientName(''); setFClientSearch('');
-    setFClientResults([]); setFClientDropdown(false);
-    setFIncVehicleId(''); setFIncVehicles([]);
-  };
-
-
   const handleSave = async () => {
     if (isIncidencia) {
       if (!fDate) { toast.error('La fecha es requerida'); return; }
@@ -505,8 +426,11 @@ const DealershipReservas = () => {
       setSaving(true);
       const incPayload: Record<string, unknown> = {
         dealership_id: selectedDealership,
-        client_id: fClientId || null,
-        vehicle_id: fIncVehicleId || null,
+        ...resolveReservationAssignment({
+          vehicle: plateResult ? { id: plateResult.id, client_id: plateResult.client_id } : null,
+          clientId: unifiedClientId || null,
+          walkinName: fWalkinName, walkinPhone: fWalkinPhone, walkinPlate: fWalkinPlate,
+        }),
         reservation_date: fDate,
         reservation_time: fTime || '08:00',
         service_type: fService,
@@ -515,8 +439,7 @@ const DealershipReservas = () => {
         technical_report_url: fIncMediaUrls || null,
       };
       if (editingRes) {
-        // An incidencia never carries walk-in data; clear it in case this row was converted from a walk-in reservation.
-        const { error } = await supabase.from('reservations').update({ ...incPayload, walkin_client_name: null, walkin_client_phone: null, walkin_plate: null }).eq('id', editingRes.id);
+        const { error } = await supabase.from('reservations').update(incPayload).eq('id', editingRes.id);
         if (error) { toast.error('Error al actualizar incidencia'); console.error(error); }
         else { toast.success('Incidencia actualizada'); setCreateOpen(false); setEditingRes(null); fetchReservations(); }
       } else {
@@ -544,12 +467,11 @@ const DealershipReservas = () => {
     setSaving(true);
 
     // Resolved client/vehicle assignment, shared by create and edit.
-    // Setting one representation clears the others so reassigning is consistent.
-    const assign = plateResult
-      ? { vehicle_id: plateResult.id, client_id: plateResult.client_id, walkin_client_name: null, walkin_client_phone: null, walkin_plate: null }
-      : unifiedClientId
-      ? { vehicle_id: null, client_id: unifiedClientId, walkin_client_name: null, walkin_client_phone: null, walkin_plate: null }
-      : { vehicle_id: null, client_id: null, walkin_client_name: fWalkinName.trim(), walkin_client_phone: fWalkinPhone.trim() || null, walkin_plate: fWalkinPlate.trim().toUpperCase() || null };
+    const assign = resolveReservationAssignment({
+      vehicle: plateResult ? { id: plateResult.id, client_id: plateResult.client_id } : null,
+      clientId: unifiedClientId || null,
+      walkinName: fWalkinName, walkinPhone: fWalkinPhone, walkinPlate: fWalkinPlate,
+    });
 
     if (editingRes) {
       const updatePayload = {
@@ -645,25 +567,40 @@ const DealershipReservas = () => {
     }
   };
 
-  const openEditIncidencia = (r: Reservation) => {
+  const openEditIncidencia = async (r: Reservation) => {
     // Limpiar cualquier estado de creación guardado para evitar confusión
     try { localStorage.removeItem(DR_LS_KEY); } catch {}
+    resetNormalFields();
+    resetIncidenciaFields();
     setEditingRes(r);
     setFService(r.service_type);
     setFDate(r.reservation_date);
-    setFMileage(String(r.current_mileage));
+    setFTime(r.reservation_time?.slice(0, 5) || '09:00');
+    setFMileage(String(r.current_mileage || 0));
     setFNotes(r.notes || '');
-    setFClientId(r.client_id || '');
-    setFClientName(r.clients?.full_name || '');
-    setFClientSearch(r.clients?.full_name || '');
-    setFIncVehicleId(r.vehicle_id || '');
+    setFObs('');
     setFIncMediaUrls(r.technical_report_url || null);
-    if (r.client_id) {
-      supabase.from('vehicles').select('id, plate, year, vehicle_models(name, brand)')
-        .eq('client_id', r.client_id).then(({ data }) => setFIncVehicles((data || []) as unknown as VehicleResult[]));
-    }
     setDetailOpen(false);
     setCreateOpen(true);
+    // Prefill the unified client/vehicle search the same way as a normal reservation edit.
+    if (r.vehicle_id) {
+      const { data } = await supabase
+        .from('vehicles')
+        .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
+        .eq('id', r.vehicle_id)
+        .single();
+      if (data) { setPlateResult(data as any); setPlateSearched(true); setUnifiedSearch((data as any).plate || ''); }
+    } else if (r.client_id) {
+      prefillingEditRef.current = true;
+      setUnifiedClientId(r.client_id);
+      setUnifiedClientName(r.clients?.full_name || '');
+      setUnifiedSearch(r.clients?.full_name || '');
+    } else if (r.walkin_client_name) {
+      setFWalkinName(r.walkin_client_name);
+      setFWalkinPhone(r.walkin_client_phone || '');
+      setFWalkinPlate(r.walkin_plate || '');
+      setUnifiedSearched(true);
+    }
   };
 
   const openEditReservation = async (r: Reservation) => {
@@ -1276,86 +1213,10 @@ const DealershipReservas = () => {
 
           <Separator />
 
-          {/* FORMA INCIDENCIA */}
-          {isIncidencia && (
-            <div className="space-y-3">
-              <div className="space-y-1" ref={clientSearchRef}>
-                <Label className="text-xs">Cliente</Label>
-                <div className="relative">
-                  <div className="flex items-center gap-1">
-                    <Input
-                      value={fClientSearch}
-                      onChange={e => { setFClientSearch(e.target.value); if (fClientId) { setFClientId(''); setFClientName(''); } }}
-                      placeholder="Buscar por nombre o placa..."
-                      className="h-8 text-xs"
-                      disabled={!!fClientId}
-                    />
-                    {fClientId && (
-                      <Button size="sm" variant="ghost" className="h-8 w-8 p-0 shrink-0" onClick={clearClient}>
-                        <X className="w-3.5 h-3.5" />
-                      </Button>
-                    )}
-                  </div>
-                  {fClientDropdown && fClientResults.length > 0 && (
-                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-48 overflow-y-auto">
-                      {fClientResults.map(c => (
-                        <div key={c.id} className="px-3 py-2 text-xs cursor-pointer hover:bg-accent" onMouseDown={() => selectClient(c)}>{c.full_name}</div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {fClientId && <p className="text-[10px] text-green-700 flex items-center gap-1 mt-0.5"><User className="w-3 h-3" /> {fClientName} seleccionado</p>}
-              </div>
-
-              {fClientId && (
-                <div className="space-y-1">
-                  <Label className="text-xs">Vehículo</Label>
-                  {fIncVehicles.length === 0 ? (
-                    <p className="text-[10px] text-muted-foreground">Sin vehículos registrados</p>
-                  ) : (
-                    <Select value={fIncVehicleId} onValueChange={setFIncVehicleId}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vehículo" /></SelectTrigger>
-                      <SelectContent>
-                        {fIncVehicles.map(v => (
-                          <SelectItem key={v.id} value={v.id} className="text-xs">
-                            {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}{v.plate ? ` · ${v.plate}` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Fecha del reporte *</Label>
-                  <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Hora</Label>
-                  <Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Descripción de la falla *</Label>
-                <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={4} placeholder="Describa la falla, desperfecto o problema observado..." className="text-xs resize-none" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Kilometraje actual</Label>
-                <Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} placeholder="Ej: 25000" className="h-8 text-xs" />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Fotos / Videos</Label>
-                <TechnicalReportUploader maxSizeMB={40} value={fIncMediaUrls} onChange={setFIncMediaUrls} />
-              </div>
-            </div>
-          )}
-
-          {/* FORMA RESERVA NORMAL */}
-          {!isIncidencia && (
+          {/* Buscar cliente/vehículo — unificado por nombre o placa (reserva e incidencia) */}
+          {(
             <>
-              {/* Cliente: búsqueda unificada por nombre o placa */}
+              {/* Buscar cliente — unificado por nombre o placa */}
               <div className="space-y-2" ref={unifiedRef}>
                 <Label className="text-xs font-semibold">Buscar cliente</Label>
                 <div className="relative">
@@ -1472,29 +1333,61 @@ const DealershipReservas = () => {
                 )}
               </div>
 
-              <Separator />
+              {/* Incidencia: campos propios */}
+              {isIncidencia && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Fecha del reporte *</Label>
+                      <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Hora</Label>
+                      <Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Descripción de la falla *</Label>
+                    <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={4} placeholder="Describa la falla, desperfecto o problema observado..." className="text-xs resize-none" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Kilometraje actual</Label>
+                    <Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} placeholder="Ej: 25000" className="h-8 text-xs" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Fotos / Videos</Label>
+                    <TechnicalReportUploader maxSizeMB={40} value={fIncMediaUrls} onChange={setFIncMediaUrls} />
+                  </div>
+                </div>
+              )}
 
-              {/* Detalles de la cita */}
-              <div className="space-y-3">
-                <Label className="text-xs font-semibold">Detalles de la cita</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1"><Label className="text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" /></div>
-                  <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
-                  <div className="space-y-1 col-span-2"><Label className="text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-8 text-xs" /></div>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Descripción / Motivo</Label>
-                  <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa el tipo de servicio solicitado..." />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Notas</Label>
-                  <Textarea value={fObs} onChange={e => setFObs(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones adicionales..." />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Archivo adjunto</Label>
-                  <TechnicalReportUploader maxSizeMB={40} value={createTechReportUrl} onChange={setCreateTechReportUrl} />
-                </div>
-              </div>
+              {/* Reserva normal: detalles de la cita */}
+              {!isIncidencia && (
+                <>
+                  <Separator />
+
+                  <div className="space-y-3">
+                    <Label className="text-xs font-semibold">Detalles de la cita</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1"><Label className="text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" /></div>
+                      <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
+                      <div className="space-y-1 col-span-2"><Label className="text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-8 text-xs" /></div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Descripción / Motivo</Label>
+                      <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa el tipo de servicio solicitado..." />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Notas</Label>
+                      <Textarea value={fObs} onChange={e => setFObs(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones adicionales..." />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Archivo adjunto</Label>
+                      <TechnicalReportUploader maxSizeMB={40} value={createTechReportUrl} onChange={setCreateTechReportUrl} />
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
 
