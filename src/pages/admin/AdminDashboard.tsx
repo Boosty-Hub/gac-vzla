@@ -17,7 +17,7 @@ import {
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useIsMobile } from '@/hooks/use-mobile';
 import CustomWidgetsSection from '@/components/dashboard/CustomWidgetsSection';
-import { DashboardDateRange, rangeDescription, last30From, todayIso } from '@/components/DashboardDateRange';
+import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
 
 interface Prospect {
   id: string;
@@ -65,9 +65,9 @@ const AdminDashboard = () => {
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Date range filter — default últimos 30 días (empty range = todo el historial)
-  const [fechaDesde, setFechaDesde] = useState<string>(last30From);
-  const [fechaHasta, setFechaHasta] = useState<string>(todayIso);
+  // Date range filter — default TODO EL HISTORIAL (empty range = sin filtro de fecha)
+  const [fechaDesde, setFechaDesde] = useState<string>('');
+  const [fechaHasta, setFechaHasta] = useState<string>('');
 
   useEffect(() => {
     const load = async () => {
@@ -317,7 +317,7 @@ const AdminDashboard = () => {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard icon={CalendarDays} label="Citas Reservadas" value={totalReservations} color="text-primary" sub={`${reservasCompletadas} completadas · ${reservasPendientes} pendientes`} />
-        <KpiCard icon={Users} label="Prospectos" value={totalProspects} color="text-blue-600" />
+        <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
         <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600" sub={`${ganados} ganados de ${totalProspects}`} />
         <KpiCard icon={Star} label="Satisfacción Gral." value={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.avgAll}/5` : 'N/A'} color="text-amber-500" sub={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.ratedAll} respuestas` : 'Sin calificaciones'} />
       </div>

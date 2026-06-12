@@ -484,7 +484,7 @@ const AdminHistorial = () => {
                   <>
                     <Separator />
                     <div className="text-xs">
-                      <p className="font-semibold mb-1 flex items-center gap-1"><Wrench className="w-3 h-3" /> Notas del cliente</p>
+                      <p className="font-semibold mb-1 flex items-center gap-1"><Wrench className="w-3 h-3" /> Notas Internas</p>
                       <p className="text-muted-foreground whitespace-pre-wrap bg-muted/30 rounded-md p-2">{e.notes}</p>
                     </div>
                   </>

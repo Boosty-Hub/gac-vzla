@@ -22,7 +22,7 @@ interface MessageTemplate {
 const VARIABLE_HINTS: Record<string, string[]> = {
   prospect_greeting: ['{{prospecto}}', '{{vendedor}}', '{{modelo}}'],
   prospect_assigned: ['{{nombre}}', '{{telefono}}', '{{modelo}}', '{{fuente}}', '{{fecha}}'],
-  reservation_confirmed: ['{{cliente}}', '{{fecha}}', '{{hora}}', '{{servicio}}', '{{vehiculo}}', '{{placa}}', '{{concesionario}}', '{{kilometraje}}', '{{notas}}'],
+  reservation_confirmed: ['{{cliente}}', '{{fecha}}', '{{hora}}', '{{servicio}}', '{{vehiculo}}', '{{placa}}', '{{concesionario}}', '{{kilometraje}}'],
 };
 
 const AdminConfiguracion = () => {

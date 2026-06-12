@@ -426,10 +426,6 @@ const PublicReserva = () => {
                   <Label className="text-xs">Kilometraje actual</Label>
                   <Input type="number" value={mileage} onChange={e => setMileage(e.target.value)} placeholder="Ej: 25000" className="h-9 text-sm" />
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Notas (opcional)</Label>
-                  <Textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} className="text-sm" placeholder="Describe brevemente el motivo de la cita..." />
-                </div>
               </CardContent>
             </Card>
 
@@ -467,7 +463,6 @@ const PublicReserva = () => {
                   <div className="flex items-center gap-2"><CalendarDays className="w-4 h-4 text-muted-foreground shrink-0" /><span>{selectedDate ? format(selectedDate, "EEEE d 'de' MMMM, yyyy", { locale: es }) : ''}</span></div>
                   <div className="flex items-center gap-2"><Clock className="w-4 h-4 text-muted-foreground shrink-0" /><span>{selectedTime}</span></div>
                   {mileage && <div className="flex items-center gap-2"><Hash className="w-4 h-4 text-muted-foreground shrink-0" /><span>{parseInt(mileage).toLocaleString()} km</span></div>}
-                  {notes.trim() && <div className="text-xs text-muted-foreground bg-muted/50 rounded-md p-2 mt-1">{notes}</div>}
                 </div>
               </CardContent>
             </Card>

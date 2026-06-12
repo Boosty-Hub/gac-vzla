@@ -86,7 +86,7 @@ export function DashboardDateRange({ desde, hasta, onChange }: DashboardDateRang
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className={cn('h-9 text-xs gap-1.5', !isDefault && 'border-primary text-primary')}>
+        <Button variant="outline" size="sm" className={cn('h-9 text-xs gap-1.5', !allTime && 'border-primary text-primary')}>
           <CalendarDays className="w-3.5 h-3.5" />
           {triggerLabel}
         </Button>
@@ -116,9 +116,9 @@ export function DashboardDateRange({ desde, hasta, onChange }: DashboardDateRang
             <Input type="date" value={hasta} onChange={e => onChange(desde, e.target.value)} className="h-8 text-xs" />
           </div>
         </div>
-        {!isDefault && (
-          <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground gap-1" onClick={setLast30}>
-            <X className="w-3 h-3" />Restablecer (30 días)
+        {!allTime && (
+          <Button variant="ghost" size="sm" className="h-7 text-xs w-full text-muted-foreground gap-1" onClick={setAllTime}>
+            <X className="w-3 h-3" />Quitar rango (ver todo el historial)
           </Button>
         )}
       </PopoverContent>

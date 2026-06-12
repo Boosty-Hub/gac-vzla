@@ -46,8 +46,7 @@ Tu cita de servicio ha sido *confirmada* ✅
 {{/vehiculo}}{{#placa}}🔖 *Placa:* {{placa}}
 {{/placa}}{{#concesionario}}📍 *Concesionario:* {{concesionario}}
 {{/concesionario}}{{#kilometraje}}📏 *Kilometraje:* {{kilometraje}} km
-{{/kilometraje}}{{#notas}}📝 *Notas:* {{notas}}
-{{/notas}}
+{{/kilometraje}}
 Te esperamos. Gracias por confiar en nosotros 🙏`;
 
 /**
@@ -99,6 +98,7 @@ export interface WhatsAppReservationParams {
   vehiclePlate?: string;
   dealershipName?: string;
   mileage?: number;
+  /** @deprecated notas are internal-only and are NOT included in the client message. */
   notes?: string;
 }
 
@@ -121,7 +121,7 @@ export async function buildWhatsAppReservationUrlAsync(params: WhatsAppReservati
     placa: params.vehiclePlate || undefined,
     concesionario: params.dealershipName || undefined,
     kilometraje: params.mileage && params.mileage > 0 ? params.mileage.toLocaleString() : undefined,
-    notas: params.notes || undefined,
+    // notas are INTERNAL-only — never sent to the client.
   };
 
   const msg = processTemplate(template, vars);
@@ -146,7 +146,7 @@ export function buildWhatsAppReservationUrl(params: WhatsAppReservationParams): 
     placa: params.vehiclePlate || undefined,
     concesionario: params.dealershipName || undefined,
     kilometraje: params.mileage && params.mileage > 0 ? params.mileage.toLocaleString() : undefined,
-    notas: params.notes || undefined,
+    // notas are INTERNAL-only — never sent to the client.
   };
 
   const msg = processTemplate(DEFAULT_TEMPLATE, vars);

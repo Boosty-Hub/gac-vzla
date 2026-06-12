@@ -31,7 +31,6 @@ const TEMPLATE_VAR_GROUPS: Record<string, { key: string; desc: string }[]> = {
     { key: 'placa', desc: 'Placa del vehículo' },
     { key: 'concesionario', desc: 'Nombre del concesionario' },
     { key: 'kilometraje', desc: 'Kilometraje actual' },
-    { key: 'notas', desc: 'Notas adicionales' },
   ],
   prospect_assigned: [
     { key: 'nombre', desc: 'Nombre del prospecto' },

@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { DashboardDateRange, rangeDescription, last30From, todayIso } from '@/components/DashboardDateRange';
+import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
 
 interface Prospect {
   id: string;
@@ -76,9 +76,9 @@ const DealershipDashboard = () => {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Date range filter — default últimos 30 días (empty range = todo el historial)
-  const [fechaDesde, setFechaDesde] = useState<string>(last30From);
-  const [fechaHasta, setFechaHasta] = useState<string>(todayIso);
+  // Date range filter — default TODO EL HISTORIAL (empty range = sin filtro de fecha)
+  const [fechaDesde, setFechaDesde] = useState<string>('');
+  const [fechaHasta, setFechaHasta] = useState<string>('');
 
   useEffect(() => {
     if (loadingAccess) return;
@@ -251,7 +251,7 @@ const DealershipDashboard = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCard icon={Users} label="Prospectos" value={totalProspects} color="text-blue-600" />
+        <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
         <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600"
           sub={`${ganados} ganados de ${totalProspects}`} />
         <KpiCard icon={CalendarDays} label="Reservas" value={totalReservations} color="text-primary" />

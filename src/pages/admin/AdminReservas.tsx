@@ -1294,8 +1294,8 @@ const AdminReservas = () => {
 
             {/* Notas */}
             <div className="space-y-2">
-              <Label>Notas</Label>
-              <Textarea value={fObs} onChange={e => setFObs(e.target.value)} placeholder="Observaciones adicionales..." rows={2} />
+              <Label>Notas Internas</Label>
+              <Textarea value={fObs} onChange={e => setFObs(e.target.value)} placeholder="Notas internas del equipo GAC (no visibles para el cliente)..." rows={2} />
             </div>
 
             {/* Archivo adjunto */}
@@ -1540,7 +1540,7 @@ const AdminReservas = () => {
               {/* Notes */}
               {detailRes.notes && (
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{detailRes && INCIDENCIA_TYPES.has(detailRes.service_type) ? 'Descripción de la falla' : 'Notas de reserva'}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{detailRes && INCIDENCIA_TYPES.has(detailRes.service_type) ? 'Descripción de la falla' : 'Notas Internas'}</p>
                   <div className="flex gap-1.5">
                     <StickyNote className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
                     <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.notes}</p>

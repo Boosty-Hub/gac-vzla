@@ -542,7 +542,7 @@ const UserPortal = () => {
       reservation_time: editTime,
       service_type: editService,
       current_mileage: parseInt(editMileage) || 0,
-      notes: editNotes.trim() || null,
+      // notes are internal-only — the client never edits them, so do not overwrite.
     }).eq('id', editRes.id);
     if (error) { toast.error('Error al actualizar la cita'); console.error(error); }
     else { toast.success('Cita actualizada'); setEditOpen(false); refreshReservations(); }
@@ -1034,10 +1034,6 @@ const UserPortal = () => {
                     </div>
                   </CardContent>
                 </Card>
-                <div>
-                  <Label>Notas adicionales (opcional)</Label>
-                  <Textarea className="mt-1" placeholder="Describe cualquier detalle adicional..." value={notes} onChange={e => setNotes(e.target.value)} rows={3} />
-                </div>
                 <div className="flex gap-2">
                   <Button variant="outline" className="flex-1" onClick={() => setPaso(2)}>Atrás</Button>
                   <Button className="flex-1 gac-gradient text-primary-foreground" onClick={confirmarReserva} disabled={saving}>
@@ -1141,12 +1137,6 @@ const UserPortal = () => {
                       <Clock className="w-4 h-4 text-muted-foreground shrink-0" />
                       <span>{detailRes.current_mileage.toLocaleString()} km</span>
                     </div>
-                    {detailRes.notes && (
-                      <div className="text-xs text-muted-foreground bg-muted/50 rounded-md p-2.5">
-                        <p className="font-semibold text-foreground mb-1">Notas de la cita</p>
-                        {detailRes.notes}
-                      </div>
-                    )}
                     {detailRes.status === 'completada' && detailRes.service_notes && (
                       <div className="bg-green-50 border border-green-200 rounded-md p-2.5 text-xs">
                         <p className="font-semibold text-green-800 mb-1 flex items-center gap-1">
@@ -1259,10 +1249,6 @@ const UserPortal = () => {
               <div>
                 <Label className="text-xs">Kilometraje Actual</Label>
                 <Input className="mt-1" type="number" value={editMileage} onChange={e => setEditMileage(e.target.value)} />
-              </div>
-              <div>
-                <Label className="text-xs">Notas</Label>
-                <Textarea className="mt-1 text-xs" rows={2} value={editNotes} onChange={e => setEditNotes(e.target.value)} />
               </div>
             </div>
             <DialogFooter>

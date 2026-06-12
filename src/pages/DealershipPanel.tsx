@@ -1098,7 +1098,7 @@ const DealershipPanel = () => {
                   </div>
                   {detailRes.notes && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
-                      <p className="font-semibold mb-1">Notas</p>
+                      <p className="font-semibold mb-1">Notas Internas</p>
                       <p className="text-muted-foreground whitespace-pre-wrap">{detailRes.notes}</p>
                     </div>
                   )}
@@ -1207,7 +1207,7 @@ const DealershipPanel = () => {
                             {h.dealerships && (
                               <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>
                             )}
-                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Notas:</span> {h.notes}</p>}
+                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Notas Internas:</span> {h.notes}</p>}
                             {h.service_notes && (
                               <div className="bg-green-50 border border-green-200 rounded p-1.5">
                                 <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo realizado:</p>
