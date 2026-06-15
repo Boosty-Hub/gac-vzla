@@ -287,6 +287,68 @@ function dealershipNameToKommoId(name: string): number | null {
   return null
 }
 
+// ─── Dealership → Estado de Venezuela ────────────────────────────────────────
+const DEALERSHIP_TO_STATE: Array<{ state: string; keywords: string[] }> = [
+  { state: 'Barinas',     keywords: ['hobby', 'barinas'] },
+  { state: 'Zulia',       keywords: ['meta car', 'zulia'] },
+  { state: 'Falcón',      keywords: ['palma', 'falcón', 'falcon'] },
+  { state: 'Carabobo',    keywords: ['valencia'] },
+  { state: 'Lara',        keywords: ['barquisimeto'] },
+  { state: 'Mérida',      keywords: ['mérida', 'merida'] },
+  { state: 'Bolívar',     keywords: ['puerto ordaz', 'ordaz', 'castillito'] },
+  { state: 'Anzoátegui',  keywords: ['garzas', 'anzoátegui', 'anzoategui', 'lechería', 'lecheria'] },
+  { state: 'Miranda',     keywords: ['guarenas', 'guayabal'] },
+  { state: 'Caracas',     keywords: ['harbin', 'trinidad', 'rosal', 'street boutique', 'florida', 'castellana', 'cerro verde'] },
+]
+
+function dealershipToState(name: string): string | null {
+  const lower = name.toLowerCase()
+  for (const d of DEALERSHIP_TO_STATE) {
+    if (d.keywords.some(k => lower.includes(k))) return d.state
+  }
+  return null
+}
+
+// ─── Vendedor Asignado (select CF 2988736) ───────────────────────────────────
+const VENDEDOR_KOMMO: Record<string, number> = {
+  'elsy bellanger':       7832240,
+  'franklin rodriguez':   7832242,
+  'julio martínez':       7832244,
+  'julio martinez':       7832244,
+  'manuel robles':        7832246,
+  'kodiak peña':          7897720,
+  'kodiak pena':          7897720,
+  'egerlyn sánchez':      7897722,
+  'egerlyn sanchez':      7897722,
+  'arturo silva':         7942378,
+  'miguel medina':        7962802,
+  'hernán argüello':      8008574,
+  'hernan arguello':      8008574,
+  'william morales':      8044212,
+  'moises ramirez':       8128135,
+  'moisés ramírez':       8128135,
+  'genesis giuseppe':     8158965,
+  'génesis giuseppe':     8158965,
+  'valery llanos':        8161093,
+  'yhonny farfán':        8161097,
+  'yhonny farfan':        8161097,
+  'roberto calzadilla':   8165001,
+  'leonardo sosa':        8165003,
+  'walter parra':         8165097,
+  'darwin zambrano':      8165099,
+  'naileth rodriguez':    8165471,
+  'samuel cuarta':        8166159,
+  'marc rondón':          8166161,
+  'marc rondon':          8166161,
+  'pedro tineo':          8166163,
+  'jheanfranco ochoa':    8166203,
+}
+
+function vendedorToKommoId(name: string | null): number | null {
+  if (!name) return null
+  return VENDEDOR_KOMMO[name.toLowerCase().trim()] ?? null
+}
+
 // ─── Build lead custom_fields_values for Kommo ────────────────────────────────
 function buildCustomFields(prospect: Record<string, unknown>, dealershipName?: string) {
   const fields: unknown[] = []
@@ -753,7 +815,7 @@ Deno.serve(async (req) => {
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
           status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
-          client_id, vehicle_id, kommo_lead_id,
+          client_id, vehicle_id, kommo_lead_id, created_by_name,
           clients(full_name, phone, cedula),
           vehicles(plate, year, vehicle_models(name, brand)),
           dealerships(name)
@@ -804,6 +866,9 @@ Deno.serve(async (req) => {
         if (enum_id !== null) resCFs.push({ field_id, values: [{ enum_id }] })
       }
 
+      const brandName = (res.vehicles as { vehicle_models: { brand: string } | null } | null)?.vehicle_models?.brand ?? null
+      const createdByName = (res as unknown as { created_by_name: string | null }).created_by_name ?? null
+
       addResField(CF_RES.supabase_id, res.id)
       addResField(CF_RES.estado_cita, res.status)
       addResField(CF_RES.fecha_cita, res.reservation_date)
@@ -813,8 +878,15 @@ Deno.serve(async (req) => {
       addResField(CF_RES.placa_vehiculo, plate)
       addResField(CF_RES.concesionario_cita, dealershipName)
       if (res.current_mileage) addResField(CF_RES.km_vehiculo, String(res.current_mileage))
-      if (res.notes) addResField(CF_RES.descripcion_inc, res.notes)
+      if (res.notes) {
+        addResField(CF_RES.descripcion_inc, res.notes)
+        addResField(CF.notes, res.notes)  // Observaciones (3192402)
+      }
       addResEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
+      addResEnum(CF.concesionario, dealershipNameToKommoId(dealershipName))  // Concesionario select
+      addResEnum(CF.marca, BRAND_TO_KOMMO[brandName ?? ''] ?? null)           // Marca select
+      addResField(CF.estado_vzla, dealershipToState(dealershipName))          // Estado de Venezuela
+      addResEnum(2988736, vendedorToKommoId(createdByName))                   // Vendedor Asignado select
 
       // ── Find existing Kommo contact to avoid duplicates ──────────────────
       // Priority: 1) prospect with matching phone → get contact from their Ventas lead
@@ -947,6 +1019,7 @@ Deno.serve(async (req) => {
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
           status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
+          created_by_name,
           clients(full_name, phone, cedula),
           vehicles(plate, vehicle_models(name, brand)),
           dealerships(name)
@@ -969,6 +1042,8 @@ Deno.serve(async (req) => {
         (res.vehicles as { vehicle_models: { name: string; brand: string } | null } | null)?.vehicle_models
       const vehicleStr = vehicleModel ? `${vehicleModel.brand} ${vehicleModel.name}` : ''
       const dealershipName = (res.dealerships as { name: string } | null)?.name || ''
+      const brandName2 = vehicleModel?.brand ?? null
+      const createdByName2 = (res as unknown as { created_by_name: string | null }).created_by_name ?? null
 
       const resCFs: unknown[] = []
       const addField = (field_id: number, value: unknown) => {
@@ -988,8 +1063,15 @@ Deno.serve(async (req) => {
       addField(CF_RES.placa_vehiculo, plate)
       addField(CF_RES.concesionario_cita, dealershipName)
       if (res.current_mileage) addField(CF_RES.km_vehiculo, String(res.current_mileage))
-      if (res.notes) addField(CF_RES.descripcion_inc, res.notes)
+      if (res.notes) {
+        addField(CF_RES.descripcion_inc, res.notes)
+        addField(CF.notes, res.notes)  // Observaciones (3192402)
+      }
       addEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
+      addEnum(CF.concesionario, dealershipNameToKommoId(dealershipName))
+      addEnum(CF.marca, BRAND_TO_KOMMO[brandName2 ?? ''] ?? null)
+      addField(CF.estado_vzla, dealershipToState(dealershipName))
+      addEnum(2988736, vendedorToKommoId(createdByName2))
 
       const leadName = `${clientName} - ${res.service_type} ${res.reservation_date}`
 
