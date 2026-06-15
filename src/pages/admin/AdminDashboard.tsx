@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
   MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
-  Star, Wrench, Building2, BarChart2, Sparkles,
+  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
