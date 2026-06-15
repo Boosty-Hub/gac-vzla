@@ -825,7 +825,7 @@ Deno.serve(async (req) => {
 
       if (!res) throw new Error('Reserva no encontrada')
 
-      // Guard: if reservation already has a Kommo lead, just update its stage (no duplicate)
+      // Guard 1: DB — reservation already linked to a Kommo lead
       if (res.kommo_lead_id) {
         const existingStageId = POSTVENTA_STATUS_TO_STAGE[res.status] ?? POSTVENTA_STATUS_TO_STAGE.pendiente
         await fetch(`${baseUrl}/leads/${res.kommo_lead_id}`, {
@@ -835,6 +835,24 @@ Deno.serve(async (req) => {
         return new Response(JSON.stringify({ success: true, kommo_lead_id: res.kommo_lead_id, already_existed: true }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
+      }
+
+      // Guard 2: Kommo — search by supabase_id CF to prevent duplicates if DB is out of sync
+      const kommoSearchRes = await fetch(
+        `${baseUrl}/leads?filter[custom_fields][${CF_RES.supabase_id}]=${encodeURIComponent(res.id)}&limit=1`,
+        { headers: authHeaders }
+      )
+      if (kommoSearchRes.ok && kommoSearchRes.status !== 204) {
+        const kommoSearchData = await kommoSearchRes.json() as Record<string, unknown>
+        const existingLeads = ((kommoSearchData._embedded as Record<string, unknown>)?.leads as Array<{ id: number }>) || []
+        if (existingLeads.length > 0) {
+          const existingLeadId = existingLeads[0].id
+          // Link the DB record to the existing Kommo lead (repair the missing kommo_lead_id)
+          await supabase.from('reservations').update({ kommo_lead_id: existingLeadId }).eq('id', reservation_id)
+          return new Response(JSON.stringify({ success: true, kommo_lead_id: existingLeadId, already_existed: true, repaired: true }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          })
+        }
       }
 
       const clientName =
@@ -1177,6 +1195,43 @@ Deno.serve(async (req) => {
         .neq('status', 'cancelada')
 
       return new Response(JSON.stringify({ created, skipped, failed, remaining: remaining || 0 }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // ── Batch update: re-push all fields for reservations already in Kommo ──────
+    if (action === 'batch_update_reservations') {
+      const batchLimit = Math.min(Number(body.limit) || 20, 50)
+      const offset = Number(body.offset) || 0
+
+      const { data: synced } = await supabase
+        .from('reservations')
+        .select('id, kommo_lead_id')
+        .not('kommo_lead_id', 'is', null)
+        .order('created_at', { ascending: true })
+        .range(offset, offset + batchLimit - 1)
+
+      if (!synced?.length) {
+        return new Response(JSON.stringify({ updated: 0, failed: 0, message: 'Sin reservas para actualizar' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      let updated = 0, failed = 0
+      for (const r of synced) {
+        try {
+          const { error } = await supabase.functions.invoke('kommo-api', {
+            body: { action: 'update_reservation_fields', reservation_id: r.id, kommo_lead_id: r.kommo_lead_id },
+          })
+          if (error) { failed++; console.error(`batch_update: ${r.id} →`, error) }
+          else updated++
+        } catch (e) {
+          failed++
+          console.error(`batch_update: ${r.id} threw`, e)
+        }
+      }
+
+      return new Response(JSON.stringify({ updated, failed, offset, batch_size: synced.length }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
