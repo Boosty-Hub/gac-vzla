@@ -149,6 +149,9 @@ const POSTVENTA_STAGE_TO_STATUS: Record<string, string> = {
   '104022408': 'cancelada',
 }
 
+// Stage that triggers auto-creation of a GAC reservation from a Kommo Post Venta lead
+const POSTVENTA_CREATE_STAGE = '104023216' // "En conversación Cliente/Empresa"
+
 // Custom fields for Post Venta leads (mirrored from kommo-api)
 const CF_RES = {
   supabase_id:        3192400,
@@ -393,9 +396,9 @@ Deno.serve(async (req) => {
                 details: { reservation_id: reservation.id, old_status: reservation.status, new_status: ourStatus },
               })
             }
-          } else {
-            // No matching reservation — auto-create from this Kommo Post Venta lead
-            await autoCreateReservationFromKommo(supabase, parseInt(statusLeadId), ourStatus, authHeaders, baseUrl)
+          } else if (statusId === POSTVENTA_CREATE_STAGE) {
+            // Only auto-create when the lead enters "En conversación Cliente/Empresa"
+            await autoCreateReservationFromKommo(supabase, parseInt(statusLeadId), 'pendiente', authHeaders, baseUrl)
           }
         }
         return new Response('OK', { status: 200 })

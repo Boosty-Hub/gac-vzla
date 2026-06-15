@@ -23,9 +23,15 @@ const CF = {
 
 // ─── Contact custom field IDs in Kommo ───────────────────────────────────────
 const CONTACT_CF = {
-  tipo_persona: 2988986,
-  genero:       3451546,
-  rango_edad:   3451548,
+  tipo_persona:    2988986,
+  genero:          3451546,
+  rango_edad:      3451548,
+  ci_rif:          2988990,  // C.I - RIF
+  estado:          3076676,  // Estado (Venezuela state)
+  modelo_vehiculo: 3454795,  // Modelo de vehículo (Post Venta mirror)
+  km_vehiculo:     3454797,  // Kilometraje (Post Venta mirror)
+  centro_servicio: 3454799,  // Centro de Servicio (Post Venta mirror)
+  placa:           3454801,  // Placa (Post Venta mirror)
 }
 
 // ─── Source mappings ──────────────────────────────────────────────────────────
@@ -325,7 +331,7 @@ function buildCustomFields(prospect: Record<string, unknown>, dealershipName?: s
   return fields
 }
 
-// ─── Build contact custom fields (person_type, gender, age_range) ─────────────
+// ─── Build contact custom fields (person_type, gender, age_range, ci_rif, estado) ──
 function buildContactCustomFields(prospect: Record<string, unknown>) {
   const fields: unknown[] = []
 
@@ -340,7 +346,30 @@ function buildContactCustomFields(prospect: Record<string, unknown>) {
   if (prospect.age_range) {
     fields.push({ field_id: CONTACT_CF.rango_edad, values: [{ value: prospect.age_range }] })
   }
+  if (prospect.cedula) {
+    fields.push({ field_id: CONTACT_CF.ci_rif, values: [{ value: prospect.cedula }] })
+  }
+  if (prospect['Estado de Vnzla']) {
+    fields.push({ field_id: CONTACT_CF.estado, values: [{ value: prospect['Estado de Vnzla'] }] })
+  }
 
+  return fields
+}
+
+// ─── Build contact CFs for Post Venta vehicle data (mirrors reservation) ─────
+function buildVehicleContactFields(
+  vehicleStr: string,
+  plate: string | null,
+  mileage: number | null,
+  dealershipName: string,
+  cedula?: string | null
+) {
+  const fields: unknown[] = []
+  if (vehicleStr) fields.push({ field_id: CONTACT_CF.modelo_vehiculo, values: [{ value: vehicleStr }] })
+  if (plate) fields.push({ field_id: CONTACT_CF.placa, values: [{ value: plate }] })
+  if (mileage) fields.push({ field_id: CONTACT_CF.km_vehiculo, values: [{ value: mileage }] })
+  if (dealershipName) fields.push({ field_id: CONTACT_CF.centro_servicio, values: [{ value: dealershipName }] })
+  if (cedula) fields.push({ field_id: CONTACT_CF.ci_rif, values: [{ value: cedula }] })
   return fields
 }
 
@@ -724,7 +753,7 @@ Deno.serve(async (req) => {
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
           status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
-          client_id, kommo_lead_id,
+          client_id, vehicle_id, kommo_lead_id,
           clients(full_name, phone, cedula),
           vehicles(plate, year, vehicle_models(name, brand)),
           dealerships(name)
@@ -869,6 +898,28 @@ Deno.serve(async (req) => {
       const newLead = leadsArr[0]
       if (newLead?.id) {
         await supabase.from('reservations').update({ kommo_lead_id: newLead.id }).eq('id', reservation_id)
+
+        // PATCH contact with vehicle mirror fields (modelo, placa, km, centro, cedula)
+        const clientCedula = (res.clients as { cedula?: string | null } | null)?.cedula || null
+        const vehicleContactCFs = buildVehicleContactFields(vehicleStr, plate, res.current_mileage || null, dealershipName, clientCedula)
+        if (vehicleContactCFs.length > 0) {
+          let contactId = existingKommoContactId
+          if (!contactId) {
+            const leadGet = await fetch(`${baseUrl}/leads/${newLead.id}?with=contacts`, { headers: authHeaders })
+            if (leadGet.ok) {
+              const leadData = await leadGet.json() as Record<string, unknown>
+              const contacts = ((leadData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
+              contactId = contacts[0]?.id ?? null
+            }
+          }
+          if (contactId) {
+            await fetch(`${baseUrl}/contacts/${contactId}`, {
+              method: 'PATCH', headers: authHeaders,
+              body: JSON.stringify({ custom_fields_values: vehicleContactCFs }),
+            })
+          }
+        }
+
         await supabase.from('integration_logs').insert({
           integration_name: 'kommo', event_type: 'create_reservation',
           status: 'success',
@@ -876,6 +927,7 @@ Deno.serve(async (req) => {
             lead_id: newLead.id, reservation_id, fields: resCFs.length,
             linked_contact: existingKommoContactId,
             contact_source: existingKommoContactId ? 'existing' : 'new',
+            contact_cfs: vehicleContactCFs.length,
           },
         })
       }
@@ -895,7 +947,7 @@ Deno.serve(async (req) => {
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
           status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
-          clients(full_name, phone),
+          clients(full_name, phone, cedula),
           vehicles(plate, vehicle_models(name, brand)),
           dealerships(name)
         `)
@@ -908,6 +960,7 @@ Deno.serve(async (req) => {
         (res.clients as { full_name: string } | null)?.full_name
         || res.walkin_client_name
         || 'Sin nombre'
+      const clientCedula = (res.clients as { cedula?: string | null } | null)?.cedula || null
       const plate =
         (res.vehicles as { plate: string | null } | null)?.plate
         || res.walkin_plate
@@ -945,6 +998,23 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ name: leadName, custom_fields_values: resCFs }),
       })
 
+      // Also PATCH the contact with vehicle mirror fields (modelo, placa, km, centro, cedula)
+      const vehicleContactCFs = buildVehicleContactFields(vehicleStr, plate, res.current_mileage || null, dealershipName, clientCedula)
+      if (vehicleContactCFs.length > 0) {
+        const leadGetRes = await fetch(`${baseUrl}/leads/${kommo_lead_id}?with=contacts`, { headers: authHeaders })
+        if (leadGetRes.ok) {
+          const leadData = await leadGetRes.json() as Record<string, unknown>
+          const contacts = ((leadData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
+          const contactId = contacts[0]?.id
+          if (contactId) {
+            await fetch(`${baseUrl}/contacts/${contactId}`, {
+              method: 'PATCH', headers: authHeaders,
+              body: JSON.stringify({ custom_fields_values: vehicleContactCFs }),
+            })
+          }
+        }
+      }
+
       await supabase.from('integration_logs').insert({
         integration_name: 'kommo', event_type: 'update_reservation_fields',
         status: kommoRes.ok ? 'success' : 'error',
@@ -981,6 +1051,50 @@ Deno.serve(async (req) => {
       })
 
       return new Response(JSON.stringify({ success: kommoRes.ok }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // ── Batch sync: create Kommo leads for reservations without kommo_lead_id ──
+    if (action === 'batch_sync_reservations') {
+      const batchLimit = Math.min(Number(body.limit) || 20, 50)
+
+      const { data: pendingRes } = await supabase
+        .from('reservations')
+        .select('id')
+        .is('kommo_lead_id', null)
+        .neq('status', 'cancelada')
+        .order('created_at', { ascending: true })
+        .limit(batchLimit)
+
+      if (!pendingRes?.length) {
+        return new Response(JSON.stringify({ processed: 0, message: 'Sin reservas pendientes de sync' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      let created = 0, skipped = 0, failed = 0
+
+      for (const r of pendingRes) {
+        try {
+          const { error } = await supabase.functions.invoke('kommo-api', {
+            body: { action: 'create_reservation', reservation_id: r.id },
+          })
+          if (error) { failed++; console.error(`batch_sync: ${r.id} →`, error) }
+          else created++
+        } catch (e) {
+          failed++
+          console.error(`batch_sync: ${r.id} threw`, e)
+        }
+      }
+
+      const { count: remaining } = await supabase
+        .from('reservations')
+        .select('id', { count: 'exact', head: true })
+        .is('kommo_lead_id', null)
+        .neq('status', 'cancelada')
+
+      return new Response(JSON.stringify({ created, skipped, failed, remaining: remaining || 0 }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }

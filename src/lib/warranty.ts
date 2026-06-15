@@ -122,9 +122,8 @@ export function evaluateWarranty(
   }
 
   const servicesExpected = resolved.intervalKm > 0 ? Math.floor(vehicle.mileage / resolved.intervalKm) : 0;
-  if (completedServices < servicesExpected) {
-    violationReasons.push(`Servicios atrasados: ${completedServices}/${servicesExpected} realizados`);
-  }
+  // Service count is informational only — not a warranty voiding condition.
+  // Vehicles often enter the system with existing mileage and no prior tracked service history.
 
   reasons.push(...violationReasons, ...expiryReasons);
 

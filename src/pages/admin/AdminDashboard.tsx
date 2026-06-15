@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
   MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
@@ -220,22 +219,27 @@ const AdminDashboard = () => {
       .sort((a, b) => b.value - a.value);
   }, [prospects]);
 
-  // ─── 10. Eventos — todos los prospectos con event_name (igual que widgets) ───
-  const [eventFilter, setEventFilter] = useState('todos');
-
+  // ─── 10. Eventos — captación por evento ───
   const eventBreakdown = useMemo(() => {
-    const map: Record<string, { total: number; ganados: number }> = {};
+    const map: Record<string, { total: number; ganados: number; perdidos: number }> = {};
     prospects.forEach(p => {
       if (p.event_name) {
-        if (!map[p.event_name]) map[p.event_name] = { total: 0, ganados: 0 };
+        if (!map[p.event_name]) map[p.event_name] = { total: 0, ganados: 0, perdidos: 0 };
         map[p.event_name].total++;
         if (p.status === 'ganado') map[p.event_name].ganados++;
+        if (p.status === 'perdido') map[p.event_name].perdidos++;
       }
     });
     return Object.entries(map)
-      .map(([name, d]) => ({ name, total: d.total, ganados: d.ganados }))
+      .map(([name, d]) => ({ name, total: d.total, ganados: d.ganados, perdidos: d.perdidos }))
       .sort((a, b) => b.total - a.total);
   }, [prospects]);
+
+  const allEventsAggregate = useMemo(() => ({
+    total: eventBreakdown.reduce((s, ev) => s + ev.total, 0),
+    ganados: eventBreakdown.reduce((s, ev) => s + ev.ganados, 0),
+    perdidos: eventBreakdown.reduce((s, ev) => s + ev.perdidos, 0),
+  }), [eventBreakdown]);
 
   // ─── Trend ───
   const dailyTrend = useMemo(() => {
@@ -636,63 +640,77 @@ const AdminDashboard = () => {
       </Card>
 
       {/* ── 10. Captación por evento ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2 space-y-2">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <CalendarDays className="w-4 h-4 text-violet-500" /> Eventos — Captación de Leads
-          </CardTitle>
-          {eventBreakdown.length > 0 && (
-            <Select value={eventFilter} onValueChange={setEventFilter}>
-              <SelectTrigger className="h-8 text-xs w-full">
-                <SelectValue placeholder="Todos los eventos" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="todos">Todos los eventos</SelectItem>
-                {eventBreakdown.map(ev => (
-                  <SelectItem key={ev.name} value={ev.name}>{ev.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </CardHeader>
-        <CardContent className="p-0">
-          {eventBreakdown.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-8">No hay prospectos registrados desde eventos</p>
-          ) : (
-            <div className="divide-y divide-border">
-              {(eventFilter === 'todos' ? eventBreakdown : eventBreakdown.filter(ev => ev.name === eventFilter)).map(ev => (
-                <div
-                  key={ev.name}
-                  className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
-                  onClick={() => navigate(`/admin/prospectos?event_name=${encodeURIComponent(ev.name)}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
-                  title={`Ver ${ev.total} prospectos del evento`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="p-2 rounded-lg bg-violet-50 text-violet-600 shrink-0">
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 pb-1 border-b border-border/60">
+          <CalendarDays className="w-4 h-4 text-violet-500" />
+          <h2 className="text-sm font-display font-semibold">Eventos — Captación de Leads</h2>
+          <span className="text-[10px] text-muted-foreground">prospectos captados en eventos presenciales</span>
+        </div>
+        {eventBreakdown.length === 0 ? (
+          <Card className="gac-shadow">
+            <CardContent className="py-8 text-center">
+              <p className="text-xs text-muted-foreground">No hay prospectos registrados desde eventos</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {/* Todos los eventos — aggregate card */}
+            <Card
+              className="gac-shadow cursor-pointer hover:border-violet-300 hover:shadow-md transition-all border-violet-100 bg-violet-50/30"
+              onClick={() => navigate(`/admin/prospectos?source=evento${fechaDesde ? `&fecha_desde=${fechaDesde}` : ''}${fechaHasta ? `&fecha_hasta=${fechaHasta}` : ''}`)}
+              title="Ver todos los prospectos de eventos"
+            >
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="p-2 rounded-lg bg-violet-100 text-violet-600">
+                    <LayoutGrid className="w-4 h-4" />
+                  </div>
+                  <span className="text-2xl font-bold text-violet-700">{allEventsAggregate.total}</span>
+                </div>
+                <p className="text-xs font-semibold text-violet-800 mb-2">Todos los eventos</p>
+                <div className="flex gap-2 flex-wrap">
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700">
+                    <ArrowUpRight className="w-2.5 h-2.5" />{allEventsAggregate.ganados} ganados
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-red-300 text-red-600">
+                    <ArrowDownRight className="w-2.5 h-2.5" />{allEventsAggregate.perdidos} perdidos
+                  </Badge>
+                </div>
+              </CardContent>
+            </Card>
+            {/* Individual event cards */}
+            {eventBreakdown.map(ev => (
+              <Card
+                key={ev.name}
+                className="gac-shadow cursor-pointer hover:border-violet-200 hover:shadow-md transition-all"
+                onClick={() => navigate(`/admin/prospectos?event_name=${encodeURIComponent(ev.name)}${fechaDesde ? `&fecha_desde=${fechaDesde}` : ''}${fechaHasta ? `&fecha_hasta=${fechaHasta}` : ''}`)}
+                title={`Ver ${ev.total} prospectos del evento`}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="p-2 rounded-lg bg-violet-50 text-violet-500">
                       <CalendarDays className="w-4 h-4" />
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-xs font-semibold truncate">{ev.name}</p>
-                      <p className="text-[10px] text-muted-foreground">Haz clic para ver prospectos</p>
-                    </div>
+                    <span className="text-2xl font-bold">{ev.total}</span>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <div className="text-right">
-                      <p className="text-sm font-bold">{ev.total}</p>
-                      <p className="text-[10px] text-muted-foreground">leads captados</p>
-                    </div>
-                    {ev.ganados > 0 && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700">
-                        <ArrowUpRight className="w-2.5 h-2.5" />{ev.ganados} ganados
-                      </Badge>
+                  <p className="text-xs font-semibold truncate mb-2">{ev.name}</p>
+                  <div className="flex gap-1.5 flex-wrap">
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700">
+                      <ArrowUpRight className="w-2.5 h-2.5" />{ev.ganados}
+                    </Badge>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-red-300 text-red-600">
+                      <ArrowDownRight className="w-2.5 h-2.5" />{ev.perdidos}
+                    </Badge>
+                    {ev.total - ev.ganados - ev.perdidos > 0 && (
+                      <span className="text-[10px] text-muted-foreground">{ev.total - ev.ganados - ev.perdidos} en progreso</span>
                     )}
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* ╔════ SECCIÓN: WIDGETS PERSONALIZADOS ════╗ */}
       <div className="pt-4 mt-4 border-t-2 border-dashed border-primary/30 space-y-4">

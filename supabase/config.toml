@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.login-by-plate]
 verify_jwt = false
+
+[functions.kommo-webhook]
+verify_jwt = false
