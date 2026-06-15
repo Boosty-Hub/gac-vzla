@@ -852,7 +852,7 @@ Deno.serve(async (req) => {
           `${baseUrl}/contacts?query=${encodeURIComponent(clientName)}&limit=5`,
           { headers: authHeaders }
         )
-        if (contactSearch.ok) {
+        if (contactSearch.ok && contactSearch.status !== 204) {
           const searchData = await contactSearch.json() as Record<string, unknown>
           const foundContacts = ((searchData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number; name?: string }>) || []
           // Exact name match preferred
