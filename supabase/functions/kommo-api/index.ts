@@ -1210,7 +1210,9 @@ Deno.serve(async (req) => {
       })
     }
 
-    // ── Notify dealership via WhatsApp when a new reservation is created ────────
+    // ── Notify dealership: ONE persistent lead per dealership, updated per reservation ─
+    // Lead name = dealership name. Each new reservation updates the same lead's CFs.
+    // A stage toggle (buffer → Notificaciones) re-triggers the Kommo Sales Bot.
     if (action === 'notify_dealership_reservation') {
       if (!reservation_id) throw new Error('Falta reservation_id')
 
@@ -1222,21 +1224,28 @@ Deno.serve(async (req) => {
           walkin_client_name, walkin_client_phone, walkin_plate,
           clients(full_name),
           vehicles(plate, vehicle_models(name, brand)),
-          dealerships(id, name, phone, state, kommo_contact_id)
+          dealerships(id, name, phone, state, kommo_contact_id, kommo_notification_lead_id)
         `)
         .eq('id', reservation_id)
         .single()
 
       if (!res) throw new Error('Reserva no encontrada')
 
-      const dealership = res.dealerships as { id: string; name: string; phone: string | null; state: string | null; kommo_contact_id: number | null } | null
+      const dealership = res.dealerships as {
+        id: string;
+        name: string;
+        phone: string | null;
+        state: string | null;
+        kommo_contact_id: number | null;
+        kommo_notification_lead_id: number | null;
+      } | null
+
       if (!dealership?.phone) {
         return new Response(JSON.stringify({ skipped: true, reason: 'dealership has no phone' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
 
-      // Normalize Venezuelan phone → +58XXXXXXXXXX
       const normalizeVzPhone = (raw: string): string => {
         const digits = raw.replace(/\D/g, '')
         if (digits.startsWith('58')) return `+${digits}`
@@ -1249,23 +1258,11 @@ Deno.serve(async (req) => {
       // ── Find or create dealership contact in Kommo ───────────────────────────
       let dealerContactId: number | null = dealership.kommo_contact_id ?? null
 
-      // If we have a stored contact, verify the phone still matches
       if (dealerContactId) {
         const checkRes = await fetch(`${baseUrl}/contacts/${dealerContactId}`, { headers: authHeaders })
-        if (checkRes.ok && checkRes.status !== 204) {
-          const checkData = await checkRes.json() as Record<string, unknown>
-          const phoneCFs = ((checkData.custom_fields_values as Array<{ field_code?: string; values?: Array<{ value: string }> }>) || [])
-            .find(cf => cf.field_code === 'PHONE')
-          const kommoPhone = phoneCFs?.values?.[0]?.value ?? ''
-          if (normalizeVzPhone(kommoPhone) !== normalizedPhone) {
-            dealerContactId = null // phone changed → create new contact
-          }
-        } else {
-          dealerContactId = null // contact not found
-        }
+        if (!checkRes.ok || checkRes.status === 204) dealerContactId = null
       }
 
-      // Search by phone if we don't have a valid contact
       if (!dealerContactId) {
         const phoneSearch = await fetch(
           `${baseUrl}/contacts?query=${encodeURIComponent(normalizedPhone)}&limit=3`,
@@ -1278,16 +1275,12 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Create contact if still not found
       if (!dealerContactId) {
         const createContactRes = await fetch(`${baseUrl}/contacts`, {
           method: 'POST', headers: authHeaders,
           body: JSON.stringify([{
             name: dealership.name,
-            custom_fields_values: [{
-              field_code: 'PHONE',
-              values: [{ value: normalizedPhone, enum_code: 'WORK' }],
-            }],
+            custom_fields_values: [{ field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] }],
           }]),
         })
         if (createContactRes.ok) {
@@ -1296,14 +1289,13 @@ Deno.serve(async (req) => {
         }
       }
 
-      // Persist kommo_contact_id to dealerships table
       if (dealerContactId && dealerContactId !== dealership.kommo_contact_id) {
         await supabase.from('dealerships').update({ kommo_contact_id: dealerContactId }).eq('id', dealership.id)
       }
 
       if (!dealerContactId) throw new Error('No se pudo obtener contacto del concesionario en Kommo')
 
-      // ── Build notification lead CFs (same fields the WhatsApp template uses) ─
+      // ── Build notification CFs with reservation data ───────────────────────────
       const clientName =
         (res.clients as { full_name: string } | null)?.full_name
         || res.walkin_client_name
@@ -1314,6 +1306,7 @@ Deno.serve(async (req) => {
       const vehicleModel =
         (res.vehicles as { vehicle_models: { name: string; brand: string } | null } | null)?.vehicle_models
       const vehicleStr = vehicleModel ? `${vehicleModel.brand} ${vehicleModel.name}` : ''
+      const createdBy = (res as unknown as { created_by_name: string | null }).created_by_name
 
       const notifCFs: unknown[] = []
       const addNotif = (field_id: number, value: unknown) => {
@@ -1326,35 +1319,71 @@ Deno.serve(async (req) => {
       addNotif(CF_RES.vehiculo_cita,      vehicleStr)
       addNotif(CF_RES.placa_vehiculo,     plate)
       addNotif(CF_RES.concesionario_cita, dealership.name)
-      addNotif(CF_RES.supabase_id,        res.id)
+      // NOTE: do NOT stamp supabase_id on the notification lead — it is a permanent
+      // per-dealership lead, not a reservation lead. Stamping it would make it collide
+      // with the real reservation lead in the supabase_id-based duplicate detection.
+      // Client name goes in Observaciones so the dealership sees who the appointment is for
+      addNotif(CF.notes, `Cliente: ${clientName}${res.notes ? ' | ' + res.notes : ''}`)
       if (res.current_mileage) addNotif(CF_RES.km_vehiculo, String(res.current_mileage))
-      const createdBy = (res as unknown as { created_by_name: string | null }).created_by_name
-      if (createdBy) addNotif(3193866, createdBy)  // Vendedor Asignado Act
+      if (createdBy) addNotif(CF.salesperson, createdBy)
 
-      // ── Create notification lead in stage "Notificaciones Concesionarios" ────
-      const notifLead = [{
-        name: clientName,
-        pipeline_id: POSTVENTA_PIPELINE_ID,
-        status_id: 107696308,  // Notificaciones Concesionarios stage
-        custom_fields_values: notifCFs,
-        _embedded: {
-          contacts: [{ id: dealerContactId }],
-          tags: [{ name: 'Notificación Concesionario' }],
-        },
-      }]
+      // ── Ensure ONE persistent notification lead per dealership ─────────────────
+      let notifLeadId: number | null = dealership.kommo_notification_lead_id ?? null
+      let wasCreated = false
 
-      const notifRes = await fetch(`${baseUrl}/leads/complex`, {
-        method: 'POST', headers: authHeaders,
-        body: JSON.stringify(notifLead),
-      })
-
-      if (!notifRes.ok) {
-        const errData = await notifRes.text()
-        throw new Error(`Kommo error al crear lead notificación: ${errData}`)
+      if (notifLeadId) {
+        const checkLead = await fetch(`${baseUrl}/leads/${notifLeadId}`, { headers: authHeaders })
+        if (!checkLead.ok || checkLead.status === 204) notifLeadId = null
       }
 
-      const notifData = await notifRes.json() as Record<string, unknown>
-      const notifLeadId = (notifData as Array<{ id: number }>)?.[0]?.id ?? null
+      if (notifLeadId) {
+        // Update CFs first, then toggle stage to re-trigger the Sales Bot
+        await fetch(`${baseUrl}/leads/${notifLeadId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({ custom_fields_values: notifCFs }),
+        })
+        // Buffer stage (Pendiente) → back to Notificaciones: fires "entered stage" event
+        await fetch(`${baseUrl}/leads/${notifLeadId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({ status_id: POSTVENTA_STATUS_TO_STAGE.pendiente }),
+        })
+        await fetch(`${baseUrl}/leads/${notifLeadId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({ status_id: 107696308 }),
+        })
+      } else {
+        // First reservation for this dealership → create the permanent notification lead
+        const createLeadPayload = [{
+          name: dealership.name,
+          pipeline_id: POSTVENTA_PIPELINE_ID,
+          status_id: 107696308,
+          custom_fields_values: notifCFs,
+          _embedded: {
+            contacts: [{ id: dealerContactId }],
+            tags: [{ name: 'Notificación Concesionario' }],
+          },
+        }]
+
+        const createRes = await fetch(`${baseUrl}/leads/complex`, {
+          method: 'POST', headers: authHeaders,
+          body: JSON.stringify(createLeadPayload),
+        })
+
+        if (!createRes.ok) {
+          const errData = await createRes.text()
+          throw new Error(`Kommo error al crear lead notificación: ${errData}`)
+        }
+
+        const createData = await createRes.json() as Record<string, unknown>
+        notifLeadId = (createData as Array<{ id: number }>)?.[0]?.id ?? null
+        wasCreated = true
+
+        if (notifLeadId) {
+          await supabase.from('dealerships')
+            .update({ kommo_notification_lead_id: notifLeadId })
+            .eq('id', dealership.id)
+        }
+      }
 
       await supabase.from('integration_logs').insert({
         integration_name: 'kommo',
@@ -1366,6 +1395,7 @@ Deno.serve(async (req) => {
           dealership_name: dealership.name,
           dealer_contact_id: dealerContactId,
           notification_lead_id: notifLeadId,
+          action: wasCreated ? 'created' : 'updated',
         },
       })
 
@@ -1373,6 +1403,7 @@ Deno.serve(async (req) => {
         success: true,
         notification_lead_id: notifLeadId,
         dealer_contact_id: dealerContactId,
+        action: wasCreated ? 'created' : 'updated',
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
