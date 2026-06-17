@@ -389,6 +389,7 @@ const DealershipProspectos = () => {
 
       const COLS = [
         { header: 'Nombre',              key: 'nombre',        width: 28 },
+        { header: 'Empresa',             key: 'empresa',       width: 26 },
         { header: 'Teléfono',            key: 'telefono',      width: 18 },
         { header: 'Email',               key: 'email',         width: 30 },
         { header: 'Marca',               key: 'marca',         width: 14 },
@@ -401,6 +402,7 @@ const DealershipProspectos = () => {
         { header: 'Género',              key: 'genero',        width: 12 },
         { header: 'Rango de Edad',       key: 'rango_edad',    width: 16 },
         { header: 'Test Drive',          key: 'test_drive',    width: 12 },
+        { header: 'Show Room',           key: 'show_room',     width: 12 },
         { header: 'Estado',              key: 'estado',        width: 18 },
         { header: 'Notas',               key: 'notas',         width: 45 },
         { header: 'Fecha de Registro',   key: 'fecha',         width: 18 },
@@ -430,6 +432,7 @@ const DealershipProspectos = () => {
         const model = brand ? parts.slice(1).join(' ') : (p.model_interest || '');
         const dataRow = ws.addRow({
           nombre:        p.name,
+          empresa:       p.company_name || '',
           telefono:      p.phone || '',
           email:         p.email || '',
           marca:         brand,
@@ -442,6 +445,7 @@ const DealershipProspectos = () => {
           genero:        p.gender || '',
           rango_edad:    p.age_range || '',
           test_drive:    p.test_drive ? 'Sí' : 'No',
+          show_room:     p.visited_showroom ? 'Sí' : 'No',
           estado:        PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
           notas:         p.notes || '',
           fecha:         new Date(p.created_at).toLocaleDateString('es-VE'),

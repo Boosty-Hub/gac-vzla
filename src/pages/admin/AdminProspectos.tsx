@@ -591,6 +591,7 @@ const AdminProspectos = () => {
       const COLS = [
         { header: 'Concesionario',       key: 'concesionario', width: 30 },
         { header: 'Nombre',              key: 'nombre',        width: 28 },
+        { header: 'Empresa',             key: 'empresa',       width: 26 },
         { header: 'Teléfono',            key: 'telefono',      width: 18 },
         { header: 'Email',               key: 'email',         width: 30 },
         { header: 'Marca',               key: 'marca',         width: 14 },
@@ -603,6 +604,7 @@ const AdminProspectos = () => {
         { header: 'Género',              key: 'genero',        width: 12 },
         { header: 'Rango de Edad',       key: 'rango_edad',    width: 16 },
         { header: 'Test Drive',          key: 'test_drive',    width: 12 },
+        { header: 'Show Room',           key: 'show_room',     width: 12 },
         { header: 'Estado',              key: 'estado',        width: 18 },
         { header: 'Notas',               key: 'notas',         width: 45 },
         { header: 'Fecha de Registro',   key: 'fecha',         width: 18 },
@@ -634,6 +636,7 @@ const AdminProspectos = () => {
         const dataRow = ws.addRow({
           concesionario: p.dealerships?.name || '',
           nombre:        p.name,
+          empresa:       p.company_name || '',
           telefono:      p.phone || '',
           email:         p.email || '',
           marca:         brand,
@@ -646,6 +649,7 @@ const AdminProspectos = () => {
           genero:        p.gender || '',
           rango_edad:    p.age_range || '',
           test_drive:    p.test_drive ? 'Sí' : 'No',
+          show_room:     p.visited_showroom ? 'Sí' : 'No',
           estado:        PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
           notas:         p.notes || '',
           fecha:         new Date(p.created_at).toLocaleDateString('es-VE'),
