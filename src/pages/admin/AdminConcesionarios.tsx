@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2, Trash2, Navigation, X, Power, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { syncKommoDealershipContact } from '@/lib/kommo';
 import { toast } from 'sonner';
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
@@ -181,6 +182,8 @@ const AdminConcesionarios = () => {
         toast.success('Concesionario actualizado');
         setDialogOpen(false);
         fetchDealerships();
+        // Keep the Kommo contact phone in sync so WhatsApp notifications hit the new number
+        syncKommoDealershipContact(editing.id).catch(console.error);
       }
     } else {
       const { error } = await supabase.from('dealerships').insert(payload);

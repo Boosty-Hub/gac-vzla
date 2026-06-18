@@ -63,6 +63,14 @@ export async function updateKommoReservationFields(
   if (error) console.error('[Kommo] Error actualizando campos de reserva:', error)
 }
 
+// Push the dealership's current phone to its Kommo contact (call after editing a dealership)
+export async function syncKommoDealershipContact(dealershipId: string): Promise<void> {
+  const { error } = await supabase.functions.invoke('kommo-api', {
+    body: { action: 'sync_dealership_contact', dealership_id: dealershipId },
+  })
+  if (error) console.error('[Kommo] Error sincronizando teléfono del concesionario:', error)
+}
+
 // Overwrite all matching fields in Kommo with current GAC values (true bidirectional sync)
 export async function updateKommoLeadFields(
   prospectId: string,
