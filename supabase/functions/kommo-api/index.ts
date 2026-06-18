@@ -1507,7 +1507,7 @@ Deno.serve(async (req) => {
       // This is naturally idempotent and immune to pagination drift on re-runs.
       const { data: clients } = await supabase
         .from('clients')
-        .select('id, full_name, cedula, phone, email, "IdContactKommo", kommo_conversation_lead_id')
+        .select('id, full_name, cedula, phone, email, state, "IdContactKommo", kommo_conversation_lead_id')
         .is('kommo_conversation_lead_id', null)
         .order('id', { ascending: true })
         .limit(batchLimit)
@@ -1534,12 +1534,14 @@ Deno.serve(async (req) => {
           const phone = cl.phone ? normalizeVzPhone(String(cl.phone)) : null
           const cedula = (cl.cedula as string | null) || null
           const email = (cl.email as string | null) || null
+          const estado = (cl.state as string | null) || null
           const name = (cl.full_name as string | null) || 'Cliente'
 
           const contactCFs: unknown[] = []
           if (cedula) contactCFs.push({ field_id: CONTACT_CF.ci_rif, values: [{ value: cedula }] })
           if (phone) contactCFs.push({ field_code: 'PHONE', values: [{ value: phone, enum_code: 'WORK' }] })
           if (email) contactCFs.push({ field_code: 'EMAIL', values: [{ value: email, enum_code: 'WORK' }] })
+          if (estado) contactCFs.push({ field_id: CONTACT_CF.estado, values: [{ value: estado }] })
 
           // 1) Dedup the contact (CI-RIF → phone → email)
           const match = await findExistingContact(baseUrl, authHeaders, { ciRif: cedula, phone, email })
