@@ -254,6 +254,15 @@ const CENTRO_SERVICIO_KOMMO: Array<{ id: number; keywords: string[] }> = [
   { id: 7832610, keywords: ['puerto ordaz', 'ordaz'] },
 ]
 
+// Normalize a Venezuelan phone to E.164-ish (+58...) for Kommo / WhatsApp.
+function normalizeVzPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('58')) return `+${digits}`
+  if (digits.startsWith('0')) return `+58${digits.slice(1)}`
+  if (digits.length === 10) return `+58${digits}`
+  return `+${digits}`
+}
+
 function dealershipToCentroServicioId(name: string): number | null {
   const lower = name.toLowerCase()
   for (const c of CENTRO_SERVICIO_KOMMO) {
@@ -446,6 +455,55 @@ function extractCFText(cfValues: CFValue[], fieldId: number): string | null {
 
 function extractCFEnumId(cfValues: CFValue[], fieldId: number): number | null {
   return cfValues.find(f => f.field_id === fieldId)?.values?.[0]?.enum_id ?? null
+}
+
+// ─── Unified contact dedup search ─────────────────────────────────────────────
+// GAC search order to locate an existing client/contact before create/update:
+//   1) C.I - RIF  2) Teléfono Oficina  3) Email  4) Placa
+const PHONE_CF_ID = 2988356  // Teléfono (multitext, enum WORK = Oficina)
+const EMAIL_CF_ID = 2988358  // Email (multitext)
+
+type KommoContactMatch = { id: number; _embedded?: { leads?: Array<{ id: number }> } }
+
+// Full-text search Kommo contacts by `value`, then keep only the contact whose
+// custom field `fieldId` actually equals that value (avoids loose query matches).
+async function searchContactByValue(
+  baseUrl: string,
+  authHeaders: Record<string, string>,
+  value: string | null | undefined,
+  fieldId: number,
+): Promise<KommoContactMatch | null> {
+  const q = String(value ?? '').trim()
+  if (!q) return null
+  const res = await fetch(
+    `${baseUrl}/contacts?query=${encodeURIComponent(q)}&with=leads&limit=10`,
+    { headers: authHeaders },
+  )
+  if (!res.ok || res.status === 204) return null
+  const data = await res.json() as Record<string, unknown>
+  const contacts = ((data._embedded as Record<string, unknown>)?.contacts as Array<Record<string, unknown>>) || []
+  const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
+  const target = norm(q)
+  for (const c of contacts) {
+    const cfs = (c.custom_fields_values as Array<{ field_id: number; values: Array<{ value: unknown }> }>) || []
+    const f = cfs.find(x => x.field_id === fieldId)
+    if (f && (f.values || []).some(v => norm(v.value) === target)) return c as KommoContactMatch
+  }
+  return null
+}
+
+// Returns the first matching Kommo contact following the GAC dedup order.
+async function findExistingContact(
+  baseUrl: string,
+  authHeaders: Record<string, string>,
+  keys: { ciRif?: string | null; phone?: string | null; email?: string | null; placa?: string | null },
+): Promise<KommoContactMatch | null> {
+  return (
+    (await searchContactByValue(baseUrl, authHeaders, keys.ciRif, CONTACT_CF.ci_rif)) ||
+    (await searchContactByValue(baseUrl, authHeaders, keys.phone, PHONE_CF_ID)) ||
+    (await searchContactByValue(baseUrl, authHeaders, keys.email, EMAIL_CF_ID)) ||
+    (await searchContactByValue(baseUrl, authHeaders, keys.placa, CONTACT_CF.placa))
+  )
 }
 
 // ─── syncFromKommo: fill empty fields in GAC from Kommo ───────────────────────
@@ -814,9 +872,9 @@ Deno.serve(async (req) => {
         .from('reservations')
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
-          status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
+          status, notes, internal_notes, walkin_client_name, walkin_client_phone, walkin_plate,
           client_id, vehicle_id, kommo_lead_id, created_by_name,
-          clients(full_name, phone, cedula),
+          clients(full_name, phone, cedula, email),
           vehicles(plate, year, vehicle_models(name, brand)),
           dealerships(name)
         `)
@@ -896,10 +954,8 @@ Deno.serve(async (req) => {
       addResField(CF_RES.placa_vehiculo, plate)
       addResField(CF_RES.concesionario_cita, dealershipName)
       if (res.current_mileage) addResField(CF_RES.km_vehiculo, String(res.current_mileage))
-      if (res.notes) {
-        addResField(CF_RES.descripcion_inc, res.notes)
-        addResField(CF.notes, res.notes)  // Observaciones (3192402)
-      }
+      if (res.notes) addResField(CF_RES.descripcion_inc, res.notes)  // Descripción de incidencia (visible)
+      if (res.internal_notes) addResField(CF.notes, res.internal_notes)  // Observaciones / notas internas GAC (3192402)
       addResEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
       addResEnum(CF.concesionario, dealershipNameToKommoId(dealershipName))  // Concesionario select
       addResEnum(CF.marca, BRAND_TO_KOMMO[brandName ?? ''] ?? null)           // Marca select
@@ -907,13 +963,19 @@ Deno.serve(async (req) => {
       addResEnum(2988736, vendedorToKommoId(createdByName))                   // Vendedor Asignado select
 
       // ── Find existing Kommo contact to avoid duplicates ──────────────────
-      // Priority: 1) prospect with matching phone → get contact from their Ventas lead
-      //           2) search Kommo contacts by name
-      //           3) create new contact
+      // GAC dedup order: 1) C.I-RIF  2) Teléfono Oficina  3) Email  4) Placa
+      // Fallbacks (legacy): prospect with matching phone → Ventas lead contact, then name search.
       let existingKommoContactId: number | null = null
       const searchPhone = clientPhone
+      const clientCedula = (res.clients as { cedula?: string | null } | null)?.cedula || null
+      const clientEmail = (res.clients as { email?: string | null } | null)?.email || null
 
-      if (searchPhone) {
+      const dedupContact = await findExistingContact(baseUrl, authHeaders, {
+        ciRif: clientCedula, phone: clientPhone, email: clientEmail, placa: plate,
+      })
+      existingKommoContactId = dedupContact?.id ?? null
+
+      if (!existingKommoContactId && searchPhone) {
         // Look for a prospect with the same phone that already has a kommo_lead_id
         const { data: matchedProspect } = await supabase
           .from('prospects')
@@ -990,7 +1052,6 @@ Deno.serve(async (req) => {
         await supabase.from('reservations').update({ kommo_lead_id: newLead.id }).eq('id', reservation_id)
 
         // PATCH contact with vehicle mirror fields (modelo, placa, km, centro, cedula)
-        const clientCedula = (res.clients as { cedula?: string | null } | null)?.cedula || null
         const vehicleContactCFs = buildVehicleContactFields(vehicleStr, plate, res.current_mileage || null, dealershipName, clientCedula)
         if (vehicleContactCFs.length > 0) {
           let contactId = existingKommoContactId
@@ -1047,7 +1108,7 @@ Deno.serve(async (req) => {
         .from('reservations')
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
-          status, notes, walkin_client_name, walkin_client_phone, walkin_plate,
+          status, notes, internal_notes, walkin_client_name, walkin_client_phone, walkin_plate,
           created_by_name,
           clients(full_name, phone, cedula),
           vehicles(plate, vehicle_models(name, brand)),
@@ -1092,10 +1153,8 @@ Deno.serve(async (req) => {
       addField(CF_RES.placa_vehiculo, plate)
       addField(CF_RES.concesionario_cita, dealershipName)
       if (res.current_mileage) addField(CF_RES.km_vehiculo, String(res.current_mileage))
-      if (res.notes) {
-        addField(CF_RES.descripcion_inc, res.notes)
-        addField(CF.notes, res.notes)  // Observaciones (3192402)
-      }
+      if (res.notes) addField(CF_RES.descripcion_inc, res.notes)  // Descripción de incidencia (visible)
+      if (res.internal_notes) addField(CF.notes, res.internal_notes)  // Observaciones / notas internas GAC (3192402)
       addEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
       addEnum(CF.concesionario, dealershipNameToKommoId(dealershipName))
       addEnum(CF.marca, BRAND_TO_KOMMO[brandName2 ?? ''] ?? null)
@@ -1246,13 +1305,6 @@ Deno.serve(async (req) => {
         })
       }
 
-      const normalizeVzPhone = (raw: string): string => {
-        const digits = raw.replace(/\D/g, '')
-        if (digits.startsWith('58')) return `+${digits}`
-        if (digits.startsWith('0')) return `+58${digits.slice(1)}`
-        if (digits.length === 10) return `+58${digits}`
-        return `+${digits}`
-      }
       const normalizedPhone = normalizeVzPhone(dealership.phone)
 
       // ── Find or create dealership contact in Kommo ───────────────────────────
@@ -1442,6 +1494,206 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ updated, failed, offset, batch_size: synced.length }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
+    }
+
+    // ── Migrate GAC clients into Post Venta "En conversación Cliente/Empresa" ───
+    // Batched + idempotent. Dedup contact by CI-RIF → phone → email; reuse the
+    // existing contact (never duplicate), then attach one conversation lead.
+    if (action === 'migrate_clients') {
+      const batchLimit = Math.min(Number(body.limit) || 25, 60)
+      const CONVERSATION_STAGE = 104023216
+
+      // Always pull the next slice of NOT-yet-migrated clients (stable by id).
+      // This is naturally idempotent and immune to pagination drift on re-runs.
+      const { data: clients } = await supabase
+        .from('clients')
+        .select('id, full_name, cedula, phone, email, "IdContactKommo", kommo_conversation_lead_id')
+        .is('kommo_conversation_lead_id', null)
+        .order('id', { ascending: true })
+        .limit(batchLimit)
+
+      if (!clients?.length) {
+        return new Response(JSON.stringify({ done: true, processed: 0 }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      const normalizeVzPhone = (raw: string): string => {
+        const digits = raw.replace(/\D/g, '')
+        if (digits.startsWith('58')) return `+${digits}`
+        if (digits.startsWith('0')) return `+58${digits.slice(1)}`
+        if (digits.length === 10) return `+58${digits}`
+        return `+${digits}`
+      }
+
+      let created = 0, linked = 0, skipped = 0, failed = 0
+      for (const cl of clients as Array<Record<string, unknown>>) {
+        try {
+          if (cl.kommo_conversation_lead_id) { skipped++; continue }
+
+          const phone = cl.phone ? normalizeVzPhone(String(cl.phone)) : null
+          const cedula = (cl.cedula as string | null) || null
+          const email = (cl.email as string | null) || null
+          const name = (cl.full_name as string | null) || 'Cliente'
+
+          const contactCFs: unknown[] = []
+          if (cedula) contactCFs.push({ field_id: CONTACT_CF.ci_rif, values: [{ value: cedula }] })
+          if (phone) contactCFs.push({ field_code: 'PHONE', values: [{ value: phone, enum_code: 'WORK' }] })
+          if (email) contactCFs.push({ field_code: 'EMAIL', values: [{ value: email, enum_code: 'WORK' }] })
+
+          // 1) Dedup the contact (CI-RIF → phone → email)
+          const match = await findExistingContact(baseUrl, authHeaders, { ciRif: cedula, phone, email })
+          let contactId = match?.id ?? (cl.IdContactKommo ? Number(cl.IdContactKommo) : null)
+
+          if (contactId) {
+            // Ensure identifiers exist on the contact, then attach conversation lead
+            if (contactCFs.length) {
+              await fetch(`${baseUrl}/contacts/${contactId}`, {
+                method: 'PATCH', headers: authHeaders,
+                body: JSON.stringify({ custom_fields_values: contactCFs }),
+              }).catch(() => {})
+            }
+            const createRes = await fetch(`${baseUrl}/leads/complex`, {
+              method: 'POST', headers: authHeaders,
+              body: JSON.stringify([{
+                name, pipeline_id: POSTVENTA_PIPELINE_ID, status_id: CONVERSATION_STAGE,
+                _embedded: { contacts: [{ id: contactId }], tags: [{ name: 'Cliente GAC' }] },
+              }]),
+            })
+            const cd = await createRes.json() as Array<{ id: number }>
+            await supabase.from('clients').update({
+              IdContactKommo: String(contactId),
+              kommo_conversation_lead_id: cd?.[0]?.id ?? null,
+            }).eq('id', cl.id as string)
+            linked++
+          } else {
+            // Create contact + lead together
+            const createRes = await fetch(`${baseUrl}/leads/complex`, {
+              method: 'POST', headers: authHeaders,
+              body: JSON.stringify([{
+                name, pipeline_id: POSTVENTA_PIPELINE_ID, status_id: CONVERSATION_STAGE,
+                _embedded: {
+                  contacts: [{ name, custom_fields_values: contactCFs }],
+                  tags: [{ name: 'Cliente GAC' }],
+                },
+              }]),
+            })
+            const cd = await createRes.json() as Array<{ id: number; contact_id?: number }>
+            await supabase.from('clients').update({
+              IdContactKommo: cd?.[0]?.contact_id ? String(cd[0].contact_id) : null,
+              kommo_conversation_lead_id: cd?.[0]?.id ?? null,
+            }).eq('id', cl.id as string)
+            created++
+          }
+        } catch (e) {
+          failed++
+          console.error(`migrate_clients ${cl.id}:`, e)
+        }
+      }
+
+      return new Response(JSON.stringify({
+        processed: clients.length, created, linked, skipped, failed,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    }
+
+    // ── Pre-create the permanent notification lead for every dealership that has
+    //    a phone but no lead yet (so the Sales Bot is wired before the 1st reservation).
+    if (action === 'precreate_dealership_leads') {
+      const { data: dealers } = await supabase
+        .from('dealerships')
+        .select('id, name, phone, kommo_contact_id, kommo_notification_lead_id')
+        .is('kommo_notification_lead_id', null)
+        .not('phone', 'is', null)
+
+      let created = 0, failed = 0
+      const results: Array<Record<string, unknown>> = []
+      for (const d of (dealers || []) as Array<Record<string, unknown>>) {
+        try {
+          const normalizedPhone = normalizeVzPhone(String(d.phone))
+          let contactId = (d.kommo_contact_id as number | null) ?? null
+          if (!contactId) {
+            const createContactRes = await fetch(`${baseUrl}/contacts`, {
+              method: 'POST', headers: authHeaders,
+              body: JSON.stringify([{
+                name: d.name,
+                custom_fields_values: [{ field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] }],
+              }]),
+            })
+            const cData = await createContactRes.json() as Record<string, unknown>
+            contactId = ((cData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>)?.[0]?.id ?? null
+          }
+          if (!contactId) { failed++; continue }
+
+          const createRes = await fetch(`${baseUrl}/leads/complex`, {
+            method: 'POST', headers: authHeaders,
+            body: JSON.stringify([{
+              name: d.name, pipeline_id: POSTVENTA_PIPELINE_ID, status_id: 107696308,
+              _embedded: { contacts: [{ id: contactId }], tags: [{ name: 'Notificación Concesionario' }] },
+            }]),
+          })
+          const cd = await createRes.json() as Array<{ id: number }>
+          const leadId = cd?.[0]?.id ?? null
+          await supabase.from('dealerships').update({
+            kommo_contact_id: contactId, kommo_notification_lead_id: leadId,
+          }).eq('id', d.id as string)
+          created++
+          results.push({ dealership: d.name, contact_id: contactId, lead_id: leadId })
+        } catch (e) {
+          failed++
+          console.error(`precreate_dealership_leads ${d.id}:`, e)
+        }
+      }
+
+      return new Response(JSON.stringify({ created, failed, results }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // ── Push the dealership phone to its Kommo contact (call after editing it) ──
+    if (action === 'sync_dealership_contact') {
+      const dealershipId = body.dealership_id
+      if (!dealershipId) throw new Error('Falta dealership_id')
+
+      const { data: d } = await supabase
+        .from('dealerships')
+        .select('id, name, phone, kommo_contact_id')
+        .eq('id', dealershipId)
+        .single()
+
+      if (!d) throw new Error('Concesionario no encontrado')
+      if (!d.phone) {
+        return new Response(JSON.stringify({ skipped: true, reason: 'sin teléfono' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      // No Kommo contact yet → it will be created with the current phone on the first
+      // reservation / precreate, so there is nothing to sync here.
+      if (!d.kommo_contact_id) {
+        return new Response(JSON.stringify({ skipped: true, reason: 'sin contacto en Kommo aún' }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      const normalizedPhone = normalizeVzPhone(d.phone)
+      const patchRes = await fetch(`${baseUrl}/contacts/${d.kommo_contact_id}`, {
+        method: 'PATCH', headers: authHeaders,
+        body: JSON.stringify({
+          custom_fields_values: [
+            { field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] },
+          ],
+        }),
+      })
+
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo',
+        event_type: 'sync_dealership_contact',
+        status: patchRes.ok ? 'success' : 'error',
+        details: { dealership_id: d.id, contact_id: d.kommo_contact_id, phone: normalizedPhone },
+      })
+
+      return new Response(JSON.stringify({
+        success: patchRes.ok, contact_id: d.kommo_contact_id, phone: normalizedPhone,
+      }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     return new Response(JSON.stringify({ error: 'Acción desconocida' }), {
