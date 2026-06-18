@@ -62,6 +62,7 @@ interface Reservation {
   current_mileage: number;
   status: string;
   notes: string | null;
+  internal_notes: string | null;
   service_notes: string | null;
   technical_report_url: string | null;
   satisfaction_rating: number | null;
@@ -474,7 +475,7 @@ const AdminReservas = () => {
     setFService(r.service_type);
     setFMileage(String(r.current_mileage));
     setFStatus(r.status);
-    setFNotes(r.notes || ''); setFObs('');
+    setFNotes(r.notes || ''); setFObs(r.internal_notes || '');
     setTechnicalReportUrl(r.technical_report_url || null);
     setClientResults([]);
     // Trigger vehicle fetch
@@ -519,7 +520,8 @@ const AdminReservas = () => {
       service_type: fService,
       current_mileage: parseInt(fMileage) || 0,
       status: fStatus,
-      notes: [fNotes.trim(), fObs.trim()].filter(Boolean).join('\n') || null,
+      notes: fNotes.trim() || null,
+      internal_notes: fObs.trim() || null,
       technical_report_url: technicalReportUrl || null,
     };
 
@@ -1540,13 +1542,24 @@ const AdminReservas = () => {
                 )}
               </div>
 
-              {/* Notes */}
-              {detailRes.notes && (
+              {/* Descripción de la incidencia (visible/normal) */}
+              {detailRes.notes && INCIDENCIA_TYPES.has(detailRes.service_type) && (
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{detailRes && INCIDENCIA_TYPES.has(detailRes.service_type) ? 'Descripción de la falla' : 'Notas Internas'}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Descripción de la falla</p>
                   <div className="flex gap-1.5">
                     <StickyNote className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
                     <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.notes}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Notas Internas (solo equipo GAC) */}
+              {detailRes.internal_notes && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Notas Internas</p>
+                  <div className="flex gap-1.5">
+                    <StickyNote className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
+                    <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.internal_notes}</p>
                   </div>
                 </div>
               )}

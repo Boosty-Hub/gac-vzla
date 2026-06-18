@@ -41,6 +41,7 @@ interface Reservation {
   current_mileage: number;
   status: string;
   notes: string | null;
+  internal_notes: string | null;
   walkin_client_name: string | null;
   walkin_client_phone: string | null;
   walkin_plate: string | null;
@@ -94,6 +95,7 @@ interface HistoryRecord {
   current_mileage: number;
   status: string;
   notes: string | null;
+  internal_notes: string | null;
   service_notes: string | null;
   technical_report_url: string | null;
   completed_at: string | null;
@@ -481,7 +483,8 @@ const DealershipReservas = () => {
         dealership_id: selectedDealership,
         reservation_date: fDate, reservation_time: fTime, service_type: fService,
         current_mileage: parseInt(fMileage) || 0,
-        notes: [fNotes.trim(), fObs.trim()].filter(Boolean).join('\n') || null,
+        notes: fNotes.trim() || null,
+        internal_notes: fObs.trim() || null,
         technical_report_url: createTechReportUrl || null,
         ...assign,
       };
@@ -501,7 +504,8 @@ const DealershipReservas = () => {
       dealership_id: selectedDealership,
       reservation_date: fDate, reservation_time: fTime, service_type: fService,
       current_mileage: parseInt(fMileage) || 0,
-      notes: [fNotes.trim(), fObs.trim()].filter(Boolean).join('\n') || null,
+      notes: fNotes.trim() || null,
+      internal_notes: fObs.trim() || null,
       status: 'pendiente',
       technical_report_url: createTechReportUrl || null,
       created_by_name: creatorName,
@@ -565,7 +569,7 @@ const DealershipReservas = () => {
       if (veh) setVehicleDetail(veh as unknown as VehicleDetail);
       const { data: history } = await supabase
         .from('reservations')
-        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name)')
+        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, internal_notes, service_notes, technical_report_url, completed_at, dealerships(name)')
         .eq('vehicle_id', r.vehicle_id).neq('id', r.id)
         .order('reservation_date', { ascending: false }).order('reservation_time', { ascending: false }).limit(50);
       setVehicleHistory((history || []) as unknown as HistoryRecord[]);
@@ -584,7 +588,7 @@ const DealershipReservas = () => {
     setFTime(r.reservation_time?.slice(0, 5) || '09:00');
     setFMileage(String(r.current_mileage || 0));
     setFNotes(r.notes || '');
-    setFObs('');
+    setFObs(r.internal_notes || '');
     setFIncMediaUrls(r.technical_report_url || null);
     setDetailOpen(false);
     setCreateOpen(true);
@@ -620,7 +624,7 @@ const DealershipReservas = () => {
     setFTime(r.reservation_time?.slice(0, 5) || '09:00');
     setFMileage(String(r.current_mileage || 0));
     setFNotes(r.notes || '');
-    setFObs('');
+    setFObs(r.internal_notes || '');
     setCreateTechReportUrl(r.technical_report_url || null);
     // Open the dialog up front so it reacts instantly, even if the vehicle fetch is slow.
     setDetailOpen(false);
@@ -995,10 +999,16 @@ const DealershipReservas = () => {
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
                     {detailRes.current_mileage > 0 && <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>}
                   </div>
-                  {detailRes.notes && (
+                  {detailRes.notes && isInc && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
-                      <p className="font-semibold mb-1">{isInc ? 'Descripción de la falla' : 'Notas Internas'}</p>
+                      <p className="font-semibold mb-1">Descripción de la falla</p>
                       <p className="text-muted-foreground whitespace-pre-wrap">{detailRes.notes}</p>
+                    </div>
+                  )}
+                  {detailRes.internal_notes && (
+                    <div className="bg-muted/50 rounded-md p-2.5 text-xs">
+                      <p className="font-semibold mb-1">Notas Internas</p>
+                      <p className="text-muted-foreground whitespace-pre-wrap">{detailRes.internal_notes}</p>
                     </div>
                   )}
                   {detailRes.status === 'completada' && detailRes.service_notes && (
@@ -1106,7 +1116,8 @@ const DealershipReservas = () => {
                               <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
                             </div>
                             {h.dealerships && <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>}
-                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">{hIsInc ? 'Falla:' : 'Notas Internas:'}</span> {h.notes}</p>}
+                            {hIsInc && h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Falla:</span> {h.notes}</p>}
+                            {h.internal_notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Notas Internas:</span> {h.internal_notes}</p>}
                             {h.service_notes && (
                               <div className="bg-green-50 border border-green-200 rounded p-1.5">
                                 <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo:</p>
