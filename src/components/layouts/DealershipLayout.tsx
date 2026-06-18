@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
 import NotificationCenter from '@/components/NotificationCenter';
+import ProspectReminderPopup from '@/components/ProspectReminderPopup';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -188,6 +189,7 @@ export default function DealershipLayout({ children }: DealershipLayoutProps) {
         </header>
         <main className="flex-1 p-6">{children}</main>
       </SidebarInset>
+      <ProspectReminderPopup />
     </SidebarProvider>
   );
 }
