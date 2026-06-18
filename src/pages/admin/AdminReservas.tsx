@@ -1289,13 +1289,11 @@ const AdminReservas = () => {
               </div>
             </div>
 
-            {/* Descripción de la incidencia */}
-            {INCIDENCIA_TYPES.has(fService) && (
-              <div className="space-y-2">
-                <Label>Descripción de la incidencia</Label>
-                <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." rows={3} />
-              </div>
-            )}
+            {/* Descripción de la incidencia / servicio — siempre visible */}
+            <div className="space-y-2">
+              <Label>Descripción de la incidencia</Label>
+              <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} placeholder="Describa la falla, desperfecto o tipo de servicio solicitado..." rows={3} />
+            </div>
 
             {/* Notas */}
             <div className="space-y-2">
