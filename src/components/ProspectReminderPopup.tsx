@@ -83,6 +83,13 @@ export default function ProspectReminderPopup() {
 
   if (!open) return null;
 
+  // Navigate to the prospects module filtered to this prospect (by name) so the
+  // vendedor lands right on it. DealershipProspectos seeds its search from ?q=.
+  const goToProspect = (name: string) => {
+    setOpen(false);
+    navigate(`/concesionario/prospectos?q=${encodeURIComponent(name)}`);
+  };
+
   const statusLabel = (s: string) => statuses.find(st => st.name === s)?.label || s;
   const urgentes = stale.filter(s => s.priority === 'urgente').length;
   const altas = stale.filter(s => s.priority === 'alta').length;
@@ -107,7 +114,11 @@ export default function ProspectReminderPopup() {
 
           <div className="max-h-[320px] overflow-y-auto divide-y rounded-md border">
             {stale.map(p => (
-              <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2">
+              <button
+                key={p.id}
+                onClick={() => goToProspect(p.name)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-muted/60"
+              >
                 <div className="min-w-0">
                   <p className="text-sm font-medium truncate">{p.name}</p>
                   <p className="text-[11px] text-muted-foreground flex items-center gap-1">
@@ -115,11 +126,14 @@ export default function ProspectReminderPopup() {
                     {statusLabel(p.status)} · hace {p.days} día{p.days === 1 ? '' : 's'} sin cambios
                   </p>
                 </div>
-                <Badge className={cn('text-[10px] px-1.5 py-0 shrink-0',
-                  p.priority === 'urgente' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800')}>
-                  {p.priority === 'urgente' ? 'Urgente revisar' : 'Prioridad alta'}
-                </Badge>
-              </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <Badge className={cn('text-[10px] px-1.5 py-0',
+                    p.priority === 'urgente' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800')}>
+                    {p.priority === 'urgente' ? 'Urgente revisar' : 'Prioridad alta'}
+                  </Badge>
+                  <ArrowRight className="w-3.5 h-3.5 text-muted-foreground" />
+                </div>
+              </button>
             ))}
           </div>
         </div>

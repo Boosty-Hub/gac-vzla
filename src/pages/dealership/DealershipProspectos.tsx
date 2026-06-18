@@ -113,7 +113,7 @@ const DealershipProspectos = () => {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [prosSearch, setProsSearch] = useState('');
+  const [prosSearch, setProsSearch] = useState(() => searchParams.get('q') || '');
   const [prosStatusFilter, setProsStatusFilter] = useState('todos');
   const [prosSourceFilter, setProsSourceFilter] = useState(() => searchParams.get('source') || 'todos');
   const [prosEstadoVzlaFilter, setProsEstadoVzlaFilter] = useState('todos');
