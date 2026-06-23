@@ -263,6 +263,16 @@ function normalizeVzPhone(raw: string): string {
   return `+${digits}`
 }
 
+// Strip accent marks from vowels (keeps ñ/Ñ) so WhatsApp templates render clean.
+// Accented characters were showing up garbled in the dealership notification message.
+function stripAccents(s: string): string {
+  return s
+    .replace(/[áàäâã]/g, 'a').replace(/[éèëê]/g, 'e').replace(/[íìïî]/g, 'i')
+    .replace(/[óòöôõ]/g, 'o').replace(/[úùüû]/g, 'u')
+    .replace(/[ÁÀÄÂÃ]/g, 'A').replace(/[ÉÈËÊ]/g, 'E').replace(/[ÍÌÏÎ]/g, 'I')
+    .replace(/[ÓÒÖÔÕ]/g, 'O').replace(/[ÚÙÜÛ]/g, 'U')
+}
+
 function dealershipToCentroServicioId(name: string): number | null {
   const lower = name.toLowerCase()
   for (const c of CENTRO_SERVICIO_KOMMO) {
@@ -1362,12 +1372,17 @@ Deno.serve(async (req) => {
 
       const notifCFs: unknown[] = []
       const addNotif = (field_id: number, value: unknown) => {
-        if (value !== null && value !== undefined && value !== '')
-          notifCFs.push({ field_id, values: [{ value }] })
+        if (value === null || value === undefined || value === '') return
+        // Strip accents on text so the WhatsApp template renders clean (no garbled chars).
+        const clean = typeof value === 'string' ? stripAccents(value) : value
+        notifCFs.push({ field_id, values: [{ value: clean }] })
       }
       addNotif(CF_RES.fecha_cita,         res.reservation_date)
       addNotif(CF_RES.hora_cita,          res.reservation_time)
       addNotif(CF_RES.servicio_cita,      res.service_type)
+      // The WhatsApp template reads "Servicio a Realizar" (2989056), a different field than
+      // "Servicio de la Cita" (3417657). Fill both so the [Servicio a Realizar] token resolves.
+      addNotif(CF_RES.servicio_realizar,  res.service_type)
       addNotif(CF_RES.vehiculo_cita,      vehicleStr)
       addNotif(CF_RES.placa_vehiculo,     plate)
       addNotif(CF_RES.concesionario_cita, dealership.name)
