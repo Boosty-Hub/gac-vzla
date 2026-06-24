@@ -12,6 +12,7 @@ const CF = {
   salesperson:             3193866,
   notes:                   3192402,
   estado_vzla:             3204218,
+  payment_modality:        3455411,  // "Modalidad de Pago" (text)
   event_name:              3448828,  // "Nombre del Evento" (select)
   fuente:                  2988728,
   marca:                   2988724,
@@ -387,6 +388,7 @@ function buildCustomFields(prospect: Record<string, unknown>, dealershipName?: s
   addText(CF.salesperson, prospect.salesperson)
   addText(CF.notes, prospect.notes)
   addText(CF.estado_vzla, prospect['Estado de Vnzla'])
+  addText(CF.payment_modality, prospect.payment_modality)
 
   // event_name → select enum (CF 3448828)
   addEnum(CF.event_name, eventNameToKommoEnumId(String(prospect.event_name || '')))
@@ -606,6 +608,7 @@ async function syncToKommo(
   addIfEmpty(CF.salesperson, prospect.salesperson)
   addIfEmpty(CF.notes, prospect.notes)
   addIfEmpty(CF.estado_vzla, prospect['Estado de Vnzla'])
+  addIfEmpty(CF.payment_modality, prospect.payment_modality)
   addEnumIfEmpty(CF.event_name, eventNameToKommoEnumId(String(prospect.event_name || '')))
   addEnumIfEmpty(CF.fuente, SOURCE_TO_KOMMO[prospect.source] ?? null)
 
@@ -761,9 +764,20 @@ Deno.serve(async (req) => {
       const stageId = (config.stage_mappings as Record<string, number>)[new_status]
       if (!stageId) throw new Error(`Sin mapeo para status: ${new_status}`)
 
+      // When closing the lead as lost, include the loss reason so Kommo records why
+      // the lead was lost. The lost stage id is derived from the config mapping so it
+      // stays correct if the mapping changes. loss_reason_id is optional and only
+      // forwarded for the "perdido" stage.
+      const lostStageId = (config.stage_mappings as Record<string, number>)['perdido']
+      const lossReasonId = body.loss_reason_id as number | undefined
+      const stagePayload: Record<string, unknown> = { status_id: stageId }
+      if (stageId === lostStageId && typeof lossReasonId === 'number') {
+        stagePayload.loss_reason_id = lossReasonId
+      }
+
       const kommoRes = await fetch(`${baseUrl}/leads/${kommo_lead_id}`, {
         method: 'PATCH', headers: authHeaders,
-        body: JSON.stringify({ status_id: stageId }),
+        body: JSON.stringify(stagePayload),
       })
       const kommoData = await kommoRes.json()
 
@@ -771,7 +785,12 @@ Deno.serve(async (req) => {
         integration_name: 'kommo', event_type: 'update_stage',
         prospect_id: prospect_id || null, kommo_lead_id,
         status: kommoRes.ok ? 'success' : 'error',
-        details: { new_status, stage_id: stageId },
+        details: {
+          new_status, stage_id: stageId,
+          ...(stagePayload.loss_reason_id !== undefined
+            ? { loss_reason_id: stagePayload.loss_reason_id }
+            : {}),
+        },
       })
 
       if (kommoRes.ok && prospect_id) {
@@ -779,6 +798,68 @@ Deno.serve(async (req) => {
       }
 
       return new Response(JSON.stringify({ success: kommoRes.ok }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    // ── Sync loss reasons from Kommo → prospect_loss_reasons ──────────────────
+    // Pulls the catalog of "loss reasons" configured in Kommo and upserts them so
+    // the UI can offer the same options when closing a prospect as lost. Runs
+    // server-side in Deno, so accents are preserved as-is (do NOT strip accents).
+    if (action === 'sync_loss_reasons') {
+      const lossRes = await fetch(`${baseUrl}/leads/loss_reasons`, { headers: authHeaders })
+
+      if (!lossRes.ok) {
+        const errText = await lossRes.text()
+        await supabase.from('integration_logs').insert({
+          integration_name: 'kommo', event_type: 'sync_loss_reasons',
+          status: 'error', details: { http_status: lossRes.status, error: errText },
+        })
+        throw new Error(`Kommo API error (loss_reasons): ${errText}`)
+      }
+
+      const lossData = await lossRes.json() as Record<string, unknown>
+      const embedded = lossData._embedded as Record<string, unknown> | undefined
+      const reasons = (embedded?.loss_reasons as Array<{ id: number; name: string; sort?: number }>) || []
+
+      const rows = reasons.map((r) => ({
+        kommo_loss_reason_id: r.id,
+        name: r.name,
+        sort_order: typeof r.sort === 'number' ? r.sort : 0,
+        is_active: true,
+      }))
+
+      let upserted = 0
+      if (rows.length > 0) {
+        const { error: upsertError } = await supabase
+          .from('prospect_loss_reasons')
+          .upsert(rows, { onConflict: 'kommo_loss_reason_id' })
+        if (upsertError) {
+          await supabase.from('integration_logs').insert({
+            integration_name: 'kommo', event_type: 'sync_loss_reasons',
+            status: 'error', details: { stage: 'upsert', error: upsertError.message },
+          })
+          throw new Error(`Supabase upsert error (loss_reasons): ${upsertError.message}`)
+        }
+        upserted = rows.length
+
+        // Deactivate any local reason that no longer comes from Kommo. Filter to
+        // currently active rows first so already-inactive rows are not rewritten on
+        // every run.
+        const keepIds = rows.map((r) => r.kommo_loss_reason_id)
+        await supabase
+          .from('prospect_loss_reasons')
+          .update({ is_active: false })
+          .eq('is_active', true)
+          .not('kommo_loss_reason_id', 'in', `(${keepIds.join(',')})`)
+      }
+
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'sync_loss_reasons',
+        status: 'success', details: { fetched: reasons.length, upserted },
+      })
+
+      return new Response(JSON.stringify({ success: true, fetched: reasons.length, upserted }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
@@ -1285,6 +1366,9 @@ Deno.serve(async (req) => {
     if (action === 'notify_dealership_reservation') {
       if (!reservation_id) throw new Error('Falta reservation_id')
 
+      // Wrap the whole notification flow so failures are recorded instead of being
+      // swallowed by the top-level catch. This lets us measure the notification gap.
+      try {
       const { data: res } = await supabase
         .from('reservations')
         .select(`
@@ -1372,7 +1456,14 @@ Deno.serve(async (req) => {
 
       const notifCFs: unknown[] = []
       const addNotif = (field_id: number, value: unknown) => {
-        if (value === null || value === undefined || value === '') return
+        // This is a single permanent per-dealership lead that gets overwritten on every
+        // reservation. If we skipped empty values, the field would keep the data from the
+        // PREVIOUS reservation (e.g. a stale plate/vehicle). So for empty/null we still send
+        // an empty string to CLEAR the field in Kommo instead of leaving phantom data.
+        if (value === null || value === undefined || value === '') {
+          notifCFs.push({ field_id, values: [{ value: '' }] })
+          return
+        }
         // Strip accents on text so the WhatsApp template renders clean (no garbled chars).
         const clean = typeof value === 'string' ? stripAccents(value) : value
         notifCFs.push({ field_id, values: [{ value: clean }] })
@@ -1391,8 +1482,10 @@ Deno.serve(async (req) => {
       // with the real reservation lead in the supabase_id-based duplicate detection.
       // Client name goes in Observaciones so the dealership sees who the appointment is for
       addNotif(CF.notes, `Cliente: ${clientName}${res.notes ? ' | ' + res.notes : ''}`)
-      if (res.current_mileage) addNotif(CF_RES.km_vehiculo, String(res.current_mileage))
-      if (createdBy) addNotif(CF.salesperson, createdBy)
+      // Always call addNotif so empty values clear the field (avoid stale data from the
+      // previous reservation on this permanent per-dealership lead).
+      addNotif(CF_RES.km_vehiculo, res.current_mileage ? String(res.current_mileage) : '')
+      addNotif(CF.salesperson, createdBy || '')
 
       // ── Ensure ONE persistent notification lead per dealership ─────────────────
       let notifLeadId: number | null = dealership.kommo_notification_lead_id ?? null
@@ -1472,6 +1565,21 @@ Deno.serve(async (req) => {
         dealer_contact_id: dealerContactId,
         action: wasCreated ? 'created' : 'updated',
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+      } catch (notifyErr) {
+        // Record the failure so the notification gap is observable in integration_logs.
+        await supabase.from('integration_logs').insert({
+          integration_name: 'kommo',
+          event_type: 'notify_dealership_error',
+          status: 'error',
+          details: {
+            reservation_id,
+            error: (notifyErr as Error).message,
+          },
+        })
+        return new Response(JSON.stringify({ error: (notifyErr as Error).message }), {
+          status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
     }
 
     // ── Batch update: re-push all fields for reservations already in Kommo ──────
