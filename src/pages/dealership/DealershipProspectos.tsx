@@ -970,8 +970,15 @@ const DealershipProspectos = () => {
     const isOwn = !!ownName && (p.salesperson || '') === ownName;
     // Vendedor/salesperson roles only edit their own prospects; otherwise read-only.
     const readOnly = (isVendedor || isSalesperson) ? !isOwn : false;
+    // Close the duplicate alert AND the create modal beneath it before opening the
+    // edit view. Both are Radix modals; reopening the same modal while they tear
+    // down races with its onOpenChange (which clears editingProspect via
+    // setDialogOpen(false)), so the edit dialog would never appear ("no me lleva").
+    // Defer the open one tick so it lands on a clean state.
     setDuplicateProspect(null);
-    openEditDialog(p, readOnly);
+    setDialogOpenRaw(false);
+    setEditingProspect(null);
+    setTimeout(() => openEditDialog(p, readOnly), 0);
   };
 
   const toggleProspectFlag = async (id: string, field: 'test_drive' | 'visited_showroom', value: boolean) => {
