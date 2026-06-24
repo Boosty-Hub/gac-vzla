@@ -33,6 +33,7 @@ const AdminEventos = () => {
     const { data } = await supabase
       .from('prospect_events' as any)
       .select('*')
+      .order('is_active', { ascending: false })
       .order('sort_order')
       .order('name');
     setEvents((data || []) as unknown as ProspectEvent[]);
