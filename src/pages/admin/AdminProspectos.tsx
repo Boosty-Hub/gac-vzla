@@ -13,12 +13,13 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ResponsiveModal, ResponsiveModalHeader, ResponsiveModalTitle, ResponsiveModalFooter } from '@/components/ui/responsive-modal';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag, ChevronUp, ChevronDown, ChevronsUpDown, SlidersHorizontal } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag, ChevronUp, ChevronDown, ChevronsUpDown, SlidersHorizontal, Filter } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -36,6 +37,7 @@ import ProspectEventManager from '@/components/ProspectEventManager';
 import { useProspectEvents } from '@/hooks/useProspectEvents';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
+import { phonesMatch } from '@/lib/phone';
 
 
 interface Dealership {
@@ -64,6 +66,7 @@ interface Prospect {
   gender: string | null;
   age_range: string | null;
   company_name: string | null;
+  payment_modality: string | null;
   created_at: string;
   updated_at: string;
   dealerships: { name: string } | null;
@@ -82,13 +85,18 @@ const AGE_RANGES: { value: string; label: string }[] = [
   { value: '30-40', label: '30 a 40' },
   { value: '40+', label: '40 o más' },
 ];
+// Stored as display values in Spanish ('Contado' | 'Financiamiento')
+const PAYMENT_MODALITIES: { value: string; label: string }[] = [
+  { value: 'Contado', label: 'Contado' },
+  { value: 'Financiamiento', label: 'Financiamiento' },
+];
 
 
 const FALLBACK_STATUS = { id: '', name: 'unknown', label: 'Desconocido', color: 'bg-gray-100 text-gray-800', sort_order: 0, is_active: true };
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
-type ColKey = 'concesionario' | 'nombre' | 'empresa' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'showroom' | 'estado' | 'fecha';
+type ColKey = 'concesionario' | 'nombre' | 'empresa' | 'telefono' | 'email' | 'marca' | 'modelo' | 'fuente' | 'evento' | 'vendedor' | 'estadovzla' | 'tipopersona' | 'genero' | 'edad' | 'testdrive' | 'showroom' | 'modalidadPago' | 'estado' | 'fecha';
 const COL_LABELS: Record<ColKey, string> = {
   concesionario: 'Concesionario',
   nombre: 'Nombre',
@@ -106,6 +114,7 @@ const COL_LABELS: Record<ColKey, string> = {
   edad: 'Edad',
   testdrive: 'Test Drive',
   showroom: 'Show Room',
+  modalidadPago: 'Modalidad de pago',
   estado: 'Estado',
   fecha: 'Fecha',
 };
@@ -147,6 +156,9 @@ const AdminProspectos = () => {
   const [fechaHasta, setFechaHasta] = useState(() => searchParams.get('fecha_hasta') || '');
   const [eventNameFilter, setEventNameFilter] = useState(() => searchParams.get('event_name') || 'todos');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(() =>
+    ['dealership', 'source', 'salesperson', 'event_name', 'fecha_desde', 'fecha_hasta'].some(k => searchParams.get(k))
+  );
 
   // Clear URL params after reading them on mount (so they don't persist on manual filter changes)
   useEffect(() => {
@@ -154,7 +166,7 @@ const AdminProspectos = () => {
   }, []);
 
   // Column visibility
-  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(new Set(ALL_COLS));
+  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(new Set(ALL_COLS.filter(c => c !== 'evento' && c !== 'modalidadPago')));
   const toggleCol = (col: ColKey) => setVisibleCols(prev => { const s = new Set(prev); s.has(col) ? s.delete(col) : s.add(col); return s; });
 
   // Create/Edit dialog — persisted in sessionStorage to survive navigation
@@ -183,6 +195,7 @@ const AdminProspectos = () => {
   const [pPersonType, setPPersonType] = useState<string>(() => getSS().pPersonType || '');
   const [pGender, setPGender] = useState<string>(() => getSS().pGender || '');
   const [pAgeRange, setPAgeRange] = useState<string>(() => getSS().pAgeRange || '');
+  const [pPaymentModality, setPPaymentModality] = useState<string>(() => getSS().pPaymentModality || '');
 
   const setDialogOpen = (open: boolean) => {
     setDialogOpenRaw(open);
@@ -198,9 +211,9 @@ const AdminProspectos = () => {
       return;
     }
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pCompanyName, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pDealership, pName, pPhone, pEmail, pCompanyName, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange, pPaymentModality }));
     } catch {}
-  }, [dialogOpen, editing, pDealership, pName, pPhone, pEmail, pCompanyName, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
+  }, [dialogOpen, editing, pDealership, pName, pPhone, pEmail, pCompanyName, pBrand, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange, pPaymentModality]);
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -209,7 +222,7 @@ const AdminProspectos = () => {
   // Import XLSX
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; dealership: string; notes: string; salesperson: string; event_name: string; fecha: string; test_drive: boolean; person_type: string; gender: string; age_range: string; errors: string[] }>>([]);
+  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; dealership: string; notes: string; salesperson: string; event_name: string; fecha: string; test_drive: boolean; person_type: string; gender: string; age_range: string; payment_modality: string; errors: string[] }>>([]);
   const [importing, setImporting] = useState(false);
   const [importDealership, setImportDealership] = useState('');
 
@@ -340,6 +353,7 @@ const AdminProspectos = () => {
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
     setPEventName(''); setPEstadoVzla('');
     setPTestDrive(false); setPShowroom(false); setPPersonType(''); setPGender(''); setPAgeRange('');
+    setPPaymentModality('');
   };
 
   const openCreate = () => {
@@ -376,6 +390,7 @@ const AdminProspectos = () => {
     setPPersonType(p.person_type || '');
     setPGender(p.gender || '');
     setPAgeRange(p.age_range || '');
+    setPPaymentModality(p.payment_modality || '');
     setDialogOpen(true);
   };
 
@@ -399,21 +414,58 @@ const AdminProspectos = () => {
     gender: pGender || null,
     age_range: pAgeRange || null,
     company_name: pCompanyName.trim() || null,
+    payment_modality: pPaymentModality || null,
   });
 
-  const checkDuplicatePhone = async (phone: string, excludeId?: string): Promise<boolean> => {
-    const normalized = phone.replace(/\D/g, '');
-    if (!normalized) return false;
-    const { data } = await supabase.from('prospects').select('id, name, phone').not('phone', 'is', null);
-    const duplicate = (data || []).find((p: any) => {
-      if (excludeId && p.id === excludeId) return false;
-      return p.phone.replace(/\D/g, '') === normalized;
-    });
-    if (duplicate) {
-      toast.error(`Ya existe un prospecto con ese teléfono: ${duplicate.name}`);
-      return true;
+  type DuplicateMatch = { id: string; name: string; phone: string | null; salesperson: string | null };
+
+  const checkDuplicatePhone = async (
+    phone: string,
+    excludeId?: string,
+  ): Promise<DuplicateMatch | null> => {
+    if (!phone.replace(/\D/g, '')) return null;
+    // Supabase devuelve máx. 1000 filas por request; paginamos para revisar TODOS
+    // los prospectos con teléfono (hay >1000) y no perder duplicados antiguos.
+    const pageSize = 1000;
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from('prospects')
+        .select('id, name, phone, salesperson')
+        .not('phone', 'is', null)
+        .range(from, from + pageSize - 1);
+      if (error || !data || data.length === 0) break;
+      const duplicate = (data as any[]).find((p) => {
+        if (excludeId && p.id === excludeId) return false;
+        return phonesMatch(p.phone, phone);
+      });
+      if (duplicate) return duplicate as DuplicateMatch;
+      if (data.length < pageSize) break;
     }
-    return false;
+    return null;
+  };
+
+  const showDuplicateToast = (dup: DuplicateMatch) => {
+    const managedBy = dup.salesperson?.trim() || 'sin vendedor asignado';
+    toast.error(`Este cliente está siendo gestionado por ${managedBy}`, {
+      action: {
+        label: 'Ver',
+        onClick: async () => {
+          // Nunca abrir el detalle con el objeto parcial DuplicateMatch: editarlo
+          // guardaría campos vacíos sobre el prospecto real (corrupción de datos).
+          // Buscamos el prospecto COMPLETO por id antes de abrir el detalle.
+          const { data, error } = await supabase
+            .from('prospects')
+            .select('*, dealerships(name)')
+            .eq('id', dup.id)
+            .single();
+          if (error || !data) {
+            toast.error('No se pudo cargar el prospecto');
+            return;
+          }
+          openDetail(data as Prospect);
+        },
+      },
+    });
   };
 
   const doSave = async () => {
@@ -421,8 +473,8 @@ const AdminProspectos = () => {
     const payload = buildPayload();
     if (editing) {
       if (payload.phone) {
-        const isDuplicate = await checkDuplicatePhone(payload.phone, editing.id);
-        if (isDuplicate) { setSaving(false); return; }
+        const duplicate = await checkDuplicatePhone(payload.phone, editing.id);
+        if (duplicate) { showDuplicateToast(duplicate); setSaving(false); return; }
       }
       const { error } = await supabase.from('prospects').update(payload).eq('id', editing.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
@@ -440,8 +492,8 @@ const AdminProspectos = () => {
       }
     } else {
       if (payload.phone) {
-        const isDuplicate = await checkDuplicatePhone(payload.phone);
-        if (isDuplicate) { setSaving(false); return; }
+        const duplicate = await checkDuplicatePhone(payload.phone);
+        if (duplicate) { showDuplicateToast(duplicate); setSaving(false); return; }
       }
       const { data: inserted, error } = await supabase.from('prospects').insert(payload).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
@@ -605,6 +657,7 @@ const AdminProspectos = () => {
         { header: 'Rango de Edad',       key: 'rango_edad',    width: 16 },
         { header: 'Test Drive',          key: 'test_drive',    width: 12 },
         { header: 'Show Room',           key: 'show_room',     width: 12 },
+        { header: 'Modalidad de pago',   key: 'modalidad_pago', width: 20 },
         { header: 'Estado',              key: 'estado',        width: 18 },
         { header: 'Notas',               key: 'notas',         width: 45 },
         { header: 'Fecha de Registro',   key: 'fecha',         width: 18 },
@@ -650,6 +703,7 @@ const AdminProspectos = () => {
           rango_edad:    p.age_range || '',
           test_drive:    p.test_drive ? 'Sí' : 'No',
           show_room:     p.visited_showroom ? 'Sí' : 'No',
+          modalidad_pago: p.payment_modality || '',
           estado:        PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
           notas:         p.notes || '',
           fecha:         new Date(p.created_at).toLocaleDateString('es-VE'),
@@ -687,14 +741,14 @@ const AdminProspectos = () => {
     const headers = [
       'nombre', 'telefono', 'email', 'marca', 'modelo',
       'fuente', 'estado', 'notas', 'vendedor', 'nombre_evento', 'fecha',
-      'test_drive', 'tipo_persona', 'genero', 'rango_edad',
+      'test_drive', 'tipo_persona', 'genero', 'rango_edad', 'modalidad_pago',
     ];
     const example = [
       'Juan Pérez', '+58 412 1234567', 'juan@email.com', 'GAC', 'GS4',
       PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
       PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
       'Interesado en SUV', 'Carlos Gómez', '', '2026-04-07',
-      'si', 'natural', 'masculino', '30-40',
+      'si', 'natural', 'masculino', '30-40', 'Contado',
     ];
     const validSources = PROSPECT_SOURCES.map(s => `${s.value} = ${s.label}`).join('\n');
     const validStatuses = PROSPECT_STATUSES.map(s => `${s.name} = ${s.label}`).join('\n');
@@ -718,6 +772,7 @@ const AdminProspectos = () => {
       ['- tipo_persona: natural / juridica'],
       ['- genero: masculino / femenino'],
       ['- rango_edad: 20-30 / 30-40 / 40+'],
+      ['- modalidad_pago: Contado / Financiamiento (opcional)'],
       ['- No modificar los encabezados de la primera hoja'],
     ];
 
@@ -741,6 +796,7 @@ const AdminProspectos = () => {
       { wch: 14 }, // tipo_persona
       { wch: 12 }, // genero
       { wch: 12 }, // rango_edad
+      { wch: 18 }, // modalidad_pago
     ];
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
 
@@ -795,6 +851,14 @@ const AdminProspectos = () => {
           if (age_range && !['20-30','30-40','40+'].includes(age_range)) {
             errors.push(`Rango de edad inválido: "${age_range}"`); age_range = '';
           }
+          // Optional: normalize to canonical display values 'Contado' / 'Financiamiento'
+          let payment_modality = String(row['modalidad_pago'] ?? '').trim();
+          if (payment_modality) {
+            const pmLower = payment_modality.toLowerCase();
+            if (pmLower === 'contado') payment_modality = 'Contado';
+            else if (pmLower === 'financiamiento') payment_modality = 'Financiamiento';
+            else { errors.push(`Modalidad de pago inválida: "${payment_modality}"`); payment_modality = ''; }
+          }
 
           // Validar y formatear fecha
           if (fecha) {
@@ -832,7 +896,7 @@ const AdminProspectos = () => {
           if (!status) status = VALID_STATUSES[0] || 'nuevo';
           if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email inválido');
 
-          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, dealership: '', notes, salesperson, event_name, fecha, test_drive, person_type, gender, age_range, errors });
+          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, dealership: '', notes, salesperson, event_name, fecha, test_drive, person_type, gender, age_range, payment_modality, errors });
         });
         setImportRows(rows);
         setImportOpen(true);
@@ -876,6 +940,7 @@ const AdminProspectos = () => {
         person_type: r.person_type || null,
         gender: r.gender || null,
         age_range: r.age_range || null,
+        payment_modality: r.payment_modality || null,
         created_at: r.fecha || undefined, // Usar fecha del Excel si existe
       };
     });
@@ -1013,40 +1078,64 @@ const AdminProspectos = () => {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 min-w-0">
+        <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-lg font-display font-bold">Prospectos</h1>
           <Badge variant="outline" className="gap-1 text-xs">
             <Users className="w-3 h-3" /> {prospects.length}
           </Badge>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button size="sm" variant="outline" onClick={() => setStatusManagerOpen(true)} className="gap-1">
-            <Settings2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Estados</span>
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setSalespersonManagerOpen(true)} className="gap-1">
-            <UserCog className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Vendedores</span>
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setModelManagerOpen(true)} className="gap-1">
-            <Car className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Modelos</span>
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setSourceManagerOpen(true)} className="gap-1">
-            <MapPin className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Tipos contacto</span>
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => setEventManagerOpen(true)} className="gap-1">
-            <CalendarDays className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Eventos</span>
-          </Button>
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
+          {/* Management actions grouped */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className="gap-1">
+                <Settings2 className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Gestionar</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Gestionar</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setStatusManagerOpen(true)}>
+                <Settings2 className="w-3.5 h-3.5 mr-2" /> Estados
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setSalespersonManagerOpen(true)}>
+                <UserCog className="w-3.5 h-3.5 mr-2" /> Vendedores
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setModelManagerOpen(true)}>
+                <Car className="w-3.5 h-3.5 mr-2" /> Modelos
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setSourceManagerOpen(true)}>
+                <MapPin className="w-3.5 h-3.5 mr-2" /> Tipos contacto
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setEventManagerOpen(true)}>
+                <CalendarDays className="w-3.5 h-3.5 mr-2" /> Eventos
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {canCreate && (
             <>
-              <Button size="sm" variant="outline" onClick={exportToXLSX} className="gap-1 hidden sm:flex">
-                <Download className="w-3.5 h-3.5" /> Exportar
-              </Button>
-              <Button size="sm" variant="outline" onClick={downloadTemplate} className="gap-1 hidden sm:flex">
-                <FileText className="w-3.5 h-3.5" /> Plantilla
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} className="gap-1 hidden sm:flex">
-                <Upload className="w-3.5 h-3.5" /> Importar XLSX
-              </Button>
+              {/* Import/Export grouped */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline" className="gap-1">
+                    <Download className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Importar/Exportar</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>Importar / Exportar</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={exportToXLSX}>
+                    <Download className="w-3.5 h-3.5 mr-2" /> Exportar
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={downloadTemplate}>
+                    <FileText className="w-3.5 h-3.5 mr-2" /> Plantilla
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+                    <Upload className="w-3.5 h-3.5 mr-2" /> Importar XLSX
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <input ref={fileInputRef} type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} />
               <Button size="sm" variant="outline" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/prospectos`); toast.success('Enlace copiado al portapapeles'); }} className="gap-1">
                 <ExternalLink className="w-3.5 h-3.5" /> <span className="hidden sm:inline">Landing</span>
@@ -1102,6 +1191,19 @@ const AdminProspectos = () => {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input placeholder="Buscar..." className="pl-8 h-8 text-xs" value={search} onChange={e => { setSearch(e.target.value); setCurrentPage(1); }} />
             </div>
+            {/* Filtros toggle */}
+            {(() => {
+              const activeFiltersCount = [dealershipFilter, statusFilter, sourceFilter, eventNameFilter, salespersonFilter, estadoVzlaFilter, testDriveFilter, personTypeFilter, genderFilter, ageRangeFilter].filter(v => v !== 'todos').length + (fechaDesde || fechaHasta ? 1 : 0);
+              return (
+                <Button variant="outline" size="sm" className={cn("h-8 text-xs shrink-0 gap-1.5", (showFilters || activeFiltersCount > 0) && "border-primary text-primary")} onClick={() => setShowFilters(p => !p)}>
+                  <Filter className="w-3.5 h-3.5" />
+                  Filtros
+                  {activeFiltersCount > 0 && <Badge className="h-4 w-4 p-0 flex items-center justify-center text-[10px] bg-primary text-white">{activeFiltersCount}</Badge>}
+                </Button>
+              );
+            })()}
+            {showFilters && (
+            <>
             <div className="flex flex-col gap-0.5 shrink-0">
               <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Concesionario</span>
               <Select value={dealershipFilter} onValueChange={v => { setDealershipFilter(v); setCurrentPage(1); }}>
@@ -1191,6 +1293,8 @@ const AdminProspectos = () => {
                 </Button>
               );
             })()}
+            </>
+            )}
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 shrink-0"><SlidersHorizontal className="w-3.5 h-3.5" /> Columnas</Button>
@@ -1214,7 +1318,7 @@ const AdminProspectos = () => {
             )}
           </div>
           {/* ── Filtros avanzados (colapsable) ── */}
-          {showAdvancedFilters && (
+          {showFilters && showAdvancedFilters && (
             <div className="flex flex-wrap gap-1.5 items-end pt-1 border-t border-dashed border-border">
               <div className="flex flex-col gap-0.5 shrink-0">
                 <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Estado Venezuela</span>
@@ -1315,6 +1419,7 @@ const AdminProspectos = () => {
                   {visibleCols.has('estadovzla') && <TableHead>Estado Vzla</TableHead>}
                   {visibleCols.has('testdrive') && <TableHead className="text-center" title="Test Drive">TD</TableHead>}
                   {visibleCols.has('showroom') && <TableHead className="text-center" title="Visitó Show Room">SR</TableHead>}
+                  {visibleCols.has('modalidadPago') && <TableHead>Modalidad de pago</TableHead>}
                   {visibleCols.has('tipopersona') && <TableHead>Tipo</TableHead>}
                   {visibleCols.has('genero') && <TableHead>Género</TableHead>}
                   {visibleCols.has('edad') && <TableHead>Edad</TableHead>}
@@ -1416,6 +1521,7 @@ const AdminProspectos = () => {
                           </button>
                         </TableCell>
                       )}
+                      {visibleCols.has('modalidadPago') && <TableCell className="text-muted-foreground">{p.payment_modality || '-'}</TableCell>}
                       {visibleCols.has('tipopersona') && <TableCell className="text-muted-foreground capitalize">{p.person_type || '-'}</TableCell>}
                       {visibleCols.has('genero') && <TableCell className="text-muted-foreground capitalize">{p.gender || '-'}</TableCell>}
                       {visibleCols.has('edad') && <TableCell className="text-muted-foreground">{p.age_range || '-'}</TableCell>}
@@ -1521,6 +1627,7 @@ const AdminProspectos = () => {
                   {detailProspect.person_type && <Field label="Tipo persona" icon={User} value={PERSON_TYPES.find(p => p.value === detailProspect.person_type)?.label} />}
                   {detailProspect.gender && <Field label="Género" icon={User} value={GENDERS.find(g => g.value === detailProspect.gender)?.label} />}
                   {detailProspect.age_range && <Field label="Rango edad" icon={User} value={AGE_RANGES.find(a => a.value === detailProspect.age_range)?.label} />}
+                  <Field label="Modalidad de pago" icon={Tag} value={detailProspect.payment_modality || '-'} />
                   {detailProspect.source === 'evento' && (
                     <Field label="Evento" icon={CalendarDays} value={detailProspect.event_name} />
                   )}
@@ -1810,6 +1917,16 @@ const AdminProspectos = () => {
                   <SelectContent>
                     <SelectItem value="__none">Sin especificar</SelectItem>
                     {AGE_RANGES.map(a => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Modalidad de pago</Label>
+                <Select value={pPaymentModality || '__none'} onValueChange={v => setPPaymentModality(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {PAYMENT_MODALITIES.map(pm => <SelectItem key={pm.value} value={pm.value}>{pm.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

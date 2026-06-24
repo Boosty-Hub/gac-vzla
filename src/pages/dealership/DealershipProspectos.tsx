@@ -32,6 +32,8 @@ import { useProspectSources } from '@/hooks/useProspectSources';
 import { useProspectEvents } from '@/hooks/useProspectEvents';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
+import { phonesMatch } from '@/lib/phone';
+import { useLossReasons } from '@/hooks/useLossReasons';
 
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
@@ -71,6 +73,10 @@ const AGE_RANGES: { value: string; label: string }[] = [
   { value: '30-40', label: '30 a 40' },
   { value: '40+', label: '40 o más' },
 ];
+const PAYMENT_MODALITIES: { value: string; label: string }[] = [
+  { value: 'Contado', label: 'Contado' },
+  { value: 'Financiamiento', label: 'Financiamiento' },
+];
 
 interface Prospect {
   id: string;
@@ -91,6 +97,7 @@ interface Prospect {
   person_type: string | null;
   gender: string | null;
   age_range: string | null;
+  payment_modality: string | null;
   company_name: string | null;
   created_at: string;
 }
@@ -109,6 +116,7 @@ const DealershipProspectos = () => {
   const canEdit = hasPermission('prospectos.edit');
   const isMobile = useIsMobile();
   const { models: prospectModels, brands: prospectBrands } = useProspectModels();
+  const { lossReasons } = useLossReasons();
   const [searchParams, setSearchParams] = useSearchParams();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,6 +147,9 @@ const DealershipProspectos = () => {
   const getSS = () => { try { return JSON.parse(sessionStorage.getItem(SS_KEY) || '{}'); } catch { return {}; } };
   const [dialogOpen, setDialogOpenRaw] = useState<boolean>(() => !!getSS().dialogOpen);
   const [editingProspect, setEditingProspect] = useState<Prospect | null>(null);
+  // When viewing a prospect that belongs to another salesperson (reached via the
+  // "already managed" duplicate alert) the dialog opens read-only: saving is blocked.
+  const [editReadOnly, setEditReadOnly] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -158,10 +169,11 @@ const DealershipProspectos = () => {
   const [pPersonType, setPPersonType] = useState<string>(() => getSS().pPersonType || '');
   const [pGender, setPGender] = useState<string>(() => getSS().pGender || '');
   const [pAgeRange, setPAgeRange] = useState<string>(() => getSS().pAgeRange || '');
+  const [pPaymentModality, setPPaymentModality] = useState<string>(() => getSS().pPaymentModality || '');
 
   const setDialogOpen = (open: boolean) => {
     setDialogOpenRaw(open);
-    if (!open) { setEditingProspect(null); try { sessionStorage.removeItem(SS_KEY); } catch {} }
+    if (!open) { setEditingProspect(null); setEditReadOnly(false); try { sessionStorage.removeItem(SS_KEY); } catch {} }
   };
 
   // Solo persistir en sessionStorage cuando es modo CREACIÓN (no edición).
@@ -174,13 +186,13 @@ const DealershipProspectos = () => {
       return;
     }
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pCompanyName, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pCompanyName, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange, pPaymentModality }));
     } catch {}
-  }, [dialogOpen, editingProspect, pName, pPhone, pEmail, pCompanyName, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange]);
+  }, [dialogOpen, editingProspect, pName, pPhone, pEmail, pCompanyName, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange, pPaymentModality]);
   // Import/Export
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; notes: string; salesperson: string; event_name: string; estado_vzla: string; fecha: string; test_drive: boolean; person_type: string; gender: string; age_range: string; errors: string[] }>>([]);
+  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; notes: string; salesperson: string; event_name: string; estado_vzla: string; fecha: string; test_drive: boolean; person_type: string; gender: string; age_range: string; payment_modality: string; errors: string[] }>>([]);
   const [importing, setImporting] = useState(false);
 
   const [greetingTemplate, setGreetingTemplate] = useState<string>('Hola {{prospecto}}, ¡es un gusto saludarte! Mi nombre es {{vendedor}}, seré el asesor de ventas encargado de brindarte información de nuestros vehículos. ¿En qué puedo ayudarte hoy? 🚗');
@@ -221,6 +233,23 @@ const DealershipProspectos = () => {
   const [bulkValue, setBulkValue] = useState('');
   const [bulkBrand, setBulkBrand] = useState('');
   const [bulkLoading, setBulkLoading] = useState(false);
+
+  // Loss-reason capture: when a prospect is moved to "perdido" we must collect a
+  // mandatory loss reason before persisting. `lossReasonTarget` holds the pending
+  // intent so we know what to do once the user confirms.
+  type LossReasonTarget =
+    | { kind: 'inline'; id: string }
+    | { kind: 'edit' }
+    | { kind: 'bulk' }
+    | { kind: 'create' }
+    | null;
+  const [lossReasonTarget, setLossReasonTarget] = useState<LossReasonTarget>(null);
+  const [selectedLossReasonId, setSelectedLossReasonId] = useState('');
+  const [lossReasonSaving, setLossReasonSaving] = useState(false);
+
+  // Duplicate-phone alert: holds the existing prospect that is already being
+  // managed so we can show its salesperson and offer navigation to it.
+  const [duplicateProspect, setDuplicateProspect] = useState<{ id: string; name: string; salesperson: string | null; dealership_id: string } | null>(null);
 
 
   useEffect(() => {
@@ -354,10 +383,18 @@ const DealershipProspectos = () => {
 
   const handleBulkApply = async () => {
     if (!canEdit) return;
+    if (selectedIds.size === 0) return;
     if (!bulkAction) return;
+    // REQ1: bulk move to "perdido" must capture a single mandatory loss reason
+    // applied to every selected prospect; defer to the loss-reason dialog.
+    if (bulkAction === 'status' && bulkValue === 'perdido') {
+      setSelectedLossReasonId('');
+      setLossReasonTarget({ kind: 'bulk' });
+      return;
+    }
     let payload: Record<string, any> = {};
     switch (bulkAction) {
-      case 'status': if (!bulkValue || bulkValue === '__none') return; payload = { status: bulkValue }; break;
+      case 'status': if (!bulkValue || bulkValue === '__none') return; payload = bulkValue === 'perdido' ? { status: bulkValue } : { status: bulkValue, loss_reason_id: null, loss_reason: null }; break;
       case 'estadoVzla': payload = { 'Estado de Vnzla': (!bulkValue || bulkValue === '__clear') ? null : bulkValue }; break;
       case 'model': payload = { model_interest: (!bulkValue || bulkValue === '__none') ? null : (bulkBrand ? `${bulkBrand} ${bulkValue}` : bulkValue) }; break;
       case 'source': if (!bulkValue || bulkValue === '__none') return; payload = { source: bulkValue }; break;
@@ -401,6 +438,7 @@ const DealershipProspectos = () => {
         { header: 'Tipo de Persona',     key: 'tipo_persona',  width: 16 },
         { header: 'Género',              key: 'genero',        width: 12 },
         { header: 'Rango de Edad',       key: 'rango_edad',    width: 16 },
+        { header: 'Modalidad de Pago',   key: 'modalidad_pago', width: 18 },
         { header: 'Test Drive',          key: 'test_drive',    width: 12 },
         { header: 'Show Room',           key: 'show_room',     width: 12 },
         { header: 'Estado',              key: 'estado',        width: 18 },
@@ -444,6 +482,7 @@ const DealershipProspectos = () => {
           tipo_persona:  p.person_type || '',
           genero:        p.gender || '',
           rango_edad:    p.age_range || '',
+          modalidad_pago: p.payment_modality || '',
           test_drive:    p.test_drive ? 'Sí' : 'No',
           show_room:     p.visited_showroom ? 'Sí' : 'No',
           estado:        PROSPECT_STATUSES.find(s => s.name === p.status)?.label || p.status,
@@ -479,15 +518,15 @@ const DealershipProspectos = () => {
   };
 
   const downloadTemplate = () => {
-    const headers = ['nombre','telefono','email','marca','modelo','fuente','estado','notas','vendedor','nombre_evento','estado_vzla','fecha','test_drive','tipo_persona','genero','rango_edad'];
+    const headers = ['nombre','telefono','email','marca','modelo','fuente','estado','notas','vendedor','nombre_evento','estado_vzla','fecha','test_drive','tipo_persona','genero','rango_edad','modalidad_pago'];
     const example = ['Juan Pérez','+58 412 1234567','juan@email.com','GAC','GS4',
       PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
       PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
       'Interesado en SUV', autoSalesperson || 'Carlos Gómez', '', '', '2026-04-07',
-      'si','natural','masculino','30-40'];
+      'si','natural','masculino','30-40','Contado'];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:25},{wch:20},{wch:30},{wch:20},{wch:20},{wch:18},{wch:18},{wch:12},{wch:14},{wch:12},{wch:12}];
+    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:25},{wch:20},{wch:30},{wch:20},{wch:20},{wch:18},{wch:18},{wch:12},{wch:14},{wch:12},{wch:12},{wch:16}];
     const wsNotes = XLSX.utils.aoa_to_sheet([
       ['INSTRUCCIONES:'],
       ['- nombre y telefono son obligatorios'],
@@ -499,6 +538,7 @@ const DealershipProspectos = () => {
       ['- tipo_persona: natural / juridica'],
       ['- genero: masculino / femenino'],
       ['- rango_edad: 20-30 / 30-40 / 40+'],
+      ['- modalidad_pago: Contado / Financiamiento (opcional)'],
     ]);
     wsNotes['!cols'] = [{wch:65}];
     XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
@@ -544,6 +584,14 @@ const DealershipProspectos = () => {
           if (age_range && !['20-30','30-40','40+'].includes(age_range)) {
             errors.push(`Rango de edad inválido: "${age_range}"`); age_range = '';
           }
+          // payment_modality is optional; normalize "contado"/"financiamiento" to the
+          // canonical Spanish values stored in the DB (prospects.payment_modality).
+          let payment_modality = String(row['modalidad_pago'] ?? '').trim().toLowerCase();
+          if (payment_modality === 'contado') payment_modality = 'Contado';
+          else if (payment_modality === 'financiamiento') payment_modality = 'Financiamiento';
+          else if (payment_modality) {
+            errors.push(`Modalidad de pago inválida: "${row['modalidad_pago']}"`); payment_modality = '';
+          }
           let source = String(row['fuente'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
           let status = String(row['estado'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
           let fecha = String(row['fecha'] ?? '').trim();
@@ -561,7 +609,7 @@ const DealershipProspectos = () => {
           if (!source) source = VALID_SOURCES[0] || 'concesionario';
           if (status && !VALID_STATUSES.includes(status)) { errors.push(`Estado inválido: "${status}"`); status = VALID_STATUSES[0] || 'nuevo'; }
           if (!status) status = VALID_STATUSES[0] || 'nuevo';
-          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, notes, salesperson, event_name, estado_vzla, fecha, test_drive, person_type, gender, age_range, errors });
+          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, notes, salesperson, event_name, estado_vzla, fecha, test_drive, person_type, gender, age_range, payment_modality, errors });
         });
         setImportRows(rows);
         setImportOpen(true);
@@ -594,6 +642,7 @@ const DealershipProspectos = () => {
       person_type: r.person_type || null,
       gender: r.gender || null,
       age_range: r.age_range || null,
+      payment_modality: r.payment_modality || null,
       created_at: r.fecha || undefined,
     }));
     const { error } = await supabase.from('prospects').insert(payload);
@@ -608,16 +657,19 @@ const DealershipProspectos = () => {
     setPSalesperson(autoSalesperson);
     setPEventName(''); setPEstadoVzla('');
     setPTestDrive(false); setPShowroom(false); setPPersonType(''); setPGender(''); setPAgeRange('');
+    setPPaymentModality('');
   };
 
   const openDialog = () => {
     resetForm();
+    setEditReadOnly(false);
     setDialogOpen(true);
   };
 
-  const openEditDialog = (p: Prospect) => {
+  const openEditDialog = (p: Prospect, readOnly = false) => {
     // Limpiar cualquier estado de creación guardado para evitar confusión
     try { sessionStorage.removeItem(SS_KEY); } catch {}
+    setEditReadOnly(readOnly);
     setEditingProspect(p);
     setPName(p.name);
     setPPhone(p.phone || '');
@@ -635,26 +687,61 @@ const DealershipProspectos = () => {
     setPPersonType(p.person_type || '');
     setPGender(p.gender || '');
     setPAgeRange(p.age_range || '');
+    setPPaymentModality(p.payment_modality || '');
     setDialogOpenRaw(true);
   };
 
-  const checkDuplicatePhone = async (phone: string): Promise<boolean> => {
-    const normalized = phone.replace(/\D/g, '');
-    if (!normalized) return false;
-    const { data } = await supabase.from('prospects').select('id, name, phone').not('phone', 'is', null);
-    const duplicate = (data || []).find((p: any) => p.phone.replace(/\D/g, '') === normalized);
-    if (duplicate) {
-      toast.error(`Ya existe un prospecto con ese teléfono: ${duplicate.name}`);
-      return true;
+  type DuplicateProspect = { id: string; name: string; phone: string | null; salesperson: string | null; dealership_id: string };
+
+  const checkDuplicatePhone = async (phone: string): Promise<DuplicateProspect | null> => {
+    if (!phone.replace(/\D/g, '')) return null;
+    // Supabase returns max 1000 rows per request; paginate in batches so duplicates
+    // beyond the first 1000 prospects are not missed (the table can hold thousands).
+    const pageSize = 1000;
+    const all: DuplicateProspect[] = [];
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from('prospects')
+        .select('id, name, phone, salesperson, dealership_id')
+        .not('phone', 'is', null)
+        .range(from, from + pageSize - 1);
+      if (error || !data || data.length === 0) break;
+      all.push(...(data as DuplicateProspect[]));
+      if (data.length < pageSize) break;
     }
-    return false;
+    const duplicate = all.find((p) => phonesMatch(p.phone, phone));
+    return duplicate ?? null;
+  };
+
+  // Persist a "perdido" transition for a prospect: writes status + loss reason to
+  // Supabase and, when the prospect is linked to Kommo, pushes the loss reason to
+  // the CRM. `updateKommoLeadStage` does not carry the loss reason, so the perdido
+  // case invokes the kommo-api edge function directly.
+  const applyLostStatus = async (
+    prospectId: string,
+    kommoLeadId: number | null,
+    lossReasonKommoId: number,
+    lossReasonName: string,
+    extraPayload: Record<string, any> = {},
+  ): Promise<boolean> => {
+    const { error } = await supabase
+      .from('prospects')
+      .update({ ...extraPayload, status: 'perdido', loss_reason_id: lossReasonKommoId, loss_reason: lossReasonName } as any)
+      .eq('id', prospectId);
+    if (error) { toast.error('Error al actualizar estado'); console.error(error); return false; }
+    if (kommoLeadId) {
+      supabase.functions
+        .invoke('kommo-api', { body: { action: 'update_stage', prospect_id: prospectId, kommo_lead_id: kommoLeadId, new_status: 'perdido', loss_reason_id: lossReasonKommoId } })
+        .catch(console.error);
+    }
+    return true;
   };
 
   const doSave = async () => {
     setSaving(true);
     const phone = pPhone.trim();
     if (editingProspect) {
-      const { error } = await supabase.from('prospects').update({
+      const editPayload = {
         name: pName.trim(),
         phone: phone || null,
         email: pEmail.trim() || null,
@@ -670,8 +757,22 @@ const DealershipProspectos = () => {
         person_type: pPersonType || null,
         gender: pGender || null,
         age_range: pAgeRange || null,
+        payment_modality: pPaymentModality || null,
         company_name: pCompanyName.trim() || null,
-      } as any).eq('id', editingProspect.id);
+        // C6: when the new status is not "perdido", clear any stale loss reason.
+        ...((pStatus || 'nuevo') !== 'perdido' ? { loss_reason_id: null, loss_reason: null } : {}),
+      };
+      // REQ1: when the edit moves the prospect to "perdido" we must capture a
+      // mandatory loss reason before persisting. Defer to the loss-reason dialog.
+      if ((pStatus || 'nuevo') === 'perdido' && editingProspect.status !== 'perdido') {
+        setSaving(false);
+        setSelectedLossReasonId('');
+        // W-a: close the missing-fields AlertDialog first so modals don't stack.
+        setConfirmOpen(false);
+        setLossReasonTarget({ kind: 'edit' });
+        return;
+      }
+      const { error } = await supabase.from('prospects').update(editPayload as any).eq('id', editingProspect.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
       else {
         toast.success('Prospecto actualizado');
@@ -682,8 +783,17 @@ const DealershipProspectos = () => {
       }
     } else {
       if (phone) {
-        const isDuplicate = await checkDuplicatePhone(phone);
-        if (isDuplicate) { setSaving(false); return; }
+        const duplicate = await checkDuplicatePhone(phone);
+        if (duplicate) { setDuplicateProspect(duplicate); setSaving(false); return; }
+      }
+      // C5: creating a brand-new prospect already marked "perdido" must capture a
+      // mandatory loss reason first; defer the insert to the loss-reason dialog.
+      if ((pStatus || 'nuevo') === 'perdido') {
+        setSaving(false);
+        setSelectedLossReasonId('');
+        setConfirmOpen(false);
+        setLossReasonTarget({ kind: 'create' });
+        return;
       }
       const { data: inserted, error } = await supabase.from('prospects').insert({
         dealership_id: selectedDealership,
@@ -702,6 +812,7 @@ const DealershipProspectos = () => {
         person_type: pPersonType || null,
         gender: pGender || null,
         age_range: pAgeRange || null,
+        payment_modality: pPaymentModality || null,
         company_name: pCompanyName.trim() || null,
       } as any).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
@@ -731,13 +842,136 @@ const DealershipProspectos = () => {
 
   const updateStatus = async (id: string, newStatus: string) => {
     if (!canEdit) return;
-    const { error } = await supabase.from('prospects').update({ status: newStatus }).eq('id', id);
+    // REQ1: moving an inline Select to "perdido" must capture a mandatory loss
+    // reason first; defer the write until the user confirms in the dialog.
+    if (newStatus === 'perdido') {
+      setSelectedLossReasonId('');
+      setLossReasonTarget({ kind: 'inline', id });
+      return;
+    }
+    // C6: leaving "perdido" must clear the stale loss reason so it doesn't linger.
+    const { error } = await supabase.from('prospects').update({ status: newStatus, loss_reason_id: null, loss_reason: null } as any).eq('id', id);
     if (error) { toast.error('Error al actualizar estado'); console.error(error); }
     else {
       fetchProspects();
       const p = prospects.find(x => x.id === id);
       if (p?.kommo_lead_id) updateKommoLeadStage(id, p.kommo_lead_id, newStatus).catch(console.error);
     }
+  };
+
+  // REQ1: confirm handler for the mandatory loss-reason dialog. Resolves the chosen
+  // reason and applies it to the pending target (inline Select, edit dialog, or bulk).
+  const confirmLossReason = async () => {
+    if (!lossReasonTarget || !selectedLossReasonId) return;
+    const reason = lossReasons.find(r => r.id === selectedLossReasonId);
+    if (!reason) return;
+    setLossReasonSaving(true);
+    try {
+      if (lossReasonTarget.kind === 'inline') {
+        const p = prospects.find(x => x.id === lossReasonTarget.id);
+        const ok = await applyLostStatus(lossReasonTarget.id, p?.kommo_lead_id ?? null, reason.kommoId, reason.name);
+        if (ok) fetchProspects();
+      } else if (lossReasonTarget.kind === 'edit' && editingProspect) {
+        const editPayload = {
+          name: pName.trim(),
+          phone: pPhone.trim() || null,
+          email: pEmail.trim() || null,
+          model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+          source: pSource || 'concesionario',
+          notes: pNotes.trim() || null,
+          salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
+          event_name: pEventName.trim() || null,
+          'Estado de Vnzla': pEstadoVzla.trim() || null,
+          test_drive: !!pTestDrive,
+          visited_showroom: !!pShowroom,
+          person_type: pPersonType || null,
+          gender: pGender || null,
+          age_range: pAgeRange || null,
+          payment_modality: pPaymentModality || null,
+          company_name: pCompanyName.trim() || null,
+        };
+        const ok = await applyLostStatus(editingProspect.id, editingProspect.kommo_lead_id, reason.kommoId, reason.name, editPayload);
+        if (ok) {
+          toast.success('Prospecto actualizado');
+          if (editingProspect.kommo_lead_id) {
+            updateKommoLeadFields(editingProspect.id, editingProspect.kommo_lead_id).catch(console.error);
+          }
+          setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
+        }
+      } else if (lossReasonTarget.kind === 'create') {
+        // C5: persist the brand-new prospect with the captured loss reason. Mirrors
+        // the creation insert in doSave but includes loss_reason_id / loss_reason.
+        const { data: inserted, error } = await supabase.from('prospects').insert({
+          dealership_id: selectedDealership,
+          name: pName.trim(),
+          phone: pPhone.trim() || null,
+          email: pEmail.trim() || null,
+          model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+          source: pSource || 'concesionario',
+          status: pStatus || 'nuevo',
+          notes: pNotes.trim() || null,
+          salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
+          event_name: pEventName.trim() || null,
+          'Estado de Vnzla': pEstadoVzla.trim() || null,
+          test_drive: !!pTestDrive,
+          visited_showroom: !!pShowroom,
+          person_type: pPersonType || null,
+          gender: pGender || null,
+          age_range: pAgeRange || null,
+          payment_modality: pPaymentModality || null,
+          company_name: pCompanyName.trim() || null,
+          loss_reason_id: reason.kommoId,
+          loss_reason: reason.name,
+        } as any).select().single();
+        if (error) { toast.error('Error al crear prospecto'); console.error(error); }
+        else {
+          toast.success('Prospecto creado');
+          setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
+          createKommoLead(inserted.id).catch(console.error);
+        }
+      } else if (lossReasonTarget.kind === 'bulk') {
+        if (selectedIds.size === 0) return;
+        const ids = [...selectedIds];
+        const { error } = await supabase
+          .from('prospects')
+          .update({ status: 'perdido', loss_reason_id: reason.kommoId, loss_reason: reason.name } as any)
+          .in('id', ids);
+        if (error) { toast.error('Error al actualizar prospectos'); console.error(error); }
+        else {
+          toast.success(`${ids.length} prospecto(s) actualizados`);
+          // Push the loss reason to Kommo for each linked prospect.
+          prospects
+            .filter(p => selectedIds.has(p.id) && p.kommo_lead_id)
+            .forEach(p => {
+              supabase.functions
+                .invoke('kommo-api', { body: { action: 'update_stage', prospect_id: p.id, kommo_lead_id: p.kommo_lead_id, new_status: 'perdido', loss_reason_id: reason.kommoId } })
+                .catch(console.error);
+            });
+          setSelectedIds(new Set()); setBulkAction(null); setBulkValue(''); setBulkBrand('');
+          fetchProspects();
+        }
+      }
+    } finally {
+      setLossReasonSaving(false);
+      setLossReasonTarget(null);
+      setSelectedLossReasonId('');
+    }
+  };
+
+  // Open the prospect referenced by the duplicate alert. The current salesperson
+  // may not see prospects owned by others, so fetch it directly by id (bypassing
+  // the salesperson filter) and open the edit dialog read-only when it is not theirs.
+  const viewDuplicateProspect = async () => {
+    if (!duplicateProspect) return;
+    const { data, error } = await supabase.from('prospects').select('*').eq('id', duplicateProspect.id).single();
+    if (error || !data) { toast.error('No se pudo abrir el prospecto'); console.error(error); return; }
+    const p = data as Prospect;
+    const ownName = autoSalesperson || profile?.full_name || '';
+    const isOwn = !!ownName && (p.salesperson || '') === ownName;
+    // Vendedor/salesperson roles only edit their own prospects; otherwise read-only.
+    const readOnly = (isVendedor || isSalesperson) ? !isOwn : false;
+    setDuplicateProspect(null);
+    openEditDialog(p, readOnly);
   };
 
   const toggleProspectFlag = async (id: string, field: 'test_drive' | 'visited_showroom', value: boolean) => {
@@ -1371,6 +1605,16 @@ const DealershipProspectos = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Modalidad de pago</Label>
+                <Select value={pPaymentModality || '__none'} onValueChange={v => setPPaymentModality(v === '__none' ? '' : v)}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Sin especificar</SelectItem>
+                    {PAYMENT_MODALITIES.map(pm => <SelectItem key={pm.value} value={pm.value}>{pm.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1 flex items-end">
                 <label className="flex items-center gap-2 cursor-pointer h-9">
                   <Checkbox checked={pTestDrive} onCheckedChange={v => setPTestDrive(!!v)} />
@@ -1402,11 +1646,19 @@ const DealershipProspectos = () => {
               <Textarea value={pNotes} onChange={e => setPNotes(e.target.value)} rows={2} className="text-xs" placeholder="Observaciones..." />
             </div>
           </div>
+          {editReadOnly && (
+            <p className="px-1 text-[11px] text-amber-600 flex items-center gap-1">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              Este prospecto pertenece a otro vendedor. Solo lectura.
+            </p>
+          )}
           <ResponsiveModalFooter className="flex-col sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setDialogOpen(false)} className="w-full sm:w-auto">Cancelar</Button>
-            <Button onClick={handleSave} disabled={saving} className="gac-gradient w-full sm:w-auto">
-              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingProspect ? 'Guardar Cambios' : 'Crear Prospecto'}
-            </Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} className="w-full sm:w-auto">{editReadOnly ? 'Cerrar' : 'Cancelar'}</Button>
+            {!editReadOnly && (
+              <Button onClick={handleSave} disabled={saving} className="gac-gradient w-full sm:w-auto">
+                {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingProspect ? 'Guardar Cambios' : 'Crear Prospecto'}
+              </Button>
+            )}
           </ResponsiveModalFooter>
       </ResponsiveModal>
 
@@ -1428,6 +1680,60 @@ const DealershipProspectos = () => {
             <AlertDialogAction onClick={doSave} className="gac-gradient" disabled={saving}>
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingProspect ? 'Sí, guardar de todas formas' : 'Sí, crear de todas formas'}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* MANDATORY LOSS REASON DIALOG (REQ1) */}
+      <Dialog open={lossReasonTarget !== null} onOpenChange={open => { if (!open && !lossReasonSaving) { setLossReasonTarget(null); setSelectedLossReasonId(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-display">Motivo de pérdida</DialogTitle>
+          </DialogHeader>
+          <div className="py-1 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              {lossReasonTarget?.kind === 'bulk'
+                ? <>Selecciona el motivo de pérdida. Se aplicará a <strong>{selectedIds.size}</strong> prospecto(s).</>
+                : 'Selecciona el motivo por el que se pierde este prospecto.'}
+            </p>
+            {lossReasons.length === 0 ? (
+              <p className="text-xs text-amber-600 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                No hay motivos de pérdida configurados. Contacta al administrador.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                <Label className="text-xs">Motivo *</Label>
+                <Select value={selectedLossReasonId} onValueChange={setSelectedLossReasonId}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar motivo" /></SelectTrigger>
+                  <SelectContent>
+                    {lossReasons.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" disabled={lossReasonSaving} onClick={() => { setLossReasonTarget(null); setSelectedLossReasonId(''); }}>Cancelar</Button>
+            <Button size="sm" className="gac-gradient" disabled={lossReasonSaving || !selectedLossReasonId} onClick={confirmLossReason}>
+              {lossReasonSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* DUPLICATE PROSPECT ALERT (REQ4) */}
+      <AlertDialog open={duplicateProspect !== null} onOpenChange={open => { if (!open) setDuplicateProspect(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cliente ya gestionado</AlertDialogTitle>
+            <AlertDialogDescription>
+              Este cliente está siendo gestionado por {duplicateProspect?.salesperson?.trim() || 'sin vendedor asignado'}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cerrar</AlertDialogCancel>
+            <AlertDialogAction onClick={viewDuplicateProspect} className="gac-gradient">Ver</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
