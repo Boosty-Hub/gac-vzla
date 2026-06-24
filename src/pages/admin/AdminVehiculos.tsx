@@ -390,12 +390,12 @@ const AdminVehiculos = () => {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
-        <div className="relative col-span-2 sm:flex-1 sm:min-w-[150px] sm:max-w-xs">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 items-end">
+        <div className="relative col-span-2 lg:col-span-2">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Placa, VIN, color..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
         </div>
-        <div className="relative col-span-2 sm:flex-1 sm:min-w-[140px] sm:max-w-xs">
+        <div className="relative col-span-2 md:col-span-1 lg:col-span-1">
           <Car className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input placeholder="Modelo (ej: GS3)..." className="pl-8 h-8 text-xs" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />
         </div>
@@ -420,7 +420,7 @@ const AdminVehiculos = () => {
         {/* Date range popover */}
         <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="sm" className={cn("h-8 text-xs gap-1.5 col-span-1", (dateFrom || dateTo) && "border-primary text-primary")}>
+            <Button variant="outline" size="sm" className={cn("h-8 text-xs gap-1.5 w-full justify-start", (dateFrom || dateTo) && "border-primary text-primary")}>
               <CalendarDays className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">{dateFilterLabel()}</span>
               {(dateFrom || dateTo) && (
@@ -453,17 +453,6 @@ const AdminVehiculos = () => {
             )}
           </PopoverContent>
         </Popover>
-
-        <div className="col-span-1 sm:ml-auto">
-          <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
-            <SelectTrigger className="h-8 text-xs sm:w-[100px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="100">100 filas</SelectItem>
-              <SelectItem value="300">300 filas</SelectItem>
-              <SelectItem value="1000">1000 filas</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
       </div>
 
       {/* List */}
@@ -608,18 +597,30 @@ const AdminVehiculos = () => {
       )}
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground hidden sm:block">
-            {page * pageSize + 1}–{Math.min((page + 1) * pageSize, totalCount)} de {totalCount}
-          </p>
-          <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-              className="px-3 py-1.5 text-sm rounded-md border disabled:opacity-40 hover:bg-muted">Anterior</button>
-            <span className="text-xs text-muted-foreground">Pág. {page + 1} / {totalPages}</span>
-            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-              className="px-3 py-1.5 text-sm rounded-md border disabled:opacity-40 hover:bg-muted">Siguiente</button>
+      {!loading && vehicles.length > 0 && (
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-muted-foreground hidden sm:block">
+              {page * pageSize + 1}–{Math.min((page + 1) * pageSize, totalCount)} de {totalCount}
+            </p>
+            <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
+              <SelectTrigger className="h-8 text-xs w-[100px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="100">100 filas</SelectItem>
+                <SelectItem value="300">300 filas</SelectItem>
+                <SelectItem value="1000">1000 filas</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+                className="px-3 py-1.5 text-sm rounded-md border disabled:opacity-40 hover:bg-muted">Anterior</button>
+              <span className="text-xs text-muted-foreground">Pág. {page + 1} / {totalPages}</span>
+              <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
+                className="px-3 py-1.5 text-sm rounded-md border disabled:opacity-40 hover:bg-muted">Siguiente</button>
+            </div>
+          )}
         </div>
       )}
 
