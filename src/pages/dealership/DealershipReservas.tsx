@@ -24,7 +24,7 @@ import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 import { createKommoReservation, updateKommoReservationStage, updateKommoReservationFields } from '@/lib/kommo';
 import { resolveAutoVehicle } from '@/lib/vehicleSelection';
-import { resolveReservationAssignment } from '@/lib/reservationAssignment';
+import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
 import { List, LayoutGrid } from 'lucide-react';
 
 // Service types that trigger the incidencia form
@@ -105,6 +105,12 @@ interface HistoryRecord {
 interface ClientResult {
   id: string;
   full_name: string;
+}
+
+interface VehicleModelOption {
+  id: string;
+  name: string;
+  brand: string;
 }
 
 interface VehicleResult {
@@ -215,6 +221,16 @@ const DealershipReservas = () => {
   const [fWalkinName, setFWalkinName] = useState<string>(() => getDrLS().fWalkinName || '');
   const [fWalkinPhone, setFWalkinPhone] = useState<string>(() => getDrLS().fWalkinPhone || '');
   const [fWalkinPlate, setFWalkinPlate] = useState<string>(() => getDrLS().fWalkinPlate || '');
+  // Manual entry (creates real client + vehicle): extra fields + explicit toggle.
+  const [manualMode, setManualMode] = useState<boolean>(() => getDrLS().manualMode === true);
+  // Editing a LEGACY walk-in row (only walkin_* text, no FK client/vehicle). Distinct
+  // from manual entry: editing keeps it as free-text walk-in (updates walkin_* columns),
+  // never creating entities, so repeated edits don't duplicate data.
+  const [editingLegacyWalkin, setEditingLegacyWalkin] = useState(false);
+  const [fWalkinCedula, setFWalkinCedula] = useState<string>(() => getDrLS().fWalkinCedula || '');
+  const [fWalkinModelId, setFWalkinModelId] = useState<string>(() => getDrLS().fWalkinModelId || '');
+  const [fWalkinYear, setFWalkinYear] = useState<string>(() => getDrLS().fWalkinYear || '');
+  const [vehicleModels, setVehicleModels] = useState<VehicleModelOption[]>([]);
   // True while prefilling an edit, to suppress implicit single-vehicle auto-select.
   const prefillingEditRef = useRef(false);
 
@@ -225,6 +241,16 @@ const DealershipReservas = () => {
   const isIncidencia = INCIDENCIA_TYPES.has(fService);
 
   const isVendedor = role?.name?.toLowerCase() === 'vendedor';
+
+  // Single source of truth for "manual entry that CREATES real entities": either the
+  // explicit toggle is on, OR (only while creating) a search returned no results so no
+  // vehicle/client was picked. The SAME flag drives BOTH the visibility of the manual
+  // fields AND the save branch that creates real client/vehicle entities — so the UI
+  // promise always matches persistence (C4). The legacy-walk-in edit path is mutually
+  // exclusive with this (it never sets manualMode) and persists walkin_* text instead.
+  const manualActiveForCreate =
+    !editingLegacyWalkin &&
+    (manualMode || (!editingRes && unifiedSearched && unifiedResults.length === 0 && !plateResult && !unifiedClientId));
 
   const fetchReservations = async () => {
     if (!selectedDealership) return;
@@ -272,9 +298,28 @@ const DealershipReservas = () => {
     })();
   }, []);
 
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('vehicle_models')
+        .select('id, name, brand')
+        .eq('is_active', true)
+        .order('brand')
+        .order('name');
+      if (data) setVehicleModels(data as VehicleModelOption[]);
+    })();
+  }, []);
+
   // Normal form: client name autocomplete
   // Normal reservation — unified debounced search: plate + name
   useEffect(() => {
+    // Manual mode owns the client/vehicle inputs: never let the debounced search
+    // run (it would clear results and re-hide the manual section while editing).
+    if (manualMode) {
+      setUnifiedResults([]);
+      setUnifiedDropdown(false);
+      return;
+    }
     if (!unifiedSearch.trim() || plateResult || unifiedClientId) {
       setUnifiedResults([]);
       setUnifiedDropdown(false);
@@ -307,7 +352,7 @@ const DealershipReservas = () => {
       if (results.length === 0 && !editingRes) setFWalkinPlate(q.toUpperCase());
     }, 300);
     return () => clearTimeout(timer);
-  }, [unifiedSearch, plateResult, unifiedClientId]);
+  }, [unifiedSearch, plateResult, unifiedClientId, manualMode]);
 
   // Normal reservation — fetch vehicles after client selected by name
   useEffect(() => {
@@ -352,9 +397,9 @@ const DealershipReservas = () => {
       return;
     }
     try {
-      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone, fWalkinPlate }));
+      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinYear }));
     } catch {}
-  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone, fWalkinPlate]);
+  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinYear]);
 
   const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
@@ -405,7 +450,26 @@ const DealershipReservas = () => {
     setLoadingUnifiedVehicle(false);
     setPlateResult(null); setPlateSearched(false);
     setFWalkinName(''); setFWalkinPhone(''); setFWalkinPlate('');
+    setManualMode(false); setEditingLegacyWalkin(false);
+    setFWalkinCedula(''); setFWalkinModelId(''); setFWalkinYear('');
     prefillingEditRef.current = false;
+  };
+
+  // Switch to manual entry: clear any prior client/vehicle selection so the
+  // manual fields are the single source of truth and stay visible.
+  const enableManualEntry = () => {
+    setUnifiedSearch(''); setUnifiedResults([]); setUnifiedDropdown(false);
+    setUnifiedClientId(''); setUnifiedClientName('');
+    setUnifiedClientVehicles([]); setUnifiedClientVehicleId('');
+    setPlateResult(null); setPlateSearched(false);
+    setManualMode(true); setUnifiedSearched(true);
+  };
+
+  const disableManualEntry = () => {
+    setManualMode(false);
+    setFWalkinName(''); setFWalkinPhone(''); setFWalkinPlate('');
+    setFWalkinCedula(''); setFWalkinModelId(''); setFWalkinYear('');
+    setUnifiedSearched(false);
   };
 
   const openCreate = () => {
@@ -421,16 +485,47 @@ const DealershipReservas = () => {
     setCreateOpen(true);
   };
 
+  // In manual mode, create (or reuse) the real client + vehicle and return a
+  // vehicle selection for resolveReservationAssignment. Returns null on error
+  // (a toast is already shown) so the caller can abort the save.
+  const resolveManualVehicle = async (): Promise<{ id: string; client_id: string } | null> => {
+    if (!fWalkinName.trim()) { toast.error('El nombre del cliente es requerido'); return null; }
+    if (!fWalkinModelId) { toast.error('Seleccione el modelo del vehículo'); return null; }
+    try {
+      const { vehicle } = await createOrReuseManualEntities(supabase, {
+        clientName: fWalkinName,
+        clientCedula: fWalkinCedula,
+        clientPhone: fWalkinPhone,
+        modelId: fWalkinModelId,
+        plate: fWalkinPlate,
+        year: fWalkinYear,
+      });
+      return vehicle;
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al registrar el cliente o vehículo manual');
+      return null;
+    }
+  };
+
   const handleSave = async () => {
     if (isIncidencia) {
       if (!fDate) { toast.error('La fecha es requerida'); return; }
       if (!fNotes.trim()) { toast.error('La descripción de la falla es requerida'); return; }
       setSaving(true);
+      let incVehicle = plateResult ? { id: plateResult.id, client_id: plateResult.client_id } : null;
+      // Manual NEW entry (create): build real client + vehicle. Editing a legacy
+      // walk-in falls through to resolveReservationAssignment's walk-in text branch.
+      if (manualActiveForCreate) {
+        const manual = await resolveManualVehicle();
+        if (!manual) { setSaving(false); return; }
+        incVehicle = manual;
+      }
       const incPayload: Record<string, unknown> = {
         dealership_id: selectedDealership,
         ...resolveReservationAssignment({
-          vehicle: plateResult ? { id: plateResult.id, client_id: plateResult.client_id } : null,
-          clientId: unifiedClientId || null,
+          vehicle: incVehicle,
+          clientId: manualActiveForCreate ? null : (unifiedClientId || null),
           walkinName: fWalkinName, walkinPhone: fWalkinPhone, walkinPlate: fWalkinPlate,
         }),
         reservation_date: fDate,
@@ -467,14 +562,27 @@ const DealershipReservas = () => {
 
     if (!fDate || !fTime || !fService) { toast.error('Fecha, hora y servicio son requeridos'); return; }
 
-    if (!plateResult && !unifiedClientId && !fWalkinName.trim()) { toast.error('Busque y seleccione un cliente'); return; }
+    if (!plateResult && !unifiedClientId && !manualActiveForCreate && !editingLegacyWalkin && !fWalkinName.trim()) { toast.error('Busque y seleccione un cliente'); return; }
 
     setSaving(true);
 
-    // Resolved client/vehicle assignment, shared by create and edit.
+    // Manual NEW entry (create): create/reuse real client + vehicle so the reservation
+    // gets FKs. The visibility flag (manualActiveForCreate) is the SAME condition that
+    // shows the manual fields, so the UI promise and persistence always agree (C4).
+    // Editing a legacy walk-in falls through to the walk-in text branch below.
+    let resolvedVehicle = plateResult ? { id: plateResult.id, client_id: plateResult.client_id } : null;
+    if (manualActiveForCreate) {
+      const manual = await resolveManualVehicle();
+      if (!manual) { setSaving(false); return; }
+      resolvedVehicle = manual;
+    }
+
+    // Resolved client/vehicle assignment, shared by create and edit. When real FKs are
+    // resolved (vehicle set), resolveReservationAssignment nulls walkin_* so no stale
+    // text is left behind; the legacy-walk-in edit path keeps the walkin_* text.
     const assign = resolveReservationAssignment({
-      vehicle: plateResult ? { id: plateResult.id, client_id: plateResult.client_id } : null,
-      clientId: unifiedClientId || null,
+      vehicle: resolvedVehicle,
+      clientId: manualActiveForCreate ? null : (unifiedClientId || null),
       walkinName: fWalkinName, walkinPhone: fWalkinPhone, walkinPlate: fWalkinPlate,
     });
 
@@ -606,6 +714,8 @@ const DealershipReservas = () => {
       setUnifiedClientName(r.clients?.full_name || '');
       setUnifiedSearch(r.clients?.full_name || '');
     } else if (r.walkin_client_name) {
+      // Legacy walk-in: edit free text in place, do NOT create entities on save.
+      setEditingLegacyWalkin(true);
       setFWalkinName(r.walkin_client_name);
       setFWalkinPhone(r.walkin_client_phone || '');
       setFWalkinPlate(r.walkin_plate || '');
@@ -643,8 +753,12 @@ const DealershipReservas = () => {
       setUnifiedClientName(r.clients?.full_name || '');
       setUnifiedSearch(r.clients?.full_name || '');
     } else if (r.walkin_client_name) {
-      // Walk-in: keep the plate in its own field, do NOT push it into the search box
-      // (that would re-trigger the search and hide the prefilled fields).
+      // Walk-in legacy: keep the plate in its own field, do NOT push it into the
+      // search box (that would re-trigger the search and hide the prefilled fields).
+      // editingLegacyWalkin keeps the walk-in section visible AND persists back to
+      // the walkin_* columns on save — it does NOT create client/vehicle entities,
+      // so editing a legacy walk-in never duplicates data.
+      setEditingLegacyWalkin(true);
       setFWalkinName(r.walkin_client_name);
       setFWalkinPhone(r.walkin_client_phone || '');
       setFWalkinPlate(r.walkin_plate || '');
@@ -1235,7 +1349,24 @@ const DealershipReservas = () => {
             <>
               {/* Buscar cliente — unificado por nombre o placa */}
               <div className="space-y-2" ref={unifiedRef}>
-                <Label className="text-xs font-semibold">Buscar cliente</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-xs font-semibold">{editingLegacyWalkin ? 'Cliente walk-in' : manualMode ? 'Ingreso manual' : 'Buscar cliente'}</Label>
+                  {/* The toggle is hidden while editing a legacy walk-in: that row stays
+                      free-text and must not be converted to real entities here. */}
+                  {!editingLegacyWalkin && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-[11px] text-primary"
+                    onClick={() => manualMode ? disableManualEntry() : enableManualEntry()}
+                  >
+                    {manualMode ? 'Buscar cliente existente' : 'Ingresar manualmente'}
+                  </Button>
+                  )}
+                </div>
+                {!manualMode && !editingLegacyWalkin && (
+                <>
                 <div className="relative">
                   <div className="flex items-center gap-1">
                     <Input
@@ -1330,21 +1461,55 @@ const DealershipReservas = () => {
                     )}
                   </>
                 )}
+                </>
+                )}
 
-                {/* Walk-in: cliente sin registrar (búsqueda sin resultados o edición de walk-in) */}
-                {unifiedSearched && unifiedResults.length === 0 && !plateResult && !unifiedClientId && (
+                {/* Ingreso manual NUEVO: crea cliente + vehículo reales (toggle o búsqueda sin
+                    resultados). Edición de walk-in LEGACY: edita texto libre, sin crear entidades.
+                    El flag manualActiveForCreate es la MISMA condición que dispara la creación
+                    de entidades al guardar, así la UI y la persistencia coinciden (C4). */}
+                {(manualActiveForCreate || editingLegacyWalkin) && (
                   <div className="space-y-2">
                     <div className="rounded-md bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-start gap-2">
                       <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
                       <div>
-                        <p className="font-semibold text-amber-800">{editingRes ? 'Cliente sin registrar' : 'No encontrado'}</p>
-                        <p className="text-amber-700">Ingrese los datos del cliente manualmente.</p>
+                        {editingLegacyWalkin ? (
+                          <>
+                            <p className="font-semibold text-amber-800">Cliente walk-in (sin registrar)</p>
+                            <p className="text-amber-700">Se actualizan solo los datos de texto del walk-in. No se crea cliente ni vehículo.</p>
+                          </>
+                        ) : (
+                          <>
+                            <p className="font-semibold text-amber-800">Ingreso manual</p>
+                            <p className="text-amber-700">Se creará un cliente y un vehículo nuevos con estos datos.</p>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1"><Label className="text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-8 text-xs" /></div>
                       <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412..." className="h-8 text-xs" /></div>
+                      {/* Cédula / Modelo / Año only apply when creating real entities. */}
+                      {!editingLegacyWalkin && (
+                        <>
+                          <div className="space-y-1"><Label className="text-xs">Cédula</Label><Input value={fWalkinCedula} onChange={e => setFWalkinCedula(e.target.value)} placeholder="V-12345678" className="h-8 text-xs" /></div>
+                          <div className="space-y-1">
+                            <Label className="text-xs">Marca / Modelo *</Label>
+                            <Select value={fWalkinModelId} onValueChange={setFWalkinModelId}>
+                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
+                              <SelectContent>
+                                {vehicleModels.map(m => (
+                                  <SelectItem key={m.id} value={m.id} className="text-xs">{m.brand} {m.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      )}
                       <div className="space-y-1"><Label className="text-xs">Placa</Label><Input value={fWalkinPlate} onChange={e => setFWalkinPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="h-8 text-xs uppercase" /></div>
+                      {!editingLegacyWalkin && (
+                        <div className="space-y-1"><Label className="text-xs">Año</Label><Input type="number" value={fWalkinYear} onChange={e => setFWalkinYear(e.target.value)} placeholder={String(new Date().getFullYear())} className="h-8 text-xs" /></div>
+                      )}
                     </div>
                   </div>
                 )}

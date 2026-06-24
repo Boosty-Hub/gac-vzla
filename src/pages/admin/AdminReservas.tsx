@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
 import { resolveAutoVehicle } from '@/lib/vehicleSelection';
+import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
 import { createKommoReservation, updateKommoReservationStage, updateKommoReservationFields } from '@/lib/kommo';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
@@ -51,11 +52,17 @@ interface VehicleOption {
   vehicle_models: { name: string; brand: string } | null;
 }
 
+interface VehicleModelOption {
+  id: string;
+  name: string;
+  brand: string;
+}
+
 interface Reservation {
   id: string;
   dealership_id: string;
-  client_id: string;
-  vehicle_id: string;
+  client_id: string | null;
+  vehicle_id: string | null;
   reservation_date: string;
   reservation_time: string;
   service_type: string;
@@ -66,6 +73,11 @@ interface Reservation {
   service_notes: string | null;
   technical_report_url: string | null;
   satisfaction_rating: number | null;
+  // Legacy walk-in fields: some older dealership reservations stored client/vehicle
+  // as free text instead of FKs. Read them so those rows render instead of blank.
+  walkin_client_name: string | null;
+  walkin_client_phone: string | null;
+  walkin_plate: string | null;
   created_by_name: string | null;
   created_by_role: string | null;
   kommo_lead_id: number | null;
@@ -200,6 +212,21 @@ const AdminReservas = () => {
   const [fNotes, setFNotes] = useState<string>(() => getArLS().fNotes || '');
   const [fObs, setFObs] = useState<string>('');
 
+  // Manual entry (creates real client + vehicle): toggle + extra fields.
+  const [manualMode, setManualMode] = useState<boolean>(() => getArLS().manualMode === true);
+  // Editing a LEGACY walk-in row (no FK client/vehicle, only walkin_* text). This is
+  // distinct from manual entry: editing keeps it as free-text walk-in (updates the
+  // walkin_* columns) instead of creating real client/vehicle entities, so repeated
+  // edits never duplicate data.
+  const [editingLegacyWalkin, setEditingLegacyWalkin] = useState(false);
+  const [mName, setMName] = useState<string>(() => getArLS().mName || '');
+  const [mPhone, setMPhone] = useState<string>(() => getArLS().mPhone || '');
+  const [mCedula, setMCedula] = useState<string>(() => getArLS().mCedula || '');
+  const [mModelId, setMModelId] = useState<string>(() => getArLS().mModelId || '');
+  const [mPlate, setMPlate] = useState<string>(() => getArLS().mPlate || '');
+  const [mYear, setMYear] = useState<string>(() => getArLS().mYear || '');
+  const [vehicleModels, setVehicleModels] = useState<VehicleModelOption[]>([]);
+
   // Client/vehicle lookup
   const [clientResults, setClientResults] = useState<ClientOption[]>([]);
   const [clientVehicles, setClientVehicles] = useState<VehicleOption[]>([]);
@@ -223,6 +250,16 @@ const AdminReservas = () => {
       .select('id, name, duration_minutes, is_active, requires_description')
       .order('name');
     if (data) setServiceTypes(data as unknown as ServiceType[]);
+  };
+
+  const fetchVehicleModels = async () => {
+    const { data } = await supabase
+      .from('vehicle_models')
+      .select('id, name, brand')
+      .eq('is_active', true)
+      .order('brand')
+      .order('name');
+    if (data) setVehicleModels(data as VehicleModelOption[]);
   };
 
   const fetchReservations = async () => {
@@ -257,6 +294,7 @@ const AdminReservas = () => {
   useEffect(() => {
     fetchDealerships();
     fetchServiceTypes();
+    fetchVehicleModels();
   }, []);
 
   useEffect(() => {
@@ -270,9 +308,9 @@ const AdminReservas = () => {
       return;
     }
     try {
-      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes }));
+      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear }));
     } catch {}
-  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes]);
+  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear]);
 
   // Client search with debounce (by name, cedula, or vehicle plate)
   useEffect(() => {
@@ -394,12 +432,19 @@ const AdminReservas = () => {
     return true;
   };
 
+  const resetManualFields = () => {
+    setManualMode(false);
+    setEditingLegacyWalkin(false);
+    setMName(''); setMPhone(''); setMCedula(''); setMModelId(''); setMPlate(''); setMYear('');
+  };
+
   const openCreate = () => {
     setEditingRes(null);
     setFDealership(''); setFClientSearch(''); setFClientId(''); setFVehicleId('');
     setFDate(new Date().toISOString().split('T')[0]); setFTime('08:00');
     setFService(''); setFMileage('0'); setFStatus('pendiente'); setFNotes(''); setFObs('');
     setClientResults([]); setClientVehicles([]);
+    resetManualFields();
     setCapacityWarning('');
     setTechnicalReportUrl(null);
     setDialogOpen(true);
@@ -467,9 +512,9 @@ const AdminReservas = () => {
     try { localStorage.removeItem(AR_LS_KEY); } catch {}
     setEditingRes(r);
     setFDealership(r.dealership_id);
-    setFClientId(r.client_id);
+    setFClientId(r.client_id || '');
     setFClientSearch(r.clients?.full_name || '');
-    setFVehicleId(r.vehicle_id);
+    setFVehicleId(r.vehicle_id || '');
     setFDate(r.reservation_date);
     setFTime(r.reservation_time.substring(0, 5));
     setFService(r.service_type);
@@ -478,13 +523,34 @@ const AdminReservas = () => {
     setFNotes(r.notes || ''); setFObs(r.internal_notes || '');
     setTechnicalReportUrl(r.technical_report_url || null);
     setClientResults([]);
-    // Trigger vehicle fetch
-    supabase
-      .from('vehicles')
-      .select('id, plate, year, vehicle_models(name, brand)')
-      .eq('client_id', r.client_id)
-      .eq('is_active', true)
-      .then(({ data }) => setClientVehicles((data || []) as VehicleOption[]));
+    // Legacy walk-in row (no FK client/vehicle): edit the free-text walk-in fields
+    // in place. Do NOT enable manualMode here — that would create real entities on
+    // save and duplicate data on every edit. editingLegacyWalkin persists back to
+    // the walkin_* columns instead (legacy behavior preserved).
+    if (!r.client_id && !r.vehicle_id && r.walkin_client_name) {
+      setManualMode(false);
+      setEditingLegacyWalkin(true);
+      setMName(r.walkin_client_name);
+      setMPhone(r.walkin_client_phone || '');
+      setMCedula('');
+      setMModelId('');
+      setMPlate(r.walkin_plate || '');
+      setMYear('');
+      setClientVehicles([]);
+    } else {
+      resetManualFields();
+      // Trigger vehicle fetch
+      if (r.client_id) {
+        supabase
+          .from('vehicles')
+          .select('id, plate, year, vehicle_models(name, brand)')
+          .eq('client_id', r.client_id)
+          .eq('is_active', true)
+          .then(({ data }) => setClientVehicles((data || []) as VehicleOption[]));
+      } else {
+        setClientVehicles([]);
+      }
+    }
     setDialogOpen(true);
   };
 
@@ -499,7 +565,19 @@ const AdminReservas = () => {
   };
 
   const handleSave = async () => {
-    if (!fDealership || !fClientId || !fVehicleId || !fDate || !fService) {
+    // Manual entry replaces the client+vehicle pickers, so the FK guard is relaxed
+    // to allow it; the normal path still requires an existing client + vehicle.
+    if (!fDealership || !fDate || !fService) {
+      toast.error('Completa los campos requeridos'); return;
+    }
+    if (manualMode) {
+      if (!mName.trim()) { toast.error('El nombre del cliente es requerido'); return; }
+      if (!mModelId) { toast.error('Seleccione el modelo del vehículo'); return; }
+    } else if (editingLegacyWalkin) {
+      // Legacy walk-in edit: only the name is required; model is NOT, since we keep
+      // it as free-text walk-in and never create a vehicle entity.
+      if (!mName.trim()) { toast.error('El nombre del cliente es requerido'); return; }
+    } else if (!fClientId || !fVehicleId) {
       toast.error('Completa los campos requeridos'); return;
     }
     setSaving(true);
@@ -511,10 +589,54 @@ const AdminReservas = () => {
       return;
     }
 
+    // Resolve how the reservation gets its client/vehicle/walk-in columns. Three paths:
+    //  - manualMode (NEW manual entry): create/reuse REAL entities, FKs set, walkin_* nulled.
+    //  - editingLegacyWalkin: keep as free-text walk-in, persist walkin_* columns, FKs nulled.
+    //  - normal: an existing client + vehicle were picked, FKs set, walkin_* nulled.
+    let assignClientId: string | null = fClientId || null;
+    let assignVehicleId: string | null = fVehicleId || null;
+    let walkinName: string | null = null;
+    let walkinPhone: string | null = null;
+    let walkinPlate: string | null = null;
+    if (manualMode) {
+      try {
+        const { vehicle } = await createOrReuseManualEntities(supabase, {
+          clientName: mName,
+          clientCedula: mCedula,
+          clientPhone: mPhone,
+          modelId: mModelId,
+          plate: mPlate,
+          year: mYear,
+        });
+        const assign = resolveReservationAssignment({
+          vehicle, clientId: null, walkinName: '', walkinPhone: '', walkinPlate: '',
+        });
+        // Real FKs now own the row: clear any stale walk-in text (W-g).
+        assignClientId = assign.client_id;
+        assignVehicleId = assign.vehicle_id;
+        walkinName = null; walkinPhone = null; walkinPlate = null;
+      } catch (err) {
+        console.error(err);
+        toast.error('Error al registrar el cliente o vehículo manual');
+        setSaving(false);
+        return;
+      }
+    } else if (editingLegacyWalkin) {
+      // Legacy walk-in: stays free-text, no entity creation, no model required.
+      assignClientId = null;
+      assignVehicleId = null;
+      walkinName = mName.trim() || null;
+      walkinPhone = mPhone.trim() || null;
+      walkinPlate = mPlate.trim().toUpperCase() || null;
+    }
+
     const payload: any = {
       dealership_id: fDealership,
-      client_id: fClientId,
-      vehicle_id: fVehicleId,
+      client_id: assignClientId,
+      vehicle_id: assignVehicleId,
+      walkin_client_name: walkinName,
+      walkin_client_phone: walkinPhone,
+      walkin_plate: walkinPlate,
       reservation_date: fDate,
       reservation_time: fTime + ':00',
       service_type: fService,
@@ -818,13 +940,13 @@ const AdminReservas = () => {
                   <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px]">
                     <div className="flex items-center gap-1 text-muted-foreground min-w-0">
                       <User className="w-3 h-3 shrink-0" />
-                      <span className="truncate font-medium text-foreground">{r.clients?.full_name || '-'}</span>
+                      <span className="truncate font-medium text-foreground">{r.clients?.full_name || r.walkin_client_name || '-'}</span>
                     </div>
                     <div className="flex items-center gap-1 text-muted-foreground min-w-0">
                       <Car className="w-3 h-3 shrink-0" />
-                      <span className="truncate">{r.vehicles?.vehicle_models?.brand} {r.vehicles?.vehicle_models?.name} {r.vehicles?.year}</span>
+                      <span className="truncate">{r.vehicles ? `${r.vehicles.vehicle_models?.brand || ''} ${r.vehicles.vehicle_models?.name || ''} ${r.vehicles.year}` : (r.walkin_plate || '-')}</span>
                     </div>
-                    <div className="text-muted-foreground pl-4">{r.vehicles?.plate || '-'}</div>
+                    <div className="text-muted-foreground pl-4">{r.vehicles?.plate || r.walkin_plate || '-'}</div>
                     <div className="text-muted-foreground pl-4">{r.current_mileage.toLocaleString()} km</div>
                   </div>
                   {/* Row 3: service + actions */}
@@ -901,12 +1023,14 @@ const AdminReservas = () => {
                       <br />
                       <span className="text-muted-foreground">{formatTime(r.reservation_time)}</span>
                     </TableCell>
-                    <TableCell>{r.clients?.full_name || '-'}</TableCell>
+                    <TableCell>{r.clients?.full_name || r.walkin_client_name || '-'}</TableCell>
                     <TableCell>{INCIDENCIA_TYPES.has(r.service_type) ? (r.dealerships?.state || '-') : (r.clients?.state || '-')}</TableCell>
                     <TableCell>
-                      {r.vehicles?.vehicle_models?.brand} {r.vehicles?.vehicle_models?.name} {r.vehicles?.year}
+                      {r.vehicles
+                        ? `${r.vehicles.vehicle_models?.brand || ''} ${r.vehicles.vehicle_models?.name || ''} ${r.vehicles.year}`
+                        : (r.walkin_plate || '-')}
                       <br />
-                      <span className="text-muted-foreground">{r.vehicles?.plate || '-'}</span>
+                      <span className="text-muted-foreground">{r.vehicles?.plate || r.walkin_plate || '-'}</span>
                     </TableCell>
                     <TableCell>{r.service_type}</TableCell>
                     <TableCell>
@@ -1174,35 +1298,61 @@ const AdminReservas = () => {
               </Select>
             </div>
 
-            {/* Cliente search */}
-            <div className="space-y-2">
-              <Label>Cliente *</Label>
-              <div className="relative">
-                <Input
-                  value={fClientSearch}
-                  onChange={e => { setFClientSearch(e.target.value); if (fClientId) { setFClientId(''); setFVehicleId(''); } }}
-                  placeholder="Buscar por nombre, cédula o placa..."
-                />
-                {clientResults.length > 0 && !fClientId && (
-                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-40 overflow-y-auto">
-                    {clientResults.map(c => (
-                      <button
-                        key={c.id}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex justify-between"
-                        onClick={() => selectClient(c)}
-                      >
-                        <span>{c.full_name}</span>
-                        <span className="text-xs text-muted-foreground">{c.cedula}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {searchingClients && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Buscando...</span>}
-              </div>
+            {/* Cliente: búsqueda existente o ingreso manual (crea cliente + vehículo) */}
+            <div className="flex items-center justify-between gap-2">
+              <Label>{editingLegacyWalkin ? 'Cliente walk-in' : manualMode ? 'Ingreso manual' : 'Cliente *'}</Label>
+              {/* The manual/existing toggle is hidden while editing a legacy walk-in:
+                  that row stays free-text and must not be converted to entities here. */}
+              {!editingLegacyWalkin && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs text-primary"
+                  onClick={() => {
+                    if (manualMode) {
+                      resetManualFields();
+                    } else {
+                      setManualMode(true);
+                      setFClientId(''); setFVehicleId(''); setFClientSearch(''); setClientResults([]); setClientVehicles([]);
+                    }
+                  }}
+                >
+                  {manualMode ? 'Buscar cliente existente' : 'Ingresar manualmente'}
+                </Button>
+              )}
             </div>
 
-            {/* Vehículo */}
-            {fClientId && (
+            {/* Cliente search (modo normal) */}
+            {!manualMode && !editingLegacyWalkin && (
+              <div className="space-y-2">
+                <div className="relative">
+                  <Input
+                    value={fClientSearch}
+                    onChange={e => { setFClientSearch(e.target.value); if (fClientId) { setFClientId(''); setFVehicleId(''); } }}
+                    placeholder="Buscar por nombre, cédula o placa..."
+                  />
+                  {clientResults.length > 0 && !fClientId && (
+                    <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-md max-h-40 overflow-y-auto">
+                      {clientResults.map(c => (
+                        <button
+                          key={c.id}
+                          className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex justify-between"
+                          onClick={() => selectClient(c)}
+                        >
+                          <span>{c.full_name}</span>
+                          <span className="text-xs text-muted-foreground">{c.cedula}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {searchingClients && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Buscando...</span>}
+                </div>
+              </div>
+            )}
+
+            {/* Vehículo (modo normal) */}
+            {!manualMode && fClientId && (
               <div className="space-y-2">
                 <Label>Vehículo *</Label>
                 {clientVehicles.length === 0 ? (
@@ -1222,6 +1372,54 @@ const AdminReservas = () => {
                     {fVehicleId && <WarrantyChip vehicleId={fVehicleId} />}
                   </>
                 )}
+              </div>
+            )}
+
+            {/* Ingreso manual NUEVO: crea cliente + vehículo reales.
+                Edición de walk-in LEGACY: edita texto libre (sin crear entidades). */}
+            {(manualMode || editingLegacyWalkin) && (
+              <div className="space-y-2">
+                <div className="rounded-md bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-start gap-2">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    {editingLegacyWalkin ? (
+                      <>
+                        <p className="font-semibold text-amber-800">Cliente walk-in (sin registrar)</p>
+                        <p className="text-amber-700">Se actualizan solo los datos de texto del walk-in. No se crea cliente ni vehículo.</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-amber-800">Ingreso manual</p>
+                        <p className="text-amber-700">Se creará un cliente y un vehículo nuevos con estos datos.</p>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1"><Label>Nombre *</Label><Input value={mName} onChange={e => setMName(e.target.value)} placeholder="Nombre del cliente" /></div>
+                  <div className="space-y-1"><Label>Teléfono</Label><Input value={mPhone} onChange={e => setMPhone(e.target.value)} placeholder="+58 412..." /></div>
+                  {/* Cédula / Modelo / Año only make sense when creating real entities. */}
+                  {!editingLegacyWalkin && (
+                    <>
+                      <div className="space-y-1"><Label>Cédula</Label><Input value={mCedula} onChange={e => setMCedula(e.target.value)} placeholder="V-12345678" /></div>
+                      <div className="space-y-1">
+                        <Label>Marca / Modelo *</Label>
+                        <Select value={mModelId} onValueChange={setMModelId}>
+                          <SelectTrigger><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
+                          <SelectContent>
+                            {vehicleModels.map(m => (
+                              <SelectItem key={m.id} value={m.id}>{m.brand} {m.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  )}
+                  <div className="space-y-1"><Label>Placa</Label><Input value={mPlate} onChange={e => setMPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="uppercase" /></div>
+                  {!editingLegacyWalkin && (
+                    <div className="space-y-1"><Label>Año</Label><Input type="number" value={mYear} onChange={e => setMYear(e.target.value)} placeholder={String(new Date().getFullYear())} /></div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1330,9 +1528,9 @@ const AdminReservas = () => {
           {completingRes && (
             <div className="space-y-4 py-2">
               <div className="rounded-md border p-3 bg-muted/30 text-xs space-y-1">
-                <p><span className="font-semibold">Cliente:</span> {completingRes.clients?.full_name || '-'}</p>
-                <p><span className="font-semibold">Vehículo:</span> {completingRes.vehicles ? `${completingRes.vehicles.vehicle_models?.brand} ${completingRes.vehicles.vehicle_models?.name} ${completingRes.vehicles.year}` : '-'}</p>
-                <p><span className="font-semibold">Placa:</span> {completingRes.vehicles?.plate || '-'}</p>
+                <p><span className="font-semibold">Cliente:</span> {completingRes.clients?.full_name || completingRes.walkin_client_name || '-'}</p>
+                <p><span className="font-semibold">Vehículo:</span> {completingRes.vehicles ? `${completingRes.vehicles.vehicle_models?.brand} ${completingRes.vehicles.vehicle_models?.name} ${completingRes.vehicles.year}` : (completingRes.walkin_plate || '-')}</p>
+                <p><span className="font-semibold">Placa:</span> {completingRes.vehicles?.plate || completingRes.walkin_plate || '-'}</p>
                 <p><span className="font-semibold">Servicio:</span> {completingRes.service_type}</p>
                 <p><span className="font-semibold">Km:</span> {completingRes.current_mileage.toLocaleString()}</p>
               </div>
@@ -1482,10 +1680,10 @@ const AdminReservas = () => {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Cliente</p>
                   <div className="flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <span className="font-medium">{detailRes.clients?.full_name || '-'}</span>
+                    <span className="font-medium">{detailRes.clients?.full_name || detailRes.walkin_client_name || '-'}</span>
                   </div>
                   {detailRes.clients?.cedula && <p className="text-xs text-muted-foreground pl-5">CI: {detailRes.clients.cedula}</p>}
-                  {detailRes.clients?.phone && <p className="text-xs text-muted-foreground pl-5">{detailRes.clients.phone}</p>}
+                  {(detailRes.clients?.phone || detailRes.walkin_client_phone) && <p className="text-xs text-muted-foreground pl-5">{detailRes.clients?.phone || detailRes.walkin_client_phone}</p>}
                 </div>
 
                 {/* Dealership */}
@@ -1503,9 +1701,9 @@ const AdminReservas = () => {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Vehículo</p>
                   <div className="flex items-center gap-1.5">
                     <Car className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <span>{detailRes.vehicles?.vehicle_models?.brand} {detailRes.vehicles?.vehicle_models?.name} {detailRes.vehicles?.year}</span>
+                    <span>{detailRes.vehicles ? `${detailRes.vehicles.vehicle_models?.brand || ''} ${detailRes.vehicles.vehicle_models?.name || ''} ${detailRes.vehicles.year}` : (detailRes.walkin_plate || '-')}</span>
                   </div>
-                  {detailRes.vehicles?.plate && <p className="text-xs text-muted-foreground pl-5">Placa: {detailRes.vehicles.plate}</p>}
+                  {(detailRes.vehicles?.plate || detailRes.walkin_plate) && <p className="text-xs text-muted-foreground pl-5">Placa: {detailRes.vehicles?.plate || detailRes.walkin_plate}</p>}
                 </div>
 
                 {/* Service */}
@@ -1606,7 +1804,7 @@ const AdminReservas = () => {
             <AlertDialogDescription>
               {deleteTarget && (
                 <>
-                  <span className="font-semibold">{deleteTarget.clients?.full_name || '-'}</span>
+                  <span className="font-semibold">{deleteTarget.clients?.full_name || deleteTarget.walkin_client_name || '-'}</span>
                   {' — '}{deleteTarget.service_type}
                   {' — '}{deleteTarget.reservation_date} {deleteTarget.reservation_time.substring(0, 5)}
                   <br />
