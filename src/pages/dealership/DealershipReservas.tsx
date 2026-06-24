@@ -521,13 +521,20 @@ const DealershipReservas = () => {
         if (!manual) { setSaving(false); return; }
         incVehicle = manual;
       }
+      const incAssign = resolveReservationAssignment({
+        vehicle: incVehicle,
+        clientId: manualActiveForCreate ? null : (unifiedClientId || null),
+        walkinName: fWalkinName, walkinPhone: fWalkinPhone, walkinPlate: fWalkinPlate,
+      });
+      // Vehicle is mandatory: no incidencia without a real vehicle or a walk-in plate.
+      if (!incAssign.vehicle_id && !incAssign.walkin_plate) {
+        toast.error('La incidencia debe tener un vehículo. Elegí la placa/vehículo del cliente o cargalo manualmente.');
+        setSaving(false);
+        return;
+      }
       const incPayload: Record<string, unknown> = {
         dealership_id: selectedDealership,
-        ...resolveReservationAssignment({
-          vehicle: incVehicle,
-          clientId: manualActiveForCreate ? null : (unifiedClientId || null),
-          walkinName: fWalkinName, walkinPhone: fWalkinPhone, walkinPlate: fWalkinPlate,
-        }),
+        ...incAssign,
         reservation_date: fDate,
         reservation_time: fTime || '08:00',
         service_type: fService,
@@ -585,6 +592,14 @@ const DealershipReservas = () => {
       clientId: manualActiveForCreate ? null : (unifiedClientId || null),
       walkinName: fWalkinName, walkinPhone: fWalkinPhone, walkinPlate: fWalkinPlate,
     });
+
+    // Vehicle is mandatory: block the client-only path that used to save vehicle_id = null
+    // (and reached Kommo with no vehicle). A real FK or a walk-in plate must be present.
+    if (!assign.vehicle_id && !assign.walkin_plate) {
+      toast.error('La reserva debe tener un vehículo. Elegí la placa/vehículo del cliente o cargalo manualmente.');
+      setSaving(false);
+      return;
+    }
 
     if (editingRes) {
       const updatePayload = {
