@@ -14,6 +14,8 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
+import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
+import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
 
@@ -71,7 +73,19 @@ function KpiCard({ icon: Icon, label, value, color, sub }: { icon: any; label: s
 const DealershipDashboard = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { selectedDealership, loading: loadingAccess } = useDealershipAccess();
+  const { salesperson: currentSalesperson, loading: loadingSalesperson } = useCurrentSalesperson();
+  const { user, profile, role } = useAuth();
   const isMobile = useIsMobile();
+
+  // Individual salesperson view: gated SOLELY by the "vendedor" role. Roles like
+  // concesionario/admin/superadmin must always see the full aggregated dealership
+  // data, even when they happen to be linked to an active salespersons record.
+  // For a vendedor, prefer the linked salespersons record name, then fall back to
+  // the profile full_name.
+  const isVendedor = role?.name?.toLowerCase() === 'vendedor';
+  const salespersonName = isVendedor
+    ? (currentSalesperson?.name ?? profile?.full_name ?? null)
+    : null;
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,6 +96,9 @@ const DealershipDashboard = () => {
 
   useEffect(() => {
     if (loadingAccess) return;
+    // Wait for the salesperson lookup to settle so the individual-vs-aggregated
+    // scope is decided before fetching (avoids flash/double-fetch).
+    if (loadingSalesperson) return;
     if (!selectedDealership) { setLoading(false); return; }
 
     const load = async () => {
@@ -95,6 +112,10 @@ const DealershipDashboard = () => {
       let rq: any = supabase.from('reservations')
         .select('id, status, reservation_date, service_type, created_at')
         .eq('dealership_id', selectedDealership);
+      // Individual salesperson scope: prospects have a salesperson column, but
+      // reservations do not — fall back to created_by_profile_id for reservations.
+      if (salespersonName) pq = pq.eq('salesperson', salespersonName);
+      if (salespersonName && user?.id) rq = rq.eq('created_by_profile_id', user.id);
       if (since) { pq = pq.gte('created_at', since); rq = rq.gte('created_at', since); }
       if (until) { pq = pq.lte('created_at', until); rq = rq.lte('created_at', until); }
 
@@ -105,7 +126,7 @@ const DealershipDashboard = () => {
       setLoading(false);
     };
     load();
-  }, [selectedDealership, loadingAccess, fechaDesde, fechaHasta]);
+  }, [selectedDealership, loadingAccess, loadingSalesperson, fechaDesde, fechaHasta, salespersonName, user?.id]);
 
   // ─── KPIs ───
   const totalProspects = prospects.length;
@@ -239,7 +260,7 @@ const DealershipDashboard = () => {
         <div>
           <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
           <p className="text-xs sm:text-sm text-muted-foreground">
-            <span className="font-medium text-foreground/80">{rangeDescription(fechaDesde, fechaHasta)}</span> — Datos de este concesionario
+            <span className="font-medium text-foreground/80">{rangeDescription(fechaDesde, fechaHasta)}</span> — {salespersonName ? 'Tus datos' : 'Datos de este concesionario'}
           </p>
         </div>
         <DashboardDateRange
@@ -250,10 +271,14 @@ const DealershipDashboard = () => {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className={cn("grid grid-cols-2 gap-3", salespersonName ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
         <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
         <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600"
           sub={`${ganados} ganados de ${totalProspects}`} />
+        {salespersonName && (
+          <KpiCard icon={UserCheck} label="Clientes (ganados)" value={ganados} color="text-emerald-600"
+            sub="Prospectos ganados" />
+        )}
         <KpiCard icon={CalendarDays} label="Reservas" value={totalReservations} color="text-primary" />
         <KpiCard icon={ClipboardList} label="Pendientes" value={reservasPendientes} color="text-amber-600"
           sub={`${reservasCompletadas} completadas`} />
@@ -351,7 +376,7 @@ const DealershipDashboard = () => {
       </Card>
 
       {/* Source bar + Salesperson ranking */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className={cn("grid grid-cols-1 gap-4", !salespersonName && "md:grid-cols-2")}>
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
@@ -375,7 +400,8 @@ const DealershipDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Salesperson ranking */}
+        {/* Salesperson ranking — hidden in individual salesperson view */}
+        {!salespersonName && (
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
@@ -430,10 +456,11 @@ const DealershipDashboard = () => {
             )}
           </CardContent>
         </Card>
+        )}
       </div>
 
-      {/* Contact Type by Salesperson */}
-      {contactTypeBySalesperson.data.length > 0 && (
+      {/* Contact Type by Salesperson — hidden in individual salesperson view */}
+      {!salespersonName && contactTypeBySalesperson.data.length > 0 && (
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
