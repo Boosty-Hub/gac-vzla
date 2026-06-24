@@ -13,9 +13,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { isRecurrentClient } from '@/lib/recompra';
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
 
@@ -595,6 +596,7 @@ const AdminClientes = () => {
         <div className="space-y-2">
           {clients.map(c => {
             const hasWarranty = c.vehicles?.some(v => v.warranty_active);
+            const isRecurrent = isRecurrentClient({ cedula: c.cedula, vehicleCount: c.vehicles?.length ?? 0 });
             const waUrl = buildClientWaUrl(c);
             const isExpanded = expandedClient === c.id;
             return (
@@ -613,6 +615,11 @@ const AdminClientes = () => {
                           <Badge variant={c.is_active ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
                             {c.is_active ? 'Activo' : 'Inactivo'}
                           </Badge>
+                          {isRecurrent && (
+                            <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 gap-0.5">
+                              <Repeat className="w-2.5 h-2.5" /> Recurrente
+                            </Badge>
+                          )}
                           {c.vehicles?.length > 0 && (
                             hasWarranty ? (
                               <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-800 gap-0.5">
@@ -761,9 +768,16 @@ const AdminClientes = () => {
                     <TableCell className="text-muted-foreground">{c.email || '-'}</TableCell>
                     <TableCell>{c.city || '-'}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
-                        <Car className="w-2.5 h-2.5" /> {c.vehicles?.length ?? 0}
-                      </Badge>
+                      <div className="flex items-center gap-1">
+                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
+                          <Car className="w-2.5 h-2.5" /> {c.vehicles?.length ?? 0}
+                        </Badge>
+                        {isRecurrentClient({ cedula: c.cedula, vehicleCount: c.vehicles?.length ?? 0 }) && (
+                          <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 gap-0.5" title="Cliente recurrente">
+                            <Repeat className="w-2.5 h-2.5" /> Recurrente
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {c.vehicles?.length > 0 ? (
