@@ -784,7 +784,16 @@ const DealershipProspectos = () => {
     } else {
       if (phone) {
         const duplicate = await checkDuplicatePhone(phone);
-        if (duplicate) { setDuplicateProspect(duplicate); setSaving(false); return; }
+        if (duplicate) {
+          // Close the create modal BEFORE showing the duplicate alert. Stacking the
+          // AlertDialog on top of an open modal (Radix Dialog / vaul Drawer) leaves
+          // its "Ver" button non-interactive — the underlying modal traps focus and
+          // pointer-events ("no me aparece ni cliqueable").
+          setDialogOpen(false);
+          setDuplicateProspect(duplicate);
+          setSaving(false);
+          return;
+        }
       }
       // C5: creating a brand-new prospect already marked "perdido" must capture a
       // mandatory loss reason first; defer the insert to the loss-reason dialog.
