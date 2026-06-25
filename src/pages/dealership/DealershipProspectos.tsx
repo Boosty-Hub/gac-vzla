@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
@@ -150,6 +150,10 @@ const DealershipProspectos = () => {
   // When viewing a prospect that belongs to another salesperson (reached via the
   // "already managed" duplicate alert) the dialog opens read-only: saving is blocked.
   const [editReadOnly, setEditReadOnly] = useState(false);
+  // Read-only preview (mirrors the admin portal): clicking a row/card opens this
+  // before editing, so the salesperson can review a prospect without touching it.
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailProspect, setDetailProspect] = useState<Prospect | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
@@ -666,6 +670,11 @@ const DealershipProspectos = () => {
     setDialogOpen(true);
   };
 
+  const openDetail = (p: Prospect) => {
+    setDetailProspect(p);
+    setDetailOpen(true);
+  };
+
   const openEditDialog = (p: Prospect, readOnly = false) => {
     // Limpiar cualquier estado de creación guardado para evitar confusión
     try { sessionStorage.removeItem(SS_KEY); } catch {}
@@ -969,25 +978,14 @@ const DealershipProspectos = () => {
 
   // Open the prospect referenced by the duplicate alert. The current salesperson
   // may not see prospects owned by others, so fetch it directly by id (bypassing
-  // the salesperson filter) and open the edit dialog read-only when it is not theirs.
+  // the salesperson filter) and open the read-only preview — same UX as the admin
+  // portal. The create modal was already closed before the alert was shown.
   const viewDuplicateProspect = async () => {
     if (!duplicateProspect) return;
     const { data, error } = await supabase.from('prospects').select('*').eq('id', duplicateProspect.id).single();
-    if (error || !data) { toast.error('No se pudo abrir el prospecto'); console.error(error); return; }
-    const p = data as Prospect;
-    const ownName = autoSalesperson || profile?.full_name || '';
-    const isOwn = !!ownName && (p.salesperson || '') === ownName;
-    // Vendedor/salesperson roles only edit their own prospects; otherwise read-only.
-    const readOnly = (isVendedor || isSalesperson) ? !isOwn : false;
-    // Close the duplicate alert AND the create modal beneath it before opening the
-    // edit view. Both are Radix modals; reopening the same modal while they tear
-    // down races with its onOpenChange (which clears editingProspect via
-    // setDialogOpen(false)), so the edit dialog would never appear ("no me lleva").
-    // Defer the open one tick so it lands on a clean state.
     setDuplicateProspect(null);
-    setDialogOpenRaw(false);
-    setEditingProspect(null);
-    setTimeout(() => openEditDialog(p, readOnly), 0);
+    if (error || !data) { toast.error('No se pudo abrir el prospecto'); console.error(error); return; }
+    openDetail(data as Prospect);
   };
 
   const toggleProspectFlag = async (id: string, field: 'test_drive' | 'visited_showroom', value: boolean) => {
@@ -1008,7 +1006,7 @@ const DealershipProspectos = () => {
     const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
     const src = PROSPECT_SOURCES.find(s => s.value === p.source);
     return (
-      <Card className="gac-shadow">
+      <Card className="gac-shadow cursor-pointer hover:bg-muted/30 transition-colors" onClick={() => openDetail(p)}>
         <CardContent className="p-3 space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-start gap-2 flex-1 min-w-0">
@@ -1023,7 +1021,7 @@ const DealershipProspectos = () => {
             </div>
             {canEdit ? (
               <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
-                <SelectTrigger className="h-6 w-auto text-[10px] px-1.5 py-0 border-0 bg-transparent shrink-0">
+                <SelectTrigger onClick={e => e.stopPropagation()} className="h-6 w-auto text-[10px] px-1.5 py-0 border-0 bg-transparent shrink-0">
                   <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
                 </SelectTrigger>
                 <SelectContent>
@@ -1050,16 +1048,16 @@ const DealershipProspectos = () => {
             {p.phone && (() => {
               const waUrl = buildProspectWaUrl(p, autoSalesperson || p.salesperson || '');
               return waUrl ? (
-                <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp al prospecto" className="text-green-600 hover:text-green-700">
+                <a href={waUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title="Enviar WhatsApp al prospecto" className="text-green-600 hover:text-green-700">
                   <MessageCircle className="w-3.5 h-3.5" />
                 </a>
               ) : null;
             })()}
-            <button onClick={() => setUpdatesSidebarProspect(p)} title="Ver actualizaciones" className="text-primary hover:text-primary/80">
+            <button onClick={e => { e.stopPropagation(); setUpdatesSidebarProspect(p); }} title="Ver actualizaciones" className="text-primary hover:text-primary/80">
               <Activity className="w-3.5 h-3.5" />
             </button>
             {canEdit && (
-              <button onClick={() => openEditDialog(p)} title="Editar prospecto" className="text-muted-foreground hover:text-foreground">
+              <button onClick={e => { e.stopPropagation(); openEditDialog(p); }} title="Editar prospecto" className="text-muted-foreground hover:text-foreground">
                 <Pencil className="w-3.5 h-3.5" />
               </button>
             )}
@@ -1354,8 +1352,8 @@ const DealershipProspectos = () => {
                   const st = PROSPECT_STATUSES.find(s => s.name === p.status) || PROSPECT_STATUSES[0];
                   const src = PROSPECT_SOURCES.find(s => s.value === p.source);
                   return (
-                    <TableRow key={p.id} className="[&>td]:py-1.5">
-                      <TableCell className="pl-3">
+                    <TableRow key={p.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(p)}>
+                      <TableCell className="pl-3" onClick={e => e.stopPropagation()}>
                         {canEdit && (
                           <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-primary cursor-pointer"
                             checked={selectedIds.has(p.id)} onChange={() => toggleSelect(p.id)} onClick={e => e.stopPropagation()} />
@@ -1389,7 +1387,7 @@ const DealershipProspectos = () => {
                         <TableCell>
                           {canEdit ? (
                             <Select value={p.status} onValueChange={v => updateStatus(p.id, v)}>
-                              <SelectTrigger className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent">
+                              <SelectTrigger onClick={e => e.stopPropagation()} className="h-6 w-[110px] text-[10px] px-1.5 py-0 border-0 bg-transparent">
                                 <Badge className={cn("text-[10px] px-1.5 py-0", st?.color)}>{st?.label}</Badge>
                               </SelectTrigger>
                               <SelectContent>
@@ -1458,7 +1456,7 @@ const DealershipProspectos = () => {
                           {p.phone && (() => {
                             const waUrl = buildProspectWaUrl(p, autoSalesperson || p.salesperson || '');
                             return waUrl ? (
-                              <a href={waUrl} target="_blank" rel="noopener noreferrer" title="Enviar WhatsApp al prospecto" className="text-green-600 hover:text-green-700 shrink-0">
+                              <a href={waUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} title="Enviar WhatsApp al prospecto" className="text-green-600 hover:text-green-700 shrink-0">
                                 <MessageCircle className="w-3.5 h-3.5" />
                               </a>
                             ) : null;
@@ -1676,6 +1674,86 @@ const DealershipProspectos = () => {
               </Button>
             )}
           </ResponsiveModalFooter>
+      </ResponsiveModal>
+
+      {/* READ-ONLY PREVIEW (mirrors admin) — opened on row/card click and from the duplicate alert */}
+      <ResponsiveModal open={detailOpen} onOpenChange={setDetailOpen} className="max-w-md">
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle className="font-display flex items-center gap-2">
+            <User className="w-4 h-4" /> Detalle del Prospecto
+          </ResponsiveModalTitle>
+        </ResponsiveModalHeader>
+        {detailProspect && (() => {
+          const st = PROSPECT_STATUSES.find(s => s.name === detailProspect.status) || PROSPECT_STATUSES[0];
+          const src = PROSPECT_SOURCES.find(s => s.value === detailProspect.source);
+          const Field = ({ label, icon: Icon, value, children }: { label: string; icon?: any; value?: string | null; children?: ReactNode }) => (
+            value || children ? (
+              <div className="flex items-start gap-3 py-2 border-b border-border/50 last:border-0">
+                <div className="w-24 shrink-0 text-[11px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 pt-0.5">
+                  {Icon && <Icon className="w-3 h-3 shrink-0" />}{label}
+                </div>
+                <div className="flex-1 text-sm text-foreground min-w-0">
+                  {children || <span className="truncate block">{value}</span>}
+                </div>
+              </div>
+            ) : null
+          );
+          return (
+            <div className="py-1 space-y-3">
+              <div className="flex items-start justify-between gap-3 pb-2 border-b">
+                <div className="min-w-0">
+                  <p className="font-semibold text-base leading-tight">{detailProspect.name}</p>
+                  {detailProspect.company_name && <p className="text-xs text-muted-foreground mt-0.5">{detailProspect.company_name}</p>}
+                </div>
+                <Badge className={cn("text-xs px-2 py-0.5 shrink-0 mt-0.5", st?.color)}>{st?.label}</Badge>
+              </div>
+
+              <div className="divide-y divide-border/50">
+                <Field label="Teléfono" icon={Phone} value={detailProspect.phone} />
+                <Field label="Email" icon={Mail} value={detailProspect.email} />
+                {detailProspect.company_name && <Field label="Empresa" icon={Users} value={detailProspect.company_name} />}
+                <Field label="Modelo" icon={Car} value={detailProspect.model_interest} />
+                <Field label="Estado Vzla" icon={MapPin} value={detailProspect['Estado de Vnzla']} />
+                {!isSalesperson && <Field label="Vendedor" icon={User} value={detailProspect.salesperson} />}
+                <Field label="Fuente" icon={Tag}>
+                  <Badge variant="outline" className="text-xs capitalize">{src?.label || detailProspect.source}</Badge>
+                </Field>
+                <Field label="Test Drive" icon={Car}>
+                  <Badge variant={detailProspect.test_drive ? 'default' : 'outline'} className="text-xs">
+                    {detailProspect.test_drive ? 'Sí' : 'No'}
+                  </Badge>
+                </Field>
+                <Field label="Show Room" icon={Users}>
+                  <Badge variant={detailProspect.visited_showroom ? 'default' : 'outline'} className="text-xs">
+                    {detailProspect.visited_showroom ? 'Sí' : 'No'}
+                  </Badge>
+                </Field>
+                {detailProspect.person_type && <Field label="Tipo persona" icon={User} value={PERSON_TYPES.find(pt => pt.value === detailProspect.person_type)?.label || detailProspect.person_type} />}
+                {detailProspect.gender && <Field label="Género" icon={User} value={GENDERS.find(g => g.value === detailProspect.gender)?.label || detailProspect.gender} />}
+                {detailProspect.age_range && <Field label="Rango edad" icon={User} value={AGE_RANGES.find(a => a.value === detailProspect.age_range)?.label || detailProspect.age_range} />}
+                {detailProspect.payment_modality && <Field label="Modalidad pago" icon={Tag} value={detailProspect.payment_modality} />}
+                {detailProspect.source === 'evento' && <Field label="Evento" icon={CalendarDays} value={detailProspect.event_name} />}
+                <Field label="Registro" icon={CalendarDays} value={new Date(detailProspect.created_at).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })} />
+                {detailProspect.updated_at && detailProspect.updated_at !== detailProspect.created_at && (
+                  <Field label="Actualizado" icon={CalendarDays} value={new Date(detailProspect.updated_at).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })} />
+                )}
+              </div>
+
+              {detailProspect.notes && (
+                <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
+                  <p className="font-semibold text-[11px] uppercase tracking-wide text-muted-foreground">Notas</p>
+                  <p className="text-foreground whitespace-pre-wrap leading-relaxed">{detailProspect.notes}</p>
+                </div>
+              )}
+
+              <ResponsiveModalFooter className="flex-col sm:flex-row gap-2 pt-1">
+                {canEdit && (
+                  <Button size="sm" variant="outline" className="text-xs w-full sm:w-auto" onClick={() => { setDetailOpen(false); openEditDialog(detailProspect); }}>Editar</Button>
+                )}
+              </ResponsiveModalFooter>
+            </div>
+          );
+        })()}
       </ResponsiveModal>
 
       {/* CONFIRM PARTIAL CREATE/EDIT */}
