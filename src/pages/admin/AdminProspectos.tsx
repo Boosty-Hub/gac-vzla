@@ -218,6 +218,8 @@ const AdminProspectos = () => {
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailProspect, setDetailProspect] = useState<Prospect | null>(null);
+  // Duplicate-phone alert (same UX as the dealership portal)
+  const [duplicateMatch, setDuplicateMatch] = useState<{ id: string; name: string; phone: string | null; salesperson: string | null } | null>(null);
 
   // Import XLSX
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -444,28 +446,19 @@ const AdminProspectos = () => {
     return null;
   };
 
-  const showDuplicateToast = (dup: DuplicateMatch) => {
-    const managedBy = dup.salesperson?.trim() || 'sin vendedor asignado';
-    toast.error(`Este cliente está siendo gestionado por ${managedBy}`, {
-      action: {
-        label: 'Ver',
-        onClick: async () => {
-          // Nunca abrir el detalle con el objeto parcial DuplicateMatch: editarlo
-          // guardaría campos vacíos sobre el prospecto real (corrupción de datos).
-          // Buscamos el prospecto COMPLETO por id antes de abrir el detalle.
-          const { data, error } = await supabase
-            .from('prospects')
-            .select('*, dealerships(name)')
-            .eq('id', dup.id)
-            .single();
-          if (error || !data) {
-            toast.error('No se pudo cargar el prospecto');
-            return;
-          }
-          openDetail(data as Prospect);
-        },
-      },
-    });
+  // Open the prospect referenced by the duplicate alert. Never open with the partial
+  // DuplicateMatch object — editing it would save empty fields over the real prospect
+  // (data corruption). Fetch the FULL prospect by id, then open the read-only preview.
+  const viewDuplicateMatch = async () => {
+    if (!duplicateMatch) return;
+    const { data, error } = await supabase
+      .from('prospects')
+      .select('*, dealerships(name)')
+      .eq('id', duplicateMatch.id)
+      .single();
+    setDuplicateMatch(null);
+    if (error || !data) { toast.error('No se pudo cargar el prospecto'); return; }
+    openDetail(data as Prospect);
   };
 
   const doSave = async () => {
@@ -474,10 +467,10 @@ const AdminProspectos = () => {
     if (editing) {
       if (payload.phone) {
         const duplicate = await checkDuplicatePhone(payload.phone, editing.id);
-        // Close the modal BEFORE showing the toast. While the Radix Dialog is open it
-        // sets pointer-events:none on <body>, so the sonner toast (portaled to body)
-        // renders but its "Ver" action is non-clickable ("no me aparece ni cliqueable").
-        if (duplicate) { setDialogOpen(false); showDuplicateToast(duplicate); setSaving(false); return; }
+        // Close the create/edit modal BEFORE showing the alert so the stacked
+        // AlertDialog buttons stay interactive (Radix sets pointer-events:none on the
+        // body while a modal is open).
+        if (duplicate) { setDialogOpen(false); setDuplicateMatch(duplicate); setSaving(false); return; }
       }
       const { error } = await supabase.from('prospects').update(payload).eq('id', editing.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
@@ -496,7 +489,7 @@ const AdminProspectos = () => {
     } else {
       if (payload.phone) {
         const duplicate = await checkDuplicatePhone(payload.phone);
-        if (duplicate) { setDialogOpen(false); showDuplicateToast(duplicate); setSaving(false); return; }
+        if (duplicate) { setDialogOpen(false); setDuplicateMatch(duplicate); setSaving(false); return; }
       }
       const { data: inserted, error } = await supabase.from('prospects').insert(payload).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
@@ -1656,6 +1649,22 @@ const AdminProspectos = () => {
             );
           })()}
       </ResponsiveModal>
+
+      {/* DUPLICATE PROSPECT ALERT — same UX as the dealership portal */}
+      <AlertDialog open={duplicateMatch !== null} onOpenChange={open => { if (!open) setDuplicateMatch(null); }}>
+        <AlertDialogContent className={cn(isMobile && "max-w-[calc(100vw-2rem)]")}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cliente ya gestionado</AlertDialogTitle>
+            <AlertDialogDescription>
+              Este cliente está siendo gestionado por {duplicateMatch?.salesperson?.trim() || 'sin vendedor asignado'}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cerrar</AlertDialogCancel>
+            <AlertDialogAction onClick={viewDuplicateMatch} className="gac-gradient">Ver</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* IMPORT PREVIEW DIALOG */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
