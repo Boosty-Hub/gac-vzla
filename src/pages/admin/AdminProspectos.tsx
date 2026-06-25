@@ -474,7 +474,10 @@ const AdminProspectos = () => {
     if (editing) {
       if (payload.phone) {
         const duplicate = await checkDuplicatePhone(payload.phone, editing.id);
-        if (duplicate) { showDuplicateToast(duplicate); setSaving(false); return; }
+        // Close the modal BEFORE showing the toast. While the Radix Dialog is open it
+        // sets pointer-events:none on <body>, so the sonner toast (portaled to body)
+        // renders but its "Ver" action is non-clickable ("no me aparece ni cliqueable").
+        if (duplicate) { setDialogOpen(false); showDuplicateToast(duplicate); setSaving(false); return; }
       }
       const { error } = await supabase.from('prospects').update(payload).eq('id', editing.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
@@ -493,7 +496,7 @@ const AdminProspectos = () => {
     } else {
       if (payload.phone) {
         const duplicate = await checkDuplicatePhone(payload.phone);
-        if (duplicate) { showDuplicateToast(duplicate); setSaving(false); return; }
+        if (duplicate) { setDialogOpen(false); showDuplicateToast(duplicate); setSaving(false); return; }
       }
       const { data: inserted, error } = await supabase.from('prospects').insert(payload).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
