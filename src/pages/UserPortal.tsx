@@ -22,6 +22,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { createKommoReservation } from '@/lib/kommo';
+import { resolveWarrantyCondition, evaluateWarranty, type WarrantyConditionRef } from '@/lib/warranty';
+import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 
 interface ClientData {
   id: string;
@@ -44,13 +46,6 @@ interface Vehicle {
   warranty_active: boolean;
   purchase_date: string | null;
   vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null } | null;
-}
-
-interface WarrantyCondition {
-  max_km: number;
-  max_months: number;
-  service_interval_km: number;
-  name: string;
 }
 
 interface VehicleServiceRecord {
@@ -77,6 +72,7 @@ interface Dealership {
   is_service_center: boolean;
   opening_hour: number;
   closing_hour: number;
+  bays: number | null;
 }
 
 interface ServiceType {
@@ -152,6 +148,22 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
 };
 
+// Minimum active vehicles required to switch "Mis Vehículos" into the enhanced
+// fleet-control view (search, filters, prioritization). Change to 3 in one line.
+const FLEET_VIEW_MIN_VEHICLES = 2;
+
+// A service is considered "due soon" when the vehicle is within this many km
+// below its next projected service mileage.
+const SERVICE_PROXIMITY_KM = 1500;
+
+type ServiceStatus = 'vencido' | 'proximo' | 'al_dia';
+
+const SERVICE_STATUS_CONFIG: Record<ServiceStatus, { label: string; color: string }> = {
+  vencido: { label: 'Servicio vencido', color: 'bg-red-100 text-red-800' },
+  proximo: { label: 'Servicio próximo', color: 'bg-yellow-100 text-yellow-800' },
+  al_dia: { label: 'Servicio al día', color: 'bg-green-100 text-green-800' },
+};
+
 const UP_LS_KEY = 'userportal_reserva_flow';
 const getUpLS = () => { try { return JSON.parse(localStorage.getItem(UP_LS_KEY) || '{}'); } catch { return {}; } };
 
@@ -182,7 +194,7 @@ const UserPortal = () => {
   const [cancelTarget, setCancelTarget] = useState<Reservation | null>(null);
   const [cancelling, setCancelling] = useState(false);
   // Warranty & vehicle history
-  const [warrantyCond, setWarrantyCond] = useState<WarrantyCondition | null>(null);
+  const [warrantyConditions, setWarrantyConditions] = useState<WarrantyConditionRef[]>([]);
   const [selectedVehDetail, setSelectedVehDetail] = useState<Vehicle | null>(null);
   const [vehHistory, setVehHistory] = useState<VehicleServiceRecord[]>([]);
   const [loadingVehHistory, setLoadingVehHistory] = useState(false);
@@ -215,9 +227,16 @@ const UserPortal = () => {
   const [mileage, setMileage] = useState<string>(() => getUpLS().mileage || '');
   const [notes, setNotes] = useState<string>(() => getUpLS().notes || '');
   const [reservaReportUrl, setReservaReportUrl] = useState<string | null>(null);
-  const [occupiedTimes, setOccupiedTimes] = useState<string[]>([]);
+  // Raw non-cancelled reservations for the chosen dealership + date; a slot is only
+  // full when concurrent bookings reach the dealership's bay capacity.
+  const [dayReservations, setDayReservations] = useState<CapacityReservation[]>([]);
   const [loadingTimes, setLoadingTimes] = useState(false);
   const [vehicleSearch, setVehicleSearch] = useState('');
+
+  // Fleet-control view (enhanced "Mis Vehículos" when client has multiple vehicles)
+  const [fleetSearch, setFleetSearch] = useState('');
+  const [fleetServiceFilter, setFleetServiceFilter] = useState<'todos' | 'vencido' | 'proximo' | 'al_dia'>('todos');
+  const [fleetWarrantyFilter, setFleetWarrantyFilter] = useState<'todas' | 'activa' | 'vencida'>('todas');
 
   const handleSignOut = async () => {
     try { await signOut(); } catch (e) { console.error(e); }
@@ -249,23 +268,23 @@ const UserPortal = () => {
   const fetchOccupiedTimes = async (dealershipId: string, date: Date) => {
     if (!dealershipId || !date) return;
     setLoadingTimes(true);
-    setOccupiedTimes([]);
+    setDayReservations([]);
     setSelectedTime('');
-    
+
     const dateStr = format(date, 'yyyy-MM-dd');
     const { data } = await supabase
       .from('reservations')
-      .select('reservation_time')
+      .select('reservation_time, service_type')
       .eq('dealership_id', dealershipId)
       .eq('reservation_date', dateStr)
       .neq('status', 'cancelada');
-    
-    if (data) {
-      const times = data.map(r => r.reservation_time.substring(0, 5));
-      setOccupiedTimes(times);
-    }
+
+    if (data) setDayReservations(data as CapacityReservation[]);
     setLoadingTimes(false);
   };
+
+  const getServiceDuration = (name: string) =>
+    serviceTypes.find(s => s.name === name)?.duration_minutes ?? 60;
 
   const handleDateSelectReserva = (date: Date | undefined) => {
     setSelectedDate(date);
@@ -335,7 +354,7 @@ const UserPortal = () => {
       // Fetch dealerships
       const { data: deals } = await supabase
         .from('dealerships')
-        .select('id, name, city, state, phone, address, google_maps_url, is_service_center, opening_hour, closing_hour')
+        .select('id, name, city, state, phone, address, google_maps_url, is_service_center, opening_hour, closing_hour, bays')
         .eq('is_active', true)
         .eq('is_service_center', true);
       setDealerships(sortDealerships((deals || []) as Dealership[]));
@@ -348,13 +367,12 @@ const UserPortal = () => {
         .order('name');
       setServiceTypes((stData || []) as unknown as ServiceType[]);
 
-      // Fetch warranty conditions
+      // Fetch warranty conditions (full active set for the shared warranty lib)
       const { data: wcData } = await supabase
         .from('warranty_conditions')
-        .select('name, max_km, max_months, service_interval_km')
-        .eq('is_active', true)
-        .limit(1);
-      if (wcData && wcData.length > 0) setWarrantyCond(wcData[0] as WarrantyCondition);
+        .select('id, name, max_km, max_months, service_interval_km, is_active')
+        .eq('is_active', true);
+      setWarrantyConditions((wcData || []) as WarrantyConditionRef[]);
 
       setLoading(false);
     };
@@ -413,29 +431,104 @@ const UserPortal = () => {
     })();
   }, [vehicles]);
 
+  // Warranty evaluation delegates to the shared @/lib/warranty module (same logic
+  // as WarrantyChip). Service count is informational only and no longer voids the
+  // warranty. Uses per-model overrides with global-condition fallback.
   const evaluateVehicleWarranty = (v: Vehicle) => {
-    const m = v.vehicle_models;
-    const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);
-    const maxKm = hasModelWarranty && m!.warranty_km != null ? m!.warranty_km : warrantyCond?.max_km ?? 0;
-    const maxMonths = hasModelWarranty && m!.warranty_months != null ? m!.warranty_months : warrantyCond?.max_months ?? 0;
-    const intervalKm = hasModelWarranty && m!.warranty_service_interval_km != null ? m!.warranty_service_interval_km : warrantyCond?.service_interval_km ?? 0;
-    if (!hasModelWarranty && !warrantyCond) return { active: false, reason: 'Sin condiciones configuradas', monthsRemaining: 0, kmRemaining: 0, servicesExpected: 0, servicesCompleted: 0, nextServiceKm: 0 };
-    const reasons: string[] = [];
-    const kmRemaining = maxKm - v.mileage;
-    if (maxKm > 0 && v.mileage > maxKm) reasons.push(`Excede ${maxKm.toLocaleString()} km`);
-    let monthsRemaining = maxMonths;
-    if (v.purchase_date) {
-      const purchase = new Date(v.purchase_date);
-      const now = new Date();
-      const elapsed = (now.getFullYear() - purchase.getFullYear()) * 12 + (now.getMonth() - purchase.getMonth());
-      monthsRemaining = maxMonths - elapsed;
-      if (maxMonths > 0 && elapsed > maxMonths) reasons.push(`Excede ${maxMonths} meses`);
-    }
-    const servicesExpected = intervalKm > 0 ? Math.floor(v.mileage / intervalKm) : 0;
-    const servicesCompleted = vehServiceCounts[v.id] || 0;
-    if (servicesCompleted < servicesExpected) reasons.push(`Servicios: ${servicesCompleted}/${servicesExpected}`);
-    const nextServiceKm = intervalKm > 0 ? (Math.floor(v.mileage / intervalKm) + 1) * intervalKm : 0;
-    return { active: reasons.length === 0, reason: reasons.join(' · '), monthsRemaining: Math.max(0, monthsRemaining), kmRemaining: Math.max(0, kmRemaining), servicesExpected, servicesCompleted, nextServiceKm };
+    const resolved = resolveWarrantyCondition(v.vehicle_models, warrantyConditions);
+    const result = evaluateWarranty(
+      { mileage: v.mileage, warranty_active: v.warranty_active, purchase_date: v.purchase_date },
+      resolved,
+      vehServiceCounts[v.id] || 0,
+    );
+    return {
+      active: result.active,
+      reason: result.reasons.join(' · '),
+      monthsRemaining: result.monthsRemaining,
+      kmRemaining: result.kmRemaining,
+      servicesExpected: result.servicesExpected,
+      servicesCompleted: result.servicesCompleted,
+      nextServiceKm: result.nextServiceKm,
+    };
+  };
+
+  // Plates of vehicles that already have an open service reservation.
+  const pendingServicePlates = new Set(
+    reservations
+      .filter(r => ['pendiente', 'confirmada', 'en_proceso'].includes(r.status))
+      .map(r => (r.vehicles?.plate || '').toLowerCase())
+      .filter(Boolean),
+  );
+
+  // Derive a per-vehicle service status from the already-loaded warranty projection
+  // (expected vs completed services, nextServiceKm) and the client's pending
+  // reservations. Purely client-side — no extra Supabase calls.
+  const getServiceStatus = (
+    v: Vehicle,
+    w: { nextServiceKm: number; servicesExpected: number; servicesCompleted: number },
+  ): ServiceStatus => {
+    // A scheduled reservation means the service is already being handled.
+    if (pendingServicePlates.has((v.plate || '').toLowerCase())) return 'proximo';
+    // Behind on services for the driven mileage -> overdue.
+    if (w.servicesExpected > w.servicesCompleted) return 'vencido';
+    // Close to the next projected service milestone -> due soon.
+    if (w.nextServiceKm > 0 && w.nextServiceKm - v.mileage <= SERVICE_PROXIMITY_KM) return 'proximo';
+    return 'al_dia';
+  };
+
+  // Shared vehicle card used by both the simple list and the fleet-control view.
+  // Passing showService renders the service-status badge (fleet view only).
+  const renderVehicleCard = (v: Vehicle, showService = false) => {
+    const w = evaluateVehicleWarranty(v);
+    const serviceStatus = showService ? getServiceStatus(v, w) : null;
+    return (
+      <Card key={v.id} className={cn("gac-shadow border-l-4 cursor-pointer hover:shadow-md transition-shadow", w.active ? "border-l-green-500" : "border-l-red-500")} onClick={() => openVehicleDetail(v)}>
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Car className="w-6 h-6 text-primary" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</p>
+                <p className="text-xs text-muted-foreground">{v.plate} · {v.mileage.toLocaleString()} km{v.color ? ` · ${v.color}` : ''}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                {w.active ? 'Activa' : 'Inactiva'}
+              </Badge>
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            </div>
+          </div>
+          {serviceStatus && (
+            <div className="mt-2.5">
+              <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1 w-fit", SERVICE_STATUS_CONFIG[serviceStatus].color)}>
+                <Wrench className="w-3 h-3" /> {SERVICE_STATUS_CONFIG[serviceStatus].label}
+              </Badge>
+            </div>
+          )}
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            <div className="bg-muted rounded-lg p-1.5">
+              <p className="text-sm font-bold">{w.servicesCompleted}/{w.servicesExpected}</p>
+              <p className="text-[10px] text-muted-foreground">Servicios</p>
+            </div>
+            <div className="bg-muted rounded-lg p-1.5">
+              <p className="text-sm font-bold">{w.kmRemaining > 0 ? `${(w.kmRemaining / 1000).toFixed(0)}k` : '0'}</p>
+              <p className="text-[10px] text-muted-foreground">Km rest.</p>
+            </div>
+            <div className="bg-muted rounded-lg p-1.5">
+              <p className="text-sm font-bold">{w.monthsRemaining > 0 ? `${w.monthsRemaining}m` : '0'}</p>
+              <p className="text-[10px] text-muted-foreground">Meses rest.</p>
+            </div>
+          </div>
+          {!w.active && w.reason && (
+            <p className="mt-2 text-[10px] text-red-600 font-medium">⚠ {w.reason}</p>
+          )}
+        </CardContent>
+      </Card>
+    );
   };
 
   const openVehicleDetail = async (v: Vehicle) => {
@@ -461,7 +554,7 @@ const UserPortal = () => {
     setSelectedTime('');
     setMileage('');
     setNotes('');
-    setOccupiedTimes([]);
+    setDayReservations([]);
     setVehicleSearch('');
     setReservaConfirmada(false);
     setPaso(1);
@@ -470,6 +563,19 @@ const UserPortal = () => {
 
   const confirmarReserva = async () => {
     if (!clientData || !selectedVehicle || !selectedDealership || !selectedDate || !selectedTime || !selectedService) return;
+    // Defense-in-depth: a stale selection (service change / localStorage restore) could now be full.
+    const slotDuration = serviceTypes.find(s => s.name === selectedService)?.duration_minutes ?? 30;
+    const occ = computeSlotOccupancy({
+      existingReservations: dayReservations,
+      startTime: selectedTime,
+      durationMinutes: slotDuration,
+      bays: selectedDealershipData?.bays,
+      resolveDuration: getServiceDuration,
+    });
+    if (occ.full) {
+      toast.error(`Sin disponibilidad: las ${occ.capacity} bahía(s) ya están ocupadas en ese horario.`);
+      return;
+    }
     setSaving(true);
     const { data: clientInserted, error } = await supabase.from('reservations').insert({
       dealership_id: selectedDealership,
@@ -973,16 +1079,31 @@ const UserPortal = () => {
                         <span className="ml-2 text-xs text-muted-foreground">Verificando disponibilidad...</span>
                       </div>
                     ) : (
+                      (() => {
+                        const slotDuration = serviceTypes.find(s => s.name === selectedService)?.duration_minutes ?? 30;
+                        const slots = generateTimeSlots(slotDuration, selectedDealershipData?.opening_hour ?? 8, selectedDealershipData?.closing_hour ?? 17)
+                          .map(h => ({
+                            h,
+                            occ: computeSlotOccupancy({
+                              existingReservations: dayReservations,
+                              startTime: h,
+                              durationMinutes: slotDuration,
+                              bays: selectedDealershipData?.bays,
+                              resolveDuration: getServiceDuration,
+                            }),
+                          }));
+                        const anyFull = slots.some(s => s.occ.full);
+                        return (
                       <>
-                        {occupiedTimes.length > 0 && (
+                        {anyFull && (
                           <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
                             <Clock className="w-3 h-3" />
-                            Las horas en rojo ya están ocupadas
+                            Las horas en rojo ya no tienen cupo
                           </p>
                         )}
                         <div className="grid grid-cols-4 gap-2">
-                          {generateTimeSlots(serviceTypes.find(s => s.name === selectedService)?.duration_minutes ?? 30, selectedDealershipData?.opening_hour ?? 8, selectedDealershipData?.closing_hour ?? 17).map(h => {
-                            const isOccupied = occupiedTimes.includes(h);
+                          {slots.map(({ h, occ }) => {
+                            const isOccupied = occ.full;
                             const isPast = isSlotPast(h, selectedDate);
                             const isUnavailable = isOccupied || isPast;
                             return (
@@ -1005,6 +1126,8 @@ const UserPortal = () => {
                           })}
                         </div>
                       </>
+                        );
+                      })()
                     )}
                   </div>
                 )}
@@ -1289,52 +1412,108 @@ const UserPortal = () => {
                   <p className="text-sm text-muted-foreground">No tienes vehículos registrados</p>
                 </CardContent>
               </Card>
-            ) : (
-              vehicles.map(v => {
+            ) : vehicles.length < FLEET_VIEW_MIN_VEHICLES ? (
+              // Simple card list for clients with a single vehicle (unchanged behavior)
+              vehicles.map(v => renderVehicleCard(v))
+            ) : (() => {
+              // Enhanced fleet-control view for clients with multiple vehicles.
+              const q = fleetSearch.trim().toLowerCase();
+              const enriched = vehicles.map(v => {
                 const w = evaluateVehicleWarranty(v);
-                return (
-                  <Card key={v.id} className={cn("gac-shadow border-l-4 cursor-pointer hover:shadow-md transition-shadow", w.active ? "border-l-green-500" : "border-l-red-500")} onClick={() => openVehicleDetail(v)}>
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 rounded-lg bg-primary/10">
-                            <Car className="w-6 h-6 text-primary" />
-                          </div>
-                          <div>
-                            <p className="font-semibold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</p>
-                            <p className="text-xs text-muted-foreground">{v.plate} · {v.mileage.toLocaleString()} km{v.color ? ` · ${v.color}` : ''}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                            {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                            {w.active ? 'Activa' : 'Inactiva'}
-                          </Badge>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                        </div>
+                return { v, w, serviceStatus: getServiceStatus(v, w) };
+              });
+              const filtered = enriched.filter(({ v, w, serviceStatus }) => {
+                if (q && !(v.plate || '').toLowerCase().includes(q)) return false;
+                if (fleetServiceFilter !== 'todos' && serviceStatus !== fleetServiceFilter) return false;
+                if (fleetWarrantyFilter === 'activa' && !w.active) return false;
+                if (fleetWarrantyFilter === 'vencida' && w.active) return false;
+                return true;
+              });
+              // Prioritize pending-service vehicles: vencido -> proximo -> al_dia
+              const priority: Record<ServiceStatus, number> = { vencido: 0, proximo: 1, al_dia: 2 };
+              filtered.sort((a, b) => priority[a.serviceStatus] - priority[b.serviceStatus]);
+              // Summary counts across the whole fleet (not the filtered subset)
+              const summary = enriched.reduce(
+                (acc, { w, serviceStatus }) => {
+                  acc[serviceStatus] += 1;
+                  if (w.active) acc.warrantyActive += 1; else acc.warrantyExpired += 1;
+                  return acc;
+                },
+                { vencido: 0, proximo: 0, al_dia: 0, warrantyActive: 0, warrantyExpired: 0 },
+              );
+
+              return (
+                <div className="space-y-3">
+                  {/* Summary header */}
+                  <Card className="gac-shadow">
+                    <CardContent className="p-3">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                        <span className="font-semibold">{vehicles.length} vehículos</span>
+                        <span className="flex items-center gap-1 text-red-700"><Wrench className="w-3 h-3" />{summary.vencido} vencidos</span>
+                        <span className="text-yellow-700">{summary.proximo} próximos</span>
+                        <span className="text-muted-foreground">·</span>
+                        <span className="flex items-center gap-1 text-green-700"><ShieldCheck className="w-3 h-3" />{summary.warrantyActive} garantías activas</span>
+                        <span className="text-red-700">{summary.warrantyExpired} vencidas</span>
                       </div>
-                      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-                        <div className="bg-muted rounded-lg p-1.5">
-                          <p className="text-sm font-bold">{w.servicesCompleted}/{w.servicesExpected}</p>
-                          <p className="text-[10px] text-muted-foreground">Servicios</p>
-                        </div>
-                        <div className="bg-muted rounded-lg p-1.5">
-                          <p className="text-sm font-bold">{w.kmRemaining > 0 ? `${(w.kmRemaining / 1000).toFixed(0)}k` : '0'}</p>
-                          <p className="text-[10px] text-muted-foreground">Km rest.</p>
-                        </div>
-                        <div className="bg-muted rounded-lg p-1.5">
-                          <p className="text-sm font-bold">{w.monthsRemaining > 0 ? `${w.monthsRemaining}m` : '0'}</p>
-                          <p className="text-[10px] text-muted-foreground">Meses rest.</p>
-                        </div>
-                      </div>
-                      {!w.active && w.reason && (
-                        <p className="mt-2 text-[10px] text-red-600 font-medium">⚠ {w.reason}</p>
-                      )}
                     </CardContent>
                   </Card>
-                );
-              })
-            )}
+
+                  {/* Plate search + filters */}
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Buscar por placa..."
+                        className="pl-9 h-9 text-sm"
+                        value={fleetSearch}
+                        onChange={e => setFleetSearch(e.target.value)}
+                      />
+                      {fleetSearch && (
+                        <button
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          onClick={() => setFleetSearch('')}
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Select value={fleetServiceFilter} onValueChange={val => setFleetServiceFilter(val as typeof fleetServiceFilter)}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todos">Servicio: todos</SelectItem>
+                          <SelectItem value="vencido">Servicio vencido</SelectItem>
+                          <SelectItem value="proximo">Servicio próximo</SelectItem>
+                          <SelectItem value="al_dia">Servicio al día</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={fleetWarrantyFilter} onValueChange={val => setFleetWarrantyFilter(val as typeof fleetWarrantyFilter)}>
+                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="todas">Garantía: todas</SelectItem>
+                          <SelectItem value="activa">Garantía activa</SelectItem>
+                          <SelectItem value="vencida">Garantía vencida</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Prioritized vehicle list */}
+                  {filtered.length === 0 ? (
+                    <Card className="gac-shadow">
+                      <CardContent className="p-6 text-center">
+                        <Car className="w-10 h-10 text-muted-foreground mx-auto mb-2 opacity-30" />
+                        <p className="text-xs text-muted-foreground">No hay vehículos que coincidan con los filtros</p>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="space-y-4">
+                      {filtered.map(({ v }) => renderVehicleCard(v, true))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
 
