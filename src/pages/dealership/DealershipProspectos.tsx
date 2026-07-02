@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -60,6 +60,51 @@ const COL_LABELS: Record<ColKey, string> = {
 };
 const ALL_COLS = Object.keys(COL_LABELS) as ColKey[];
 
+// re3: a prospect can hold multiple vehicle units (brand + model). The units are
+// stored in `prospect_vehicles`; `prospects.model_interest` stays as the denormalized
+// primary-unit mirror ("BRAND MODEL") that the list/detail/Kommo integration reads.
+type ProspectUnit = { brand: string; model: string };
+const MAX_PROSPECT_UNITS = 5;
+
+// Denormalized mirror = first non-empty unit as "BRAND MODEL" (or just brand), else null.
+const unitsToModelInterest = (units: ProspectUnit[]): string | null => {
+  const valid = units.filter(u => u.brand.trim());
+  if (valid.length === 0) return null;
+  const primary = valid[0];
+  return `${primary.brand} ${primary.model}`.trim();
+};
+
+// Fallback when a prospect has no prospect_vehicles rows: split model_interest on the
+// first space into a single unit (brand + rest). Model-only legacy values keep the model.
+const modelInterestToUnits = (mi: string | null): ProspectUnit[] => {
+  const s = (mi || '').trim();
+  if (!s) return [{ brand: '', model: '' }];
+  const idx = s.indexOf(' ');
+  // A single token is a brand (matches the SQL backfill's split_part(...,' ',1)); otherwise
+  // first token is brand, the rest is the model. Keeping brand set avoids the save filter
+  // (which drops brand-less units) wiping model_interest on edit.
+  if (idx === -1) return [{ brand: s, model: '' }];
+  return [{ brand: s.slice(0, idx), model: s.slice(idx + 1) }];
+};
+
+// Replace the prospect_vehicles rows for a prospect with the current non-empty units.
+const syncProspectVehicles = async (prospectId: string, units: ProspectUnit[], isEdit: boolean) => {
+  const valid = units.filter(u => u.brand.trim());
+  if (isEdit) {
+    await supabase.from('prospect_vehicles' as any).delete().eq('prospect_id', prospectId);
+  }
+  if (valid.length > 0) {
+    await supabase.from('prospect_vehicles' as any).insert(
+      valid.map((u, i) => ({
+        prospect_id: prospectId,
+        brand: u.brand.trim(),
+        model: u.model.trim() || null,
+        sort_order: i,
+      })),
+    );
+  }
+};
+
 const PERSON_TYPES: { value: string; label: string }[] = [
   { value: 'natural', label: 'Natural' },
   { value: 'juridica', label: 'Jurídica' },
@@ -100,7 +145,44 @@ interface Prospect {
   payment_modality: string | null;
   company_name: string | null;
   created_at: string;
+  // re3: units embedded from prospect_vehicles (types.ts not regenerated → optional/any-shaped).
+  prospect_vehicles?: { brand: string | null; model: string | null; sort_order: number | null }[] | null;
 }
+
+const KNOWN_BRANDS = ['GAC', 'DFSK', 'SHINERAY'];
+
+// re3 display: ordered vehicle units for a prospect. Prefers the embedded
+// prospect_vehicles rows; falls back to splitting the model_interest mirror into a
+// single primary unit (its brand token counts only if it's a known brand).
+const getProspectUnits = (p: Prospect): ProspectUnit[] => {
+  const rows = ((p as any).prospect_vehicles || []) as Array<{ brand: string | null; model: string | null; sort_order: number | null }>;
+  if (rows.length > 0) {
+    return [...rows]
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+      .map(r => ({ brand: (r.brand || '').trim(), model: (r.model || '').trim() }))
+      .filter(u => u.brand || u.model);
+  }
+  const parts = (p.model_interest || '').split(' ');
+  const hasBrand = KNOWN_BRANDS.includes(parts[0]);
+  const brand = hasBrand ? parts[0] : '';
+  const model = hasBrand ? parts.slice(1).join(' ') : (p.model_interest || '').trim();
+  if (!brand && !model) return [];
+  return [{ brand, model }];
+}
+
+// re3 CSV/XLSX import: parse the "Unidades adicionales" cell — extra units (sort_order >= 1)
+// written as "BRAND MODEL" joined by " | ". First token is the brand, the rest is the model.
+const parseExtraUnitsCell = (raw: string): ProspectUnit[] =>
+  (raw || '')
+    .split('|')
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(tok => {
+      const idx = tok.indexOf(' ');
+      return idx === -1
+        ? { brand: tok, model: '' }
+        : { brand: tok.slice(0, idx), model: tok.slice(idx + 1).trim() };
+    });
 
 
 const DealershipProspectos = () => {
@@ -161,7 +243,14 @@ const DealershipProspectos = () => {
   const [pPhone, setPPhone] = useState<string>(() => getSS().pPhone || '');
   const [pEmail, setPEmail] = useState<string>(() => getSS().pEmail || '');
   const [pCompanyName, setPCompanyName] = useState<string>(() => getSS().pCompanyName || '');
-  const [pModel, setPModel] = useState<string>(() => getSS().pModel || '');
+  const [pUnits, setPUnits] = useState<ProspectUnit[]>(() => {
+    const saved = getSS().pUnits;
+    return Array.isArray(saved) && saved.length > 0 ? saved : [{ brand: '', model: '' }];
+  });
+  const updateUnit = (index: number, patch: Partial<ProspectUnit>) =>
+    setPUnits(prev => prev.map((u, i) => (i === index ? { ...u, ...patch } : u)));
+  const addUnit = () => setPUnits(prev => (prev.length >= MAX_PROSPECT_UNITS ? prev : [...prev, { brand: '', model: '' }]));
+  const removeUnit = (index: number) => setPUnits(prev => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
   const [pSource, setPSource] = useState<string>(() => getSS().pSource || 'concesionario');
   const [pStatus, setPStatus] = useState<string>(() => getSS().pStatus || 'nuevo');
   const [pNotes, setPNotes] = useState<string>(() => getSS().pNotes || '');
@@ -190,13 +279,13 @@ const DealershipProspectos = () => {
       return;
     }
     try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pCompanyName, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange, pPaymentModality }));
+      sessionStorage.setItem(SS_KEY, JSON.stringify({ dialogOpen, pName, pPhone, pEmail, pCompanyName, pUnits, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange, pPaymentModality }));
     } catch {}
-  }, [dialogOpen, editingProspect, pName, pPhone, pEmail, pCompanyName, pModel, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange, pPaymentModality]);
+  }, [dialogOpen, editingProspect, pName, pPhone, pEmail, pCompanyName, pUnits, pSource, pStatus, pNotes, pSalesperson, pEventName, pEstadoVzla, pTestDrive, pShowroom, pPersonType, pGender, pAgeRange, pPaymentModality]);
   // Import/Export
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; source: string; status: string; notes: string; salesperson: string; event_name: string; estado_vzla: string; fecha: string; test_drive: boolean; person_type: string; gender: string; age_range: string; payment_modality: string; errors: string[] }>>([]);
+  const [importRows, setImportRows] = useState<Array<{ row: number; name: string; phone: string; email: string; brand: string; model: string; extraUnits: ProspectUnit[]; source: string; status: string; notes: string; salesperson: string; event_name: string; estado_vzla: string; fecha: string; test_drive: boolean; person_type: string; gender: string; age_range: string; payment_modality: string; errors: string[] }>>([]);
   const [importing, setImporting] = useState(false);
 
   const [greetingTemplate, setGreetingTemplate] = useState<string>('Hola {{prospecto}}, ¡es un gusto saludarte! Mi nombre es {{vendedor}}, seré el asesor de ventas encargado de brindarte información de nuestros vehículos. ¿En qué puedo ayudarte hoy? 🚗');
@@ -272,10 +361,12 @@ const DealershipProspectos = () => {
 
   const buildProspectWaUrl = (p: Prospect, salespersonName: string) => {
     if (!p.phone) return null;
+    // re3: list ALL vehicle units ("BRAND MODEL" joined by ", "), fall back to the mirror.
+    const modelo = getProspectUnits(p).map(u => `${u.brand} ${u.model}`.trim()).filter(Boolean).join(', ') || p.model_interest || '';
     const msg = greetingTemplate
       .replace(/{{prospecto}}/g, p.name)
       .replace(/{{vendedor}}/g, salespersonName || 'el asesor')
-      .replace(/{{modelo}}/g, p.model_interest || '');
+      .replace(/{{modelo}}/g, modelo);
     const phone = p.phone.replace(/\D/g, '');
     return `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
   };
@@ -300,14 +391,14 @@ const DealershipProspectos = () => {
     for (let from = 0; ; from += pageSize) {
       let query = supabase
         .from('prospects')
-        .select('*')
+        .select('*, prospect_vehicles(brand, model, sort_order)')
         .eq('dealership_id', selectedDealership)
         .order('created_at', { ascending: false })
         .range(from, from + pageSize - 1);
       if (salespersonName) query = query.eq('salesperson', salespersonName);
       const { data, error } = await query;
       if (error || !data || data.length === 0) break;
-      all.push(...(data as Prospect[]));
+      all.push(...(data as unknown as Prospect[]));
       if (data.length < pageSize) break;
     }
     setProspects(all);
@@ -376,12 +467,27 @@ const DealershipProspectos = () => {
     }
   };
 
-  const executeBulkUpdate = async (payload: Record<string, any>) => {
+  const executeBulkUpdate = async (
+    payload: Record<string, any>,
+    // re3: keep prospect_vehicles in sync when the bulk action changes the model.
+    // undefined = leave units untouched; null = clear units; object = replace with one primary unit.
+    vehicleSync?: { brand: string; model: string | null } | null,
+  ) => {
     setBulkLoading(true);
     const ids = [...selectedIds];
     const { error } = await supabase.from('prospects').update(payload).in('id', ids);
     if (error) toast.error('Error al actualizar prospectos');
-    else { toast.success(`${ids.length} prospecto(s) actualizados`); setSelectedIds(new Set()); setBulkAction(null); setBulkValue(''); setBulkBrand(''); fetchProspects(); }
+    else {
+      if (vehicleSync !== undefined) {
+        await supabase.from('prospect_vehicles' as any).delete().in('prospect_id', ids);
+        if (vehicleSync) {
+          await supabase.from('prospect_vehicles' as any).insert(
+            ids.map(id => ({ prospect_id: id, brand: vehicleSync.brand, model: vehicleSync.model, sort_order: 0 })),
+          );
+        }
+      }
+      toast.success(`${ids.length} prospecto(s) actualizados`); setSelectedIds(new Set()); setBulkAction(null); setBulkValue(''); setBulkBrand(''); fetchProspects();
+    }
     setBulkLoading(false);
   };
 
@@ -400,7 +506,17 @@ const DealershipProspectos = () => {
     switch (bulkAction) {
       case 'status': if (!bulkValue || bulkValue === '__none') return; payload = bulkValue === 'perdido' ? { status: bulkValue } : { status: bulkValue, loss_reason_id: null, loss_reason: null }; break;
       case 'estadoVzla': payload = { 'Estado de Vnzla': (!bulkValue || bulkValue === '__clear') ? null : bulkValue }; break;
-      case 'model': payload = { model_interest: (!bulkValue || bulkValue === '__none') ? null : (bulkBrand ? `${bulkBrand} ${bulkValue}` : bulkValue) }; break;
+      case 'model': {
+        // Update the model_interest mirror (unchanged logic) AND sync prospect_vehicles so
+        // the units table doesn't drift. Parse "BRAND MODEL" like the dialog save does.
+        const clear = !bulkValue || bulkValue === '__none';
+        const brand = bulkBrand.trim();
+        const modelName = clear ? '' : bulkValue.trim();
+        const modelInterest = clear ? null : (brand ? `${brand} ${modelName}` : modelName);
+        const vehicleSync = brand ? { brand, model: modelName || null } : null;
+        await executeBulkUpdate({ model_interest: modelInterest }, vehicleSync);
+        return;
+      }
       case 'source': if (!bulkValue || bulkValue === '__none') return; payload = { source: bulkValue }; break;
       case 'eventName': payload = { event_name: bulkValue.trim() || null }; break;
       case 'salesperson': payload = { salesperson: (!bulkValue || bulkValue === '__none') ? null : bulkValue }; break;
@@ -435,6 +551,7 @@ const DealershipProspectos = () => {
         { header: 'Email',               key: 'email',         width: 30 },
         { header: 'Marca',               key: 'marca',         width: 14 },
         { header: 'Modelo de Interés',   key: 'modelo',        width: 28 },
+        { header: 'Unidades adicionales', key: 'unidades_adicionales', width: 34 },
         { header: 'Tipo de Contacto',    key: 'tipo_contacto', width: 22 },
         { header: 'Nombre del Evento',   key: 'nombre_evento', width: 25 },
         { header: 'Vendedor',            key: 'vendedor',      width: 22 },
@@ -472,6 +589,8 @@ const DealershipProspectos = () => {
         const parts = (p.model_interest || '').split(' ');
         const brand = (parts.length > 1 && BRANDS_LIST.includes(parts[0])) ? parts[0] : '';
         const model = brand ? parts.slice(1).join(' ') : (p.model_interest || '');
+        // re3: extra units (sort_order >= 1) exported as "BRAND MODEL" joined by " | ".
+        const extraUnits = getProspectUnits(p).slice(1).map(u => `${u.brand} ${u.model}`.trim()).filter(Boolean).join(' | ');
         const dataRow = ws.addRow({
           nombre:        p.name,
           empresa:       p.company_name || '',
@@ -479,6 +598,7 @@ const DealershipProspectos = () => {
           email:         p.email || '',
           marca:         brand,
           modelo:        model,
+          unidades_adicionales: extraUnits,
           tipo_contacto: PROSPECT_SOURCES.find(s => s.value === p.source)?.label || p.source,
           nombre_evento: p.source === 'evento' ? (p.event_name || '') : '',
           vendedor:      p.salesperson || '',
@@ -522,19 +642,21 @@ const DealershipProspectos = () => {
   };
 
   const downloadTemplate = () => {
-    const headers = ['nombre','telefono','email','marca','modelo','fuente','estado','notas','vendedor','nombre_evento','estado_vzla','fecha','test_drive','tipo_persona','genero','rango_edad','modalidad_pago'];
-    const example = ['Juan Pérez','+58 412 1234567','juan@email.com','GAC','GS4',
+    const headers = ['nombre','telefono','email','marca','modelo','unidades_adicionales','fuente','estado','notas','vendedor','nombre_evento','estado_vzla','fecha','test_drive','tipo_persona','genero','rango_edad','modalidad_pago'];
+    const example = ['Juan Pérez','+58 412 1234567','juan@email.com','GAC','GS4','DFSK C31 | SHINERAY X30',
       PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
       PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
       'Interesado en SUV', autoSalesperson || 'Carlos Gómez', '', '', '2026-04-07',
       'si','natural','masculino','30-40','Contado'];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet([headers, example]);
-    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:25},{wch:20},{wch:30},{wch:20},{wch:20},{wch:18},{wch:18},{wch:12},{wch:14},{wch:12},{wch:12},{wch:16}];
+    ws['!cols'] = [{wch:25},{wch:20},{wch:28},{wch:12},{wch:25},{wch:34},{wch:25},{wch:20},{wch:30},{wch:20},{wch:20},{wch:18},{wch:18},{wch:12},{wch:14},{wch:12},{wch:12},{wch:16}];
     const wsNotes = XLSX.utils.aoa_to_sheet([
       ['INSTRUCCIONES:'],
       ['- nombre y telefono son obligatorios'],
       ['- marca debe ser GAC o DFSK'],
+      ['- unidades_adicionales: unidades EXTRA como "MARCA MODELO" separadas por " | "'],
+      ['  Ejemplo: DFSK C31 | SHINERAY X30 — Máx. 5 unidades en total (principal + 4)'],
       ['- FECHA: usa la fecha real del prospecto (YYYY-MM-DD o DD/MM/YYYY)'],
       ['  Si se deja vacía se usa la fecha de hoy'],
       ['- estado_vzla: nombre del estado venezolano (ej: Distrito Capital, Miranda)'],
@@ -569,6 +691,10 @@ const DealershipProspectos = () => {
           const email = String(row['email'] ?? '').trim();
           const brand = String(row['marca'] ?? '').trim().toUpperCase();
           const model = String(row['modelo'] ?? '').trim();
+          // re3: extra vehicle units (beyond the primary marca/modelo).
+          const extraUnits = parseExtraUnitsCell(
+            String(row['unidades_adicionales'] ?? row['Unidades adicionales'] ?? row['unidades adicionales'] ?? ''),
+          );
           const notes = String(row['notas'] ?? '').trim();
           const salesperson = String(row['vendedor'] ?? '').trim();
           const event_name = String(row['nombre_evento'] ?? '').trim();
@@ -613,7 +739,7 @@ const DealershipProspectos = () => {
           if (!source) source = VALID_SOURCES[0] || 'concesionario';
           if (status && !VALID_STATUSES.includes(status)) { errors.push(`Estado inválido: "${status}"`); status = VALID_STATUSES[0] || 'nuevo'; }
           if (!status) status = VALID_STATUSES[0] || 'nuevo';
-          rows.push({ row: i + 2, name, phone, email, brand, model, source, status, notes, salesperson, event_name, estado_vzla, fecha, test_drive, person_type, gender, age_range, payment_modality, errors });
+          rows.push({ row: i + 2, name, phone, email, brand, model, extraUnits, source, status, notes, salesperson, event_name, estado_vzla, fecha, test_drive, person_type, gender, age_range, payment_modality, errors });
         });
         setImportRows(rows);
         setImportOpen(true);
@@ -630,7 +756,11 @@ const DealershipProspectos = () => {
     const validRows = importRows.filter(r => r.name.trim() && r.phone.trim());
     if (validRows.length === 0) { toast.error('No hay filas válidas para importar'); return; }
     setImporting(true);
-    const payload = validRows.map(r => ({
+    // re3: generate the prospect ids client-side so vehicle units attach without depending
+    // on the DB returning inserted rows in input order.
+    const importIds = validRows.map(() => crypto.randomUUID());
+    const payload = validRows.map((r, i) => ({
+      id: importIds[i],
       dealership_id: selectedDealership,
       name: r.name,
       phone: r.phone || null,
@@ -650,13 +780,35 @@ const DealershipProspectos = () => {
       created_at: r.fecha || undefined,
     }));
     const { error } = await supabase.from('prospects').insert(payload);
-    if (error) { toast.error('Error al importar: ' + error.message); console.error(error); }
-    else { toast.success(`${validRows.length} prospecto(s) importados`); setImportOpen(false); setImportRows([]); fetchProspects(); }
+    if (error) { toast.error('Error al importar: ' + error.message); console.error(error); setImporting(false); return; }
+
+    // re3: build one prospect_vehicles row per unit (primary first, then extras), capped at
+    // MAX_PROSPECT_UNITS total, keyed by the client-generated ids (no DB-order dependency).
+    // Skip units without a brand and batch the inserts.
+    const vehicleRows: Array<{ prospect_id: string; brand: string; model: string | null; sort_order: number }> = [];
+    validRows.forEach((r, i) => {
+      const units: ProspectUnit[] = [];
+      if (r.brand.trim()) units.push({ brand: r.brand.trim(), model: r.model.trim() });
+      for (const ex of r.extraUnits) {
+        if (units.length >= MAX_PROSPECT_UNITS) break;
+        if (ex.brand.trim()) units.push({ brand: ex.brand.trim(), model: ex.model.trim() });
+      }
+      units.forEach((u, idx) => vehicleRows.push({ prospect_id: importIds[i], brand: u.brand, model: u.model || null, sort_order: idx }));
+    });
+    if (vehicleRows.length > 0) {
+      const CHUNK = 500;
+      for (let i = 0; i < vehicleRows.length; i += CHUNK) {
+        const { error: vErr } = await supabase.from('prospect_vehicles' as any).insert(vehicleRows.slice(i, i + CHUNK));
+        if (vErr) console.error('Error al importar unidades de vehículo', vErr);
+      }
+    }
+
+    toast.success(`${validRows.length} prospecto(s) importados`); setImportOpen(false); setImportRows([]); fetchProspects();
     setImporting(false);
   };
 
   const resetForm = () => {
-    setPName(''); setPPhone(''); setPEmail(''); setPCompanyName(''); setPModel('');
+    setPName(''); setPPhone(''); setPEmail(''); setPCompanyName(''); setPUnits([{ brand: '', model: '' }]);
     setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
     setPSalesperson(autoSalesperson);
     setPEventName(''); setPEstadoVzla('');
@@ -675,7 +827,7 @@ const DealershipProspectos = () => {
     setDetailOpen(true);
   };
 
-  const openEditDialog = (p: Prospect, readOnly = false) => {
+  const openEditDialog = async (p: Prospect, readOnly = false) => {
     // Limpiar cualquier estado de creación guardado para evitar confusión
     try { sessionStorage.removeItem(SS_KEY); } catch {}
     setEditReadOnly(readOnly);
@@ -684,7 +836,9 @@ const DealershipProspectos = () => {
     setPPhone(p.phone || '');
     setPEmail(p.email || '');
     setPCompanyName(p.company_name || '');
-    setPModel(p.model_interest || '');
+    // Show the primary unit immediately from model_interest and open the dialog without
+    // waiting on the network; refine with the full per-unit list once it loads.
+    setPUnits(modelInterestToUnits(p.model_interest));
     setPSource(p.source || 'concesionario');
     setPStatus(p.status || 'nuevo');
     setPNotes(p.notes || '');
@@ -698,6 +852,15 @@ const DealershipProspectos = () => {
     setPAgeRange(p.age_range || '');
     setPPaymentModality(p.payment_modality || '');
     setDialogOpenRaw(true);
+    try {
+      const { data: vehicles } = await supabase
+        .from('prospect_vehicles' as any)
+        .select('brand, model, sort_order')
+        .eq('prospect_id', p.id)
+        .order('sort_order');
+      const rows = (vehicles || []) as Array<{ brand: string | null; model: string | null }>;
+      if (rows.length > 0) setPUnits(rows.map(r => ({ brand: r.brand || '', model: r.model || '' })));
+    } catch { /* keep the model_interest fallback already set */ }
   };
 
   type DuplicateProspect = { id: string; name: string; phone: string | null; salesperson: string | null; dealership_id: string };
@@ -754,7 +917,7 @@ const DealershipProspectos = () => {
         name: pName.trim(),
         phone: phone || null,
         email: pEmail.trim() || null,
-        model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+        model_interest: unitsToModelInterest(pUnits),
         source: pSource || 'concesionario',
         status: pStatus || 'nuevo',
         notes: pNotes.trim() || null,
@@ -784,6 +947,7 @@ const DealershipProspectos = () => {
       const { error } = await supabase.from('prospects').update(editPayload as any).eq('id', editingProspect.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
       else {
+        await syncProspectVehicles(editingProspect.id, pUnits, true);
         toast.success('Prospecto actualizado');
         setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
         if (editingProspect.kommo_lead_id) {
@@ -818,7 +982,7 @@ const DealershipProspectos = () => {
         name: pName.trim(),
         phone: phone || null,
         email: pEmail.trim() || null,
-        model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+        model_interest: unitsToModelInterest(pUnits),
         source: pSource || 'concesionario',
         status: pStatus || 'nuevo',
         notes: pNotes.trim() || null,
@@ -835,6 +999,7 @@ const DealershipProspectos = () => {
       } as any).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
       else {
+        await syncProspectVehicles(inserted.id, pUnits, false);
         toast.success('Prospecto creado');
         setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
         createKommoLead(inserted.id).catch(console.error);
@@ -846,9 +1011,13 @@ const DealershipProspectos = () => {
   const handleSave = async () => {
     if (!pName.trim()) { toast.error('El nombre es requerido'); return; }
     if (!pPhone.trim()) { toast.error('El teléfono es requerido'); return; }
+    // Email is mandatory when creating a new prospect (edits of legacy prospects are exempt)
+    if (!editingProspect) {
+      if (!pEmail.trim()) { toast.error('El correo electrónico es requerido'); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pEmail.trim())) { toast.error('El correo electrónico no es válido'); return; }
+    }
     const missing: string[] = [];
-    if (!pEmail.trim()) missing.push('Correo electrónico');
-    if (!pModel.trim() || pModel === '__none') missing.push('Modelo de interés');
+    if (!pUnits.some(u => u.brand.trim())) missing.push('Modelo de interés');
     if (!isSalesperson && !isVendedor && (!pSalesperson || pSalesperson === '__none')) missing.push('Vendedor');
     if (missing.length > 0) {
       setMissingFields(missing);
@@ -894,7 +1063,7 @@ const DealershipProspectos = () => {
           name: pName.trim(),
           phone: pPhone.trim() || null,
           email: pEmail.trim() || null,
-          model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+          model_interest: unitsToModelInterest(pUnits),
           source: pSource || 'concesionario',
           notes: pNotes.trim() || null,
           salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
@@ -910,6 +1079,7 @@ const DealershipProspectos = () => {
         };
         const ok = await applyLostStatus(editingProspect.id, editingProspect.kommo_lead_id, reason.kommoId, reason.name, editPayload);
         if (ok) {
+          await syncProspectVehicles(editingProspect.id, pUnits, true);
           toast.success('Prospecto actualizado');
           if (editingProspect.kommo_lead_id) {
             updateKommoLeadFields(editingProspect.id, editingProspect.kommo_lead_id).catch(console.error);
@@ -924,7 +1094,7 @@ const DealershipProspectos = () => {
           name: pName.trim(),
           phone: pPhone.trim() || null,
           email: pEmail.trim() || null,
-          model_interest: (pModel.trim() && pModel !== '__none') ? pModel.trim() : null,
+          model_interest: unitsToModelInterest(pUnits),
           source: pSource || 'concesionario',
           status: pStatus || 'nuevo',
           notes: pNotes.trim() || null,
@@ -943,6 +1113,7 @@ const DealershipProspectos = () => {
         } as any).select().single();
         if (error) { toast.error('Error al crear prospecto'); console.error(error); }
         else {
+          await syncProspectVehicles(inserted.id, pUnits, false);
           toast.success('Prospecto creado');
           setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
           createKommoLead(inserted.id).catch(console.error);
@@ -982,10 +1153,10 @@ const DealershipProspectos = () => {
   // portal. The create modal was already closed before the alert was shown.
   const viewDuplicateProspect = async () => {
     if (!duplicateProspect) return;
-    const { data, error } = await supabase.from('prospects').select('*').eq('id', duplicateProspect.id).single();
+    const { data, error } = await supabase.from('prospects').select('*, prospect_vehicles(brand, model, sort_order)').eq('id', duplicateProspect.id).single();
     setDuplicateProspect(null);
     if (error || !data) { toast.error('No se pudo abrir el prospecto'); console.error(error); return; }
-    openDetail(data as Prospect);
+    openDetail(data as unknown as Prospect);
   };
 
   const toggleProspectFlag = async (id: string, field: 'test_drive' | 'visited_showroom', value: boolean) => {
@@ -1368,8 +1539,8 @@ const DealershipProspectos = () => {
                         </TableCell>
                       )}
                       {visibleCols.has('estadovzla') && <TableCell className="text-muted-foreground">{p['Estado de Vnzla'] || '-'}</TableCell>}
-                      {visibleCols.has('marca') && <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{parts[0]}</Badge> : '-'; })()}</TableCell>}
-                      {visibleCols.has('modelo') && <TableCell>{(() => { const parts = (p.model_interest || '').split(' '); const hasBrand = ['GAC','DFSK','SHINERAY'].includes(parts[0]); return hasBrand ? (parts.slice(1).join(' ') || '-') : (p.model_interest || '-'); })()}</TableCell>}
+                      {visibleCols.has('marca') && <TableCell>{(() => { const brand = getProspectUnits(p)[0]?.brand; return brand ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{brand}</Badge> : '-'; })()}</TableCell>}
+                      {visibleCols.has('modelo') && <TableCell>{(() => { const units = getProspectUnits(p); const primary = units[0]; const extra = units.length - 1; return (<div className="flex items-center gap-1"><span>{primary ? (primary.model || '-') : '-'}</span>{extra > 0 && <Badge variant="secondary" className="text-[9px] px-1 py-0 font-medium leading-tight" title={units.map(u => `${u.brand} ${u.model}`.trim()).join(', ')}>+{extra}</Badge>}</div>); })()}</TableCell>}
                       {!isSalesperson && !isVendedor && visibleCols.has('vendedor') && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
                       {visibleCols.has('fuente') && (
                         <TableCell>
@@ -1507,33 +1678,55 @@ const DealershipProspectos = () => {
                 <Input value={pPhone} onChange={e => setPPhone(e.target.value)} placeholder="+58 412 1234567" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Email</Label>
+                <Label className="text-xs">Email *</Label>
                 <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Nombre de Empresa</Label>
                 <Input value={pCompanyName} onChange={e => setPCompanyName(e.target.value)} placeholder="Empresa S.A." className="h-9 text-xs" />
               </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Modelo de interés</Label>
-                <Select value={pModel} onValueChange={setPModel}>
-                  <SelectTrigger className="h-9 text-xs">
-                    <SelectValue placeholder="Seleccionar modelo">
-                      {pModel && !prospectModels.some(m => `${m.brand} ${m.name}` === pModel) ? pModel : undefined}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">Sin modelo</SelectItem>
-                    {prospectBrands.map(brand => (
-                      <SelectGroup key={brand}>
-                        <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
-                        {prospectModels.filter(m => m.brand === brand).map(m => (
-                          <SelectItem key={m.id} value={`${m.brand} ${m.name}`}>{m.brand} {m.name}</SelectItem>
+              <div className="space-y-2 sm:col-span-2">
+                <Label className="text-xs">Modelos de interés</Label>
+                {pUnits.map((unit, idx) => (
+                  <div key={idx} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <Select value={unit.brand} onValueChange={(v) => updateUnit(idx, { brand: v === '__none' ? '' : v, model: '' })}>
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Seleccionar marca" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">Sin marca</SelectItem>
+                        {prospectBrands.map(brand => (
+                          <SelectItem key={brand} value={brand}>{brand}</SelectItem>
                         ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      </SelectContent>
+                    </Select>
+                    <div className="flex items-center gap-1">
+                      <Select value={unit.model} onValueChange={(v) => updateUnit(idx, { model: v === '__none' ? '' : v })} disabled={!unit.brand}>
+                        <SelectTrigger className="h-9 text-xs flex-1">
+                          <SelectValue placeholder={unit.brand ? "Seleccionar modelo" : "Primero seleccione marca"}>
+                            {unit.model && !prospectModels.some(m => m.name === unit.model) ? unit.model : undefined}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none">Sin modelo</SelectItem>
+                          {prospectModels.filter(m => m.brand === unit.brand).map(m => (
+                            <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {pUnits.length > 1 && (
+                        <Button type="button" variant="ghost" size="icon" className="h-9 w-9 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeUnit(idx)} title="Quitar modelo">
+                          <X className="h-4 w-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {pUnits.length < MAX_PROSPECT_UNITS && (
+                  <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={addUnit}>
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Agregar modelo
+                  </Button>
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Tipo de contacto</Label>
@@ -1712,7 +1905,22 @@ const DealershipProspectos = () => {
                 <Field label="Teléfono" icon={Phone} value={detailProspect.phone} />
                 <Field label="Email" icon={Mail} value={detailProspect.email} />
                 {detailProspect.company_name && <Field label="Empresa" icon={Users} value={detailProspect.company_name} />}
-                <Field label="Modelo" icon={Car} value={detailProspect.model_interest} />
+                {(() => {
+                  const units = getProspectUnits(detailProspect);
+                  if (units.length === 0) return detailProspect.model_interest ? <Field label="Modelo" icon={Car} value={detailProspect.model_interest} /> : null;
+                  return (
+                    <Field label={units.length > 1 ? 'Modelos' : 'Modelo'} icon={Car}>
+                      <div className="flex flex-col gap-1">
+                        {units.map((u, i) => (
+                          <span key={i} className="flex items-center gap-1.5">
+                            {u.brand && <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{u.brand}</Badge>}
+                            {u.model ? <span className="truncate">{u.model}</span> : (!u.brand && <span>-</span>)}
+                          </span>
+                        ))}
+                      </div>
+                    </Field>
+                  );
+                })()}
                 <Field label="Estado Vzla" icon={MapPin} value={detailProspect['Estado de Vnzla']} />
                 {!isSalesperson && <Field label="Vendedor" icon={User} value={detailProspect.salesperson} />}
                 <Field label="Fuente" icon={Tag}>

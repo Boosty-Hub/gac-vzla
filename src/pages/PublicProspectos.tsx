@@ -6,8 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Car, User, Phone, Mail, MessageSquare, CheckCircle2 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Car, User, Phone, Mail, MessageSquare, CheckCircle2, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 
@@ -30,6 +30,20 @@ const PROSPECT_SOURCES = [
   { value: 'evento', label: 'Evento' },
 ];
 
+// re3: a prospect can hold multiple vehicle units (brand + model). The units are
+// stored in `prospect_vehicles`; `prospects.model_interest` stays as the denormalized
+// primary-unit mirror ("BRAND MODEL") that the list/detail/Kommo integration reads.
+type ProspectUnit = { brand: string; model: string };
+const MAX_PROSPECT_UNITS = 5;
+
+// Denormalized mirror = first non-empty unit as "BRAND MODEL" (or just brand), else null.
+const unitsToModelInterest = (units: ProspectUnit[]): string | null => {
+  const valid = units.filter(u => u.brand.trim());
+  if (valid.length === 0) return null;
+  const primary = valid[0];
+  return `${primary.brand} ${primary.model}`.trim();
+};
+
 const PublicProspectos = () => {
   const [models, setModels] = useState<ProspectModel[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
@@ -40,7 +54,7 @@ const PublicProspectos = () => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [modelInterest, setModelInterest] = useState('');
+  const [pUnits, setPUnits] = useState<ProspectUnit[]>([{ brand: '', model: '' }]);
   const [source, setSource] = useState('pagina_web');
   const [dealershipId, setDealershipId] = useState('');
   const [eventName, setEventName] = useState('');
@@ -67,6 +81,11 @@ const PublicProspectos = () => {
 
   const brands = Array.from(new Set(models.map(m => m.brand)));
 
+  const updateUnit = (index: number, patch: Partial<ProspectUnit>) =>
+    setPUnits(prev => prev.map((u, i) => (i === index ? { ...u, ...patch } : u)));
+  const addUnit = () => setPUnits(prev => (prev.length >= MAX_PROSPECT_UNITS ? prev : [...prev, { brand: '', model: '' }]));
+  const removeUnit = (index: number) => setPUnits(prev => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -74,7 +93,7 @@ const PublicProspectos = () => {
     if (!phone.trim()) { toast.error('El teléfono es requerido'); return; }
     if (!email.trim()) { toast.error('El correo es requerido'); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error('El correo no es válido'); return; }
-    if (!modelInterest) { toast.error('El modelo de interés es requerido'); return; }
+    if (!pUnits.some(u => u.brand.trim() && u.model.trim())) { toast.error('El modelo de interés es requerido'); return; }
     if (!dealershipId) { toast.error('El concesionario es requerido'); return; }
 
     const normalizedPhone = phone.trim().replace(/\D/g, '');
@@ -88,11 +107,15 @@ const PublicProspectos = () => {
     }
 
     setSaving(true);
+    // Anon can INSERT but not SELECT prospects (RLS), so we cannot read the id back.
+    // Generate it client-side and reuse it for the prospect_vehicles rows.
+    const prospectId = crypto.randomUUID();
     const { error } = await supabase.from('prospects').insert({
+      id: prospectId,
       name: name.trim(),
       phone: phone.trim(),
       email: email.trim(),
-      model_interest: modelInterest,
+      model_interest: unitsToModelInterest(pUnits),
       source,
       status: 'nuevo',
       dealership_id: dealershipId,
@@ -104,13 +127,29 @@ const PublicProspectos = () => {
       age_range: ageRange || null,
     } as any);
 
-    setSaving(false);
     if (error) {
+      setSaving(false);
       toast.error('Error al enviar. Intenta de nuevo.');
       console.error(error);
-    } else {
-      setSubmitted(true);
+      return;
     }
+
+    // Persist every vehicle unit (anon INSERT policy allows it). model_interest above
+    // already mirrors the primary unit for the list/detail/Kommo integration.
+    const validUnits = pUnits.filter(u => u.brand.trim());
+    if (validUnits.length > 0) {
+      await supabase.from('prospect_vehicles' as any).insert(
+        validUnits.map((u, i) => ({
+          prospect_id: prospectId,
+          brand: u.brand.trim(),
+          model: u.model.trim() || null,
+          sort_order: i,
+        })),
+      );
+    }
+
+    setSaving(false);
+    setSubmitted(true);
   };
 
   if (submitted) {
@@ -126,7 +165,7 @@ const PublicProspectos = () => {
             <p className="text-muted-foreground text-sm">
               Gracias por tu interés. Un asesor se pondrá en contacto contigo pronto.
             </p>
-            <Button onClick={() => { setSubmitted(false); setName(''); setPhone(''); setEmail(''); setModelInterest(''); setSource('pagina_web'); setDealershipId(dealerships.length === 1 ? dealerships[0].id : ''); setEventName(''); setNotes(''); setTestDrive(false); setPersonType(''); setGender(''); setAgeRange(''); }} variant="outline">
+            <Button onClick={() => { setSubmitted(false); setName(''); setPhone(''); setEmail(''); setPUnits([{ brand: '', model: '' }]); setSource('pagina_web'); setDealershipId(dealerships.length === 1 ? dealerships[0].id : ''); setEventName(''); setNotes(''); setTestDrive(false); setPersonType(''); setGender(''); setAgeRange(''); }} variant="outline">
               Registrar otro
             </Button>
           </CardContent>
@@ -174,20 +213,39 @@ const PublicProspectos = () => {
             </div>
 
             <div className="space-y-2">
-              <Label>Modelo de interés *</Label>
-              <Select value={modelInterest} onValueChange={setModelInterest}>
-                <SelectTrigger><SelectValue placeholder="Selecciona un modelo" /></SelectTrigger>
-                <SelectContent>
-                  {brands.map(brand => (
-                    <SelectGroup key={brand}>
-                      <SelectLabel>{brand}</SelectLabel>
-                      {models.filter(m => m.brand === brand).map(m => (
-                        <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
+              <Label>Modelos de interés *</Label>
+              {pUnits.map((unit, idx) => (
+                <div key={idx} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Select value={unit.brand} onValueChange={(v) => updateUnit(idx, { brand: v, model: '' })}>
+                    <SelectTrigger><SelectValue placeholder="Marca" /></SelectTrigger>
+                    <SelectContent>
+                      {brands.map(brand => (
+                        <SelectItem key={brand} value={brand}>{brand}</SelectItem>
                       ))}
-                    </SelectGroup>
-                  ))}
-                </SelectContent>
-              </Select>
+                    </SelectContent>
+                  </Select>
+                  <div className="flex items-center gap-1">
+                    <Select value={unit.model} onValueChange={(v) => updateUnit(idx, { model: v })} disabled={!unit.brand}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder={unit.brand ? 'Modelo' : 'Primero la marca'} /></SelectTrigger>
+                      <SelectContent>
+                        {models.filter(m => m.brand === unit.brand).map(m => (
+                          <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {pUnits.length > 1 && (
+                      <Button type="button" variant="ghost" size="icon" className="shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeUnit(idx)} title="Quitar modelo">
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {pUnits.length < MAX_PROSPECT_UNITS && (
+                <Button type="button" variant="outline" size="sm" onClick={addUnit}>
+                  <Plus className="h-4 w-4 mr-1" /> Agregar modelo
+                </Button>
+              )}
             </div>
 
             {dealerships.length > 1 && (
