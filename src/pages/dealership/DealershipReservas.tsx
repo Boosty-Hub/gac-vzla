@@ -25,6 +25,7 @@ import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCal
 import { createKommoReservation, updateKommoReservationStage, updateKommoReservationFields } from '@/lib/kommo';
 import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
+import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { List, LayoutGrid } from 'lucide-react';
 
 // Service types that trigger the incidencia form
@@ -195,6 +196,9 @@ const DealershipReservas = () => {
   // Create dialog (initialized from localStorage to survive page refresh)
   const [createOpen, setCreateOpenRaw] = useState<boolean>(() => getDrLS().createOpen === true);
   const [saving, setSaving] = useState(false);
+  // Non-cancelled reservations for the selected dealership + date, used to compute
+  // per-slot bay availability in the time picker.
+  const [daySlotReservations, setDaySlotReservations] = useState<Array<CapacityReservation & { id: string }>>([]);
 
   // Normal reservation — unified search (name or plate)
   const [unifiedSearch, setUnifiedSearch] = useState<string>(() => getDrLS().unifiedSearch || '');
@@ -383,6 +387,40 @@ const DealershipReservas = () => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Load the day's non-cancelled reservations so the time picker can flag full slots.
+  useEffect(() => {
+    if (!createOpen || !selectedDealership || selectedDealership === '__all' || !fDate) {
+      setDaySlotReservations([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('reservations')
+        .select('id, reservation_time, service_type')
+        .eq('dealership_id', selectedDealership)
+        .eq('reservation_date', fDate)
+        .neq('status', 'cancelada');
+      if (!cancelled) setDaySlotReservations((data || []) as Array<CapacityReservation & { id: string }>);
+    })();
+    return () => { cancelled = true; };
+  }, [createOpen, selectedDealership, fDate]);
+
+  const getSlotDuration = (name: string) => serviceTypes.find(s => s.name === name)?.duration_minutes ?? 60;
+
+  // Bay occupancy for a candidate slot in the create/edit dialog. Excludes the
+  // reservation being edited so it never conflicts with its own current slot.
+  const getSlotOccupancy = (slot: string) => {
+    const existing = editingRes ? daySlotReservations.filter(r => r.id !== editingRes.id) : daySlotReservations;
+    return computeSlotOccupancy({
+      existingReservations: existing,
+      startTime: slot,
+      durationMinutes: getSlotDuration(fService),
+      bays: dealerships.find(d => d.id === selectedDealership)?.bays,
+      resolveDuration: getSlotDuration,
+    });
+  };
+
   const setCreateOpen = (open: boolean) => {
     setCreateOpenRaw(open);
     if (!open) { try { localStorage.removeItem(DR_LS_KEY); } catch {} setEditingRes(null); }
@@ -509,6 +547,15 @@ const DealershipReservas = () => {
   };
 
   const handleSave = async () => {
+    // Defense-in-depth: even though full slots are disabled in the picker, a stale
+    // selection (localStorage restore or a service change) could still be full.
+    if (fDate && fTime && selectedDealership && selectedDealership !== '__all') {
+      const occ = getSlotOccupancy(fTime);
+      if (occ.full) {
+        toast.error(`Sin disponibilidad: las ${occ.capacity} bahía(s) están ocupadas en ese horario. Elegí otra hora.`);
+        return;
+      }
+    }
     if (isIncidencia) {
       if (!fDate) { toast.error('La fecha es requerida'); return; }
       if (!fNotes.trim()) { toast.error('La descripción de la falla es requerida'); return; }
@@ -1540,7 +1587,7 @@ const DealershipReservas = () => {
                     </div>
                     <div className="space-y-1">
                       <Label className="text-xs">Hora</Label>
-                      <Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select>
+                      <Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}</SelectContent></Select>
                     </div>
                   </div>
                   <div className="space-y-1">
@@ -1567,7 +1614,7 @@ const DealershipReservas = () => {
                     <Label className="text-xs font-semibold">Detalles de la cita</Label>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1"><Label className="text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" /></div>
-                      <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select></div>
+                      <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}</SelectContent></Select></div>
                       <div className="space-y-1 col-span-2"><Label className="text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-8 text-xs" /></div>
                     </div>
                     <div className="space-y-1">

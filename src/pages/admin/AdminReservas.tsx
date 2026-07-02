@@ -23,6 +23,7 @@ import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib
 import { createKommoReservation, updateKommoReservationStage, updateKommoReservationFields } from '@/lib/kommo';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
+import { computeSlotOccupancy, formatMinuteLabel, type CapacityReservation } from '@/lib/reservationCapacity';
 
 interface Dealership {
   id: string;
@@ -387,9 +388,6 @@ const AdminReservas = () => {
     if (!dealer) return true;
 
     const duration = getServiceDuration(serviceName);
-    const [startH, startM] = time.split(':').map(Number);
-    const startMin = startH * 60 + startM;
-    const endMin = startMin + duration;
 
     // Fetch all non-cancelled reservations for this dealership on this date
     let query = supabase
@@ -406,28 +404,20 @@ const AdminReservas = () => {
     const { data: dayReservations } = await query;
     if (!dayReservations) return true;
 
-    // For each minute in the new reservation's range, count how many bays are occupied
-    for (let m = startMin; m < endMin; m++) {
-      let occupied = 0;
-      for (const r of dayReservations) {
-        const [rH, rM] = r.reservation_time.split(':').map(Number);
-        const rStart = rH * 60 + rM;
-        const rDuration = getServiceDuration(r.service_type);
-        const rEnd = rStart + rDuration;
-        if (m >= rStart && m < rEnd) {
-          occupied++;
-        }
-      }
-      if (occupied >= dealer.bays) {
-        const conflictHour = Math.floor(m / 60);
-        const conflictMin = m % 60;
-        const ampm = conflictHour >= 12 ? 'PM' : 'AM';
-        const h12 = conflictHour > 12 ? conflictHour - 12 : conflictHour === 0 ? 12 : conflictHour;
-        setCapacityWarning(
-          `Sin disponibilidad: las ${dealer.bays} bahía(s) están ocupadas a las ${h12}:${String(conflictMin).padStart(2, '0')} ${ampm}. Servicio de ${duration} min no cabe en este horario.`
-        );
-        return false;
-      }
+    // Delegate the minute-by-minute overlap count to the shared capacity helper so
+    // every reservation-creation flow enforces the same rule.
+    const result = computeSlotOccupancy({
+      existingReservations: dayReservations as CapacityReservation[],
+      startTime: time,
+      durationMinutes: duration,
+      bays: dealer.bays,
+      resolveDuration: getServiceDuration,
+    });
+    if (result.full && result.firstFullMinute !== null) {
+      setCapacityWarning(
+        `Sin disponibilidad: las ${result.capacity} bahía(s) están ocupadas a las ${formatMinuteLabel(result.firstFullMinute)}. Servicio de ${duration} min no cabe en este horario.`
+      );
+      return false;
     }
     return true;
   };
@@ -469,9 +459,89 @@ const AdminReservas = () => {
   const executeBulkUpdate = async (payload: Record<string, any>) => {
     setBulkLoading(true);
     const ids = [...selectedIds];
-    const { error } = await supabase.from('reservations').update(payload).in('id', ids);
-    if (error) toast.error('Error al actualizar reservas');
-    else { toast.success(`${ids.length} reserva(s) actualizadas`); setSelectedIds(new Set()); setBulkAction(null); fetchReservations(); }
+
+    // Only scheduling changes (date/time/dealership/service) can overbook a bay.
+    // Status/mileage-only updates skip the capacity check entirely.
+    const affectsSchedule = ['reservation_date', 'reservation_time', 'dealership_id', 'service_type']
+      .some(k => k in payload);
+
+    if (!affectsSchedule) {
+      const { error } = await supabase.from('reservations').update(payload).in('id', ids);
+      if (error) toast.error('Error al actualizar reservas');
+      else { toast.success(`${ids.length} reserva(s) actualizadas`); setSelectedIds(new Set()); setBulkAction(null); fetchReservations(); }
+      setBulkLoading(false);
+      return;
+    }
+
+    // Capacity-aware path: run the same overlap check per affected reservation and
+    // skip the ones that would exceed the target dealership's bays.
+    const idSet = new Set(ids);
+    const selected = reservations.filter(r => idSet.has(r.id));
+    // Existing non-cancelled reservations per "dealership|date", excluding the batch
+    // itself (those rows are being moved, so their old slots must not count).
+    const dayCache = new Map<string, CapacityReservation[]>();
+    // Reservations already placed by THIS batch, so several moves into the same slot
+    // still compete for bays with each other.
+    const placed = new Map<string, CapacityReservation[]>();
+    const okIds: string[] = [];
+    const skipped: string[] = [];
+
+    for (const r of selected) {
+      const dealershipId = (payload.dealership_id as string) ?? r.dealership_id;
+      const date = (payload.reservation_date as string) ?? r.reservation_date;
+      const time = ((payload.reservation_time as string) ?? r.reservation_time).slice(0, 5);
+      const service = (payload.service_type as string) ?? r.service_type;
+      const dealer = dealerships.find(d => d.id === dealershipId);
+      const key = `${dealershipId}|${date}`;
+
+      if (!dayCache.has(key)) {
+        const { data } = await supabase
+          .from('reservations')
+          .select('id, reservation_time, service_type')
+          .eq('dealership_id', dealershipId)
+          .eq('reservation_date', date)
+          .neq('status', 'cancelada');
+        dayCache.set(key, ((data || []) as Array<CapacityReservation & { id: string }>).filter(x => !idSet.has(x.id)));
+        placed.set(key, []);
+      }
+
+      const existing = [...dayCache.get(key)!, ...placed.get(key)!];
+      const result = computeSlotOccupancy({
+        existingReservations: existing,
+        startTime: time,
+        durationMinutes: getServiceDuration(service),
+        bays: dealer?.bays,
+        resolveDuration: getServiceDuration,
+      });
+
+      if (result.full) {
+        skipped.push(r.clients?.full_name || r.walkin_client_name || r.reservation_date);
+      } else {
+        okIds.push(r.id);
+        placed.get(key)!.push({ reservation_time: time, service_type: service });
+      }
+    }
+
+    if (okIds.length > 0) {
+      const { error } = await supabase.from('reservations').update(payload).in('id', okIds);
+      if (error) {
+        toast.error('Error al actualizar reservas');
+        setBulkLoading(false);
+        return;
+      }
+    }
+
+    if (skipped.length > 0 && okIds.length > 0) {
+      toast.warning(`${okIds.length} actualizada(s). ${skipped.length} omitida(s) por falta de disponibilidad.`);
+    } else if (skipped.length > 0) {
+      toast.error(`Sin disponibilidad: ${skipped.length} reserva(s) exceden la capacidad de bahías y no se actualizaron.`);
+    } else {
+      toast.success(`${okIds.length} reserva(s) actualizadas`);
+    }
+
+    setSelectedIds(new Set());
+    setBulkAction(null);
+    fetchReservations();
     setBulkLoading(false);
   };
 

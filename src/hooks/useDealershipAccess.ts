@@ -6,6 +6,7 @@ interface Dealership {
   id: string;
   name: string;
   state: string | null;
+  bays: number | null;
 }
 
 /**
@@ -31,7 +32,7 @@ export function useDealershipAccess() {
         // Admins see all active dealerships, default to first alphabetically
         const { data } = await supabase
           .from('dealerships')
-          .select('id, name, state')
+          .select('id, name, state, bays')
           .eq('is_active', true)
           .order('name');
         if (data && data.length > 0) {
@@ -43,7 +44,7 @@ export function useDealershipAccess() {
         // but default to their linked dealership (dealership_users) so their
         // own prospects are visible without having to manually pick.
         const [{ data: allDealerships }, { data: links }] = await Promise.all([
-          supabase.from('dealerships').select('id, name, state').eq('is_active', true).order('name'),
+          supabase.from('dealerships').select('id, name, state, bays').eq('is_active', true).order('name'),
           supabase.from('dealership_users').select('dealership_id').eq('profile_id', user.id).limit(1),
         ]);
         if (allDealerships && allDealerships.length > 0) {
@@ -58,7 +59,7 @@ export function useDealershipAccess() {
         // Concesionario: get linked dealership
         const { data: links } = await supabase
           .from('dealership_users')
-          .select('dealership_id, dealerships(id, name, state)')
+          .select('dealership_id, dealerships(id, name, state, bays)')
           .eq('profile_id', user.id);
 
         if (links && links.length > 0) {

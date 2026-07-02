@@ -19,12 +19,14 @@ import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 import { toast } from 'sonner';
+import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 
 interface Dealership {
   id: string;
   name: string;
   city: string | null;
   brand: string[] | null;
+  bays: number | null;
 }
 
 interface Reservation {
@@ -170,6 +172,9 @@ const DealershipPanel = () => {
   // Create reservation dialog
   const [createOpen, setCreateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Non-cancelled reservations for the selected dealership + date, to compute
+  // per-slot bay availability in the time picker.
+  const [daySlotReservations, setDaySlotReservations] = useState<CapacityReservation[]>([]);
 
   // Plate search
   const [plateSearch, setPlateSearch] = useState('');
@@ -222,7 +227,7 @@ const DealershipPanel = () => {
   const fetchDealerships = async () => {
     const { data } = await supabase
       .from('dealerships')
-      .select('id, name, city, brand')
+      .select('id, name, city, brand, bays')
       .eq('is_active', true)
       .order('name');
     if (data) setDealerships(data as Dealership[]);
@@ -324,6 +329,36 @@ const DealershipPanel = () => {
     }
   }, [selectedDealership, currentSalesperson]);
 
+  // Load the day's non-cancelled reservations so the time picker can flag full slots.
+  useEffect(() => {
+    if (!createOpen || !selectedDealership || !fDate) {
+      setDaySlotReservations([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('reservations')
+        .select('reservation_time, service_type')
+        .eq('dealership_id', selectedDealership)
+        .eq('reservation_date', fDate)
+        .neq('status', 'cancelada');
+      if (!cancelled) setDaySlotReservations((data || []) as CapacityReservation[]);
+    })();
+    return () => { cancelled = true; };
+  }, [createOpen, selectedDealership, fDate]);
+
+  const getSlotDuration = (name: string) => serviceTypes.find(s => s.name === name)?.duration_minutes ?? 60;
+
+  const getSlotOccupancy = (slot: string) =>
+    computeSlotOccupancy({
+      existingReservations: daySlotReservations,
+      startTime: slot,
+      durationMinutes: getSlotDuration(fService),
+      bays: dealerships.find(d => d.id === selectedDealership)?.bays,
+      resolveDuration: getSlotDuration,
+    });
+
   // Stats
   const pendientes = reservations.filter(r => r.status === 'pendiente').length;
   const enProceso = reservations.filter(r => r.status === 'en_proceso').length;
@@ -396,6 +431,12 @@ const DealershipPanel = () => {
     }
     if (!plateResult && !fWalkinName.trim()) {
       toast.error('Ingrese el nombre del cliente');
+      return;
+    }
+    // Defense-in-depth: full slots are disabled in the picker, but guard the save too.
+    const slotOcc = getSlotOccupancy(fTime);
+    if (slotOcc.full) {
+      toast.error(`Sin disponibilidad: las ${slotOcc.capacity} bahía(s) están ocupadas en ese horario. Elegí otra hora.`);
       return;
     }
     setSaving(true);
@@ -1419,7 +1460,7 @@ const DealershipPanel = () => {
                 <Select value={fTime} onValueChange={setFTime}>
                   <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {TIME_SLOTS.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                    {TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}
                   </SelectContent>
                 </Select>
               </div>

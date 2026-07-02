@@ -15,6 +15,7 @@ import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { createKommoReservation } from '@/lib/kommo';
+import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 
 interface VehicleResult {
   id: string;
@@ -37,6 +38,7 @@ interface Dealership {
   address: string | null;
   google_maps_url: string | null;
   is_service_center: boolean;
+  bays: number | null;
 }
 
 interface ServiceType {
@@ -71,7 +73,9 @@ const PublicReserva = () => {
   const [mileage, setMileage] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
-  const [occupiedTimes, setOccupiedTimes] = useState<string[]>([]);
+  // Raw non-cancelled reservations for the chosen dealership + date, used to compute
+  // per-slot bay availability (a slot is only full when concurrent bookings reach bays).
+  const [dayReservations, setDayReservations] = useState<CapacityReservation[]>([]);
   const [loadingTimes, setLoadingTimes] = useState(false);
 
   const sortDealerships = (deals: Dealership[]) => {
@@ -87,23 +91,32 @@ const PublicReserva = () => {
   const fetchOccupiedTimes = async (dealershipId: string, date: Date) => {
     if (!dealershipId || !date) return;
     setLoadingTimes(true);
-    setOccupiedTimes([]);
+    setDayReservations([]);
     setSelectedTime('');
-    
+
     const dateStr = format(date, 'yyyy-MM-dd');
     const { data } = await supabase
       .from('reservations')
-      .select('reservation_time')
+      .select('reservation_time, service_type')
       .eq('dealership_id', dealershipId)
       .eq('reservation_date', dateStr)
       .neq('status', 'cancelada');
-    
-    if (data) {
-      const times = data.map(r => r.reservation_time.substring(0, 5));
-      setOccupiedTimes(times);
-    }
+
+    if (data) setDayReservations(data as CapacityReservation[]);
     setLoadingTimes(false);
   };
+
+  const getServiceDuration = (name: string) =>
+    serviceTypes.find(s => s.name === name)?.duration_minutes ?? 60;
+
+  const getSlotOccupancy = (slot: string) =>
+    computeSlotOccupancy({
+      existingReservations: dayReservations,
+      startTime: slot,
+      durationMinutes: getServiceDuration(selectedService),
+      bays: dealerships.find(d => d.id === selectedDealership)?.bays,
+      resolveDuration: getServiceDuration,
+    });
 
   const handleDateSelect = (date: Date | undefined) => {
     setSelectedDate(date);
@@ -143,7 +156,7 @@ const PublicReserva = () => {
       setVehicle(data[0] as VehicleResult);
       // Load dealerships and service types
       const [{ data: deals }, { data: stData }] = await Promise.all([
-        supabase.from('dealerships').select('id, name, city, state, phone, address, google_maps_url, is_service_center').eq('is_active', true).eq('is_service_center', true),
+        supabase.from('dealerships').select('id, name, city, state, phone, address, google_maps_url, is_service_center, bays').eq('is_active', true).eq('is_service_center', true),
         supabase.from('service_types').select('id, name, duration_minutes').eq('is_active', true).order('name'),
       ]);
       setDealerships(sortDealerships((deals || []) as Dealership[]));
@@ -159,6 +172,12 @@ const PublicReserva = () => {
     if (!selectedService) { toast.error('Seleccione un tipo de servicio'); return; }
     if (!selectedDate) { toast.error('Seleccione una fecha'); return; }
     if (!selectedTime) { toast.error('Seleccione una hora'); return; }
+    // Defense-in-depth: a stale selection (service change) could now be full.
+    const occ = getSlotOccupancy(selectedTime);
+    if (occ.full) {
+      toast.error(`Sin disponibilidad: las ${occ.capacity} bahía(s) ya están ocupadas en ese horario.`);
+      return;
+    }
     setStep('confirm');
   };
 
@@ -382,36 +401,42 @@ const PublicReserva = () => {
                         <span className="ml-2 text-xs text-muted-foreground">Verificando disponibilidad...</span>
                       </div>
                     ) : (
-                      <>
-                        {occupiedTimes.length > 0 && (
-                          <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" />
-                            Las horas en rojo ya están ocupadas
-                          </p>
-                        )}
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {TIME_SLOTS.map(t => {
-                            const isOccupied = occupiedTimes.includes(t);
-                            return (
-                              <button
-                                key={t}
-                                onClick={() => !isOccupied && setSelectedTime(t)}
-                                disabled={isOccupied}
-                                className={cn(
-                                  "py-1.5 rounded-md text-xs font-medium border transition-all",
-                                  isOccupied 
-                                    ? "border-red-200 bg-red-50 text-red-400 cursor-not-allowed line-through" 
-                                    : selectedTime === t 
-                                      ? "border-primary bg-primary text-primary-foreground" 
-                                      : "border-border hover:border-primary/50"
-                                )}
-                              >
-                                {t}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </>
+                      (() => {
+                        const slots = TIME_SLOTS.map(t => ({ t, occ: getSlotOccupancy(t) }));
+                        const anyFull = slots.some(s => s.occ.full);
+                        return (
+                          <>
+                            {anyFull && (
+                              <p className="text-xs text-amber-600 mb-2 flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3" />
+                                Las horas en rojo ya no tienen cupo
+                              </p>
+                            )}
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {slots.map(({ t, occ }) => {
+                                const isOccupied = occ.full;
+                                return (
+                                  <button
+                                    key={t}
+                                    onClick={() => !isOccupied && setSelectedTime(t)}
+                                    disabled={isOccupied}
+                                    className={cn(
+                                      "py-1.5 rounded-md text-xs font-medium border transition-all",
+                                      isOccupied
+                                        ? "border-red-200 bg-red-50 text-red-400 cursor-not-allowed line-through"
+                                        : selectedTime === t
+                                          ? "border-primary bg-primary text-primary-foreground"
+                                          : "border-border hover:border-primary/50"
+                                    )}
+                                  >
+                                    {t}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </>
+                        );
+                      })()
                     )}
                   </div>
                 )}
