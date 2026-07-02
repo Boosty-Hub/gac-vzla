@@ -78,21 +78,28 @@ const KOMMO_TO_BRAND: Record<number, string> = {
 }
 
 // ─── Event name mappings (CF 3448828 "Nombre del Evento" is a SELECT) ─────────
-const EVENT_NAME_ENUMS = [
-  { id: 8158302, value: 'Cerro Verde 2026',                       keywords: ['cerro verde'] },
-  { id: 8161259, value: 'Exhibición Acarigua Mango Center 2026',  keywords: ['acarigua', 'mango center'] },
-  { id: 8161682, value: 'Plastic Show Valencia',                   keywords: ['plastic show'] },
-]
-const KOMMO_EVENT_ID_TO_NAME: Record<number, string> = {
-  8158302: 'Cerro Verde 2026',
-  8161259: 'Exhibición Acarigua Mango Center 2026',
-  8161682: 'Plastic Show Valencia',
+// Outbound (GAC → Kommo): map a GAC event name to the Kommo select enum_id.
+// Full snapshot of the 9 options of CF 3448828 (exact match, accent-insensitive).
+// Inbound (Kommo → GAC) reads the option label directly from `.value` (no map needed).
+const EVENT_NAME_TO_ENUM_ID: Record<string, number> = {
+  'cerro verde 2026': 8158302,
+  'exhibicion acarigua mango center 2026': 8161259,
+  'plastic show valencia': 8161682,
+  'expo - cerro verde': 8164423,
+  'expo isp 2026': 8164999,
+  'clinica sanatrix': 8165459,
+  'hotel punta palma': 8166147,
+  'exhibicion pits maracaibo': 8166999,
+  'futuro venezuela 360': 8167001,
+}
+
+function normEventName(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim()
 }
 
 function eventNameToKommoEnumId(eventName: string): number | null {
   if (!eventName) return null
-  const lower = eventName.toLowerCase()
-  return EVENT_NAME_ENUMS.find(e => e.keywords.some(k => lower.includes(k)))?.id ?? null
+  return EVENT_NAME_TO_ENUM_ID[normEventName(eventName)] ?? null
 }
 
 // ─── Person type mappings (on Kommo contact CF 2988986) ───────────────────────
@@ -257,11 +264,20 @@ const CENTRO_SERVICIO_KOMMO: Array<{ id: number; keywords: string[] }> = [
 
 // Normalize a Venezuelan phone to E.164-ish (+58...) for Kommo / WhatsApp.
 function normalizeVzPhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '')
-  if (digits.startsWith('58')) return `+${digits}`
-  if (digits.startsWith('0')) return `+58${digits.slice(1)}`
-  if (digits.length === 10) return `+58${digits}`
-  return `+${digits}`
+  let digits = raw.replace(/\D/g, '')
+  // Drop the country code so we always work with the national number.
+  if (digits.startsWith('58')) digits = digits.slice(2)
+  // Drop the trunk '0' (national prefix) — it must never appear in E.164. This also
+  // repairs numbers that arrived as "+580412..." (a stray 0 after the country code),
+  // which previously slipped through and broke WhatsApp delivery.
+  if (digits.startsWith('0')) digits = digits.slice(1)
+  return `+58${digits}`
+}
+
+// True for a Venezuelan mobile in E.164 form: +58 + valid operator prefix + 7 digits.
+// Operator prefixes: 412, 414, 416 (Movistar/Movilnet/Digitel) and 424, 426 (Movistar/Digitel).
+function isValidVzMobile(phone: string): boolean {
+  return /^\+584(12|14|16|24|26)\d{7}$/.test(phone)
 }
 
 // Strip accent marks from vowels (keeps ñ/Ñ) so WhatsApp templates render clean.
@@ -547,8 +563,7 @@ async function syncFromKommo(
     const v = extractCFText(cfValues, CF.estado_vzla); if (v) updates['Estado de Vnzla'] = v
   }
   if (!prospect.event_name) {
-    const enumId = extractCFEnumId(cfValues, CF.event_name)
-    if (enumId && KOMMO_EVENT_ID_TO_NAME[enumId]) updates.event_name = KOMMO_EVENT_ID_TO_NAME[enumId]
+    const v = extractCFText(cfValues, CF.event_name); if (v) updates.event_name = v
   }
   if (!prospect.source || prospect.source === 'concesionario') {
     const enumId = extractCFEnumId(cfValues, CF.fuente)
@@ -1403,10 +1418,18 @@ Deno.serve(async (req) => {
 
       // ── Find or create dealership contact in Kommo ───────────────────────────
       let dealerContactId: number | null = dealership.kommo_contact_id ?? null
+      // Phone currently stored on the existing Kommo contact (null if we have to create/search).
+      let existingContactPhone: string | null = null
 
       if (dealerContactId) {
         const checkRes = await fetch(`${baseUrl}/contacts/${dealerContactId}`, { headers: authHeaders })
-        if (!checkRes.ok || checkRes.status === 204) dealerContactId = null
+        if (!checkRes.ok || checkRes.status === 204) {
+          dealerContactId = null
+        } else {
+          const cdata = await checkRes.json() as Record<string, unknown>
+          const cfs = (cdata.custom_fields_values as Array<{ field_code?: string; values?: Array<{ value?: string }> }>) || []
+          existingContactPhone = cfs.find(f => f.field_code === 'PHONE')?.values?.[0]?.value ?? null
+        }
       }
 
       if (!dealerContactId) {
@@ -1440,6 +1463,23 @@ Deno.serve(async (req) => {
       }
 
       if (!dealerContactId) throw new Error('No se pudo obtener contacto del concesionario en Kommo')
+
+      // Keep the Kommo contact's phone in sync, but NON-DESTRUCTIVELY: only overwrite when the
+      // current Kommo number is missing/invalid AND the system has a valid VE mobile. This repairs
+      // malformed numbers (e.g. a stray trunk-0) without clobbering a good number that merely
+      // differs from the system record — WhatsApp delivers to the Kommo contact's number.
+      if (
+        existingContactPhone !== null &&
+        !isValidVzMobile(existingContactPhone) &&
+        isValidVzMobile(normalizedPhone)
+      ) {
+        await fetch(`${baseUrl}/contacts/${dealerContactId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({
+            custom_fields_values: [{ field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] }],
+          }),
+        })
+      }
 
       // ── Build notification CFs with reservation data ───────────────────────────
       const clientName =

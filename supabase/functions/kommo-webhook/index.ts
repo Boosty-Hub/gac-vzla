@@ -44,13 +44,7 @@ const KOMMO_TO_BRAND: Record<number, string> = {
   7857650: 'SHINERAY',
 }
 
-const KOMMO_EVENT_ID_TO_NAME: Record<number, string> = {
-  8158302: 'Cerro Verde 2026',
-  8161259: 'Exhibición Acarigua Mango Center 2026',
-  8161682: 'Plastic Show Valencia',
-  8164423: 'Expo - Cerro Verde',
-  8164999: 'Expo ISP 2026',
-}
+// Inbound (Kommo → GAC) reads the event label straight from `.value` — no ID→name map needed.
 
 const KOMMO_TO_PERSON_TYPE: Record<number, string> = {
   7832512: 'natural',
@@ -78,20 +72,27 @@ const SOURCE_TO_KOMMO: Record<string, number> = {
 }
 const BRAND_TO_KOMMO: Record<string, number> = { GAC: 7832208, DFSK: 7832206, SHINERAY: 7857650 }
 
-// El orden importa: las variantes más específicas van primero porque eventNameToKommoEnumId
-// devuelve el PRIMER match por substring ("Expo - Cerro Verde" contiene "cerro verde").
-const EVENT_NAME_ENUMS = [
-  { id: 8164999, keywords: ['expo isp', 'isp 2026'] },
-  { id: 8164423, keywords: ['expo - cerro verde', 'expo cerro verde'] },
-  { id: 8161259, keywords: ['acarigua', 'mango center'] },
-  { id: 8161682, keywords: ['plastic show'] },
-  { id: 8158302, keywords: ['cerro verde'] },
-]
+// Outbound (GAC → Kommo): map a GAC event name to the Kommo select enum_id.
+// Full snapshot of the 9 options of CF 3448828 "Nombre del Evento" (exact match, accent-insensitive).
+const EVENT_NAME_TO_ENUM_ID: Record<string, number> = {
+  'cerro verde 2026': 8158302,
+  'exhibicion acarigua mango center 2026': 8161259,
+  'plastic show valencia': 8161682,
+  'expo - cerro verde': 8164423,
+  'expo isp 2026': 8164999,
+  'clinica sanatrix': 8165459,
+  'hotel punta palma': 8166147,
+  'exhibicion pits maracaibo': 8166999,
+  'futuro venezuela 360': 8167001,
+}
+
+function normEventName(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim()
+}
 
 function eventNameToKommoEnumId(eventName: string): number | null {
   if (!eventName) return null
-  const lower = eventName.toLowerCase()
-  return EVENT_NAME_ENUMS.find(e => e.keywords.some(k => lower.includes(k)))?.id ?? null
+  return EVENT_NAME_TO_ENUM_ID[normEventName(eventName)] ?? null
 }
 
 const PERSON_TYPE_TO_KOMMO: Record<string, number> = {
@@ -526,11 +527,8 @@ async function syncFieldsFromKommo(
   // GAC has more events than Kommo's enum list — never overwrite a GAC value with Kommo's
   // (Kommo would revert it back because it can't represent GAC-only events as enums).
   if (!prospect.event_name) {
-    const eventEnumId = getCFEnum(cfValues, CF.event_name)
-    if (eventEnumId !== null) {
-      const eventName = KOMMO_EVENT_ID_TO_NAME[eventEnumId] ?? null
-      if (eventName) updates.event_name = eventName
-    }
+    const eventName = getCFText(cfValues, CF.event_name)
+    if (eventName) updates.event_name = eventName
   }
 
   // Source (select → text)
@@ -776,10 +774,14 @@ async function autoCreateReservationFromKommo(
 
   // Resolve dealership from text CF (populated by create_reservation)
   let dealershipId: string | null = null
+  let dealershipBays: number | null = null
   if (concesionarioCita) {
     const { data: dealer } = await supabase
-      .from('dealerships').select('id').ilike('name', `%${concesionarioCita}%`).limit(1).maybeSingle()
-    if (dealer) dealershipId = (dealer as { id: string }).id
+      .from('dealerships').select('id, bays').ilike('name', `%${concesionarioCita}%`).limit(1).maybeSingle()
+    if (dealer) {
+      dealershipId = (dealer as { id: string; bays: number | null }).id
+      dealershipBays = (dealer as { id: string; bays: number | null }).bays
+    }
   }
 
   // Resolve client and vehicle from contact phone
@@ -822,10 +824,67 @@ async function autoCreateReservationFromKommo(
     }
   }
 
+  const reservationDate = fechaCita || new Date().toISOString().slice(0, 10)
+
+  // Capacity guard: a dealership can only service `bays` vehicles at once. Mirror the
+  // shared client-side reservationCapacity helper here (Deno cannot import from src/).
+  // Skip auto-creating the reservation if the target slot is already at capacity.
+  if (dealershipId) {
+    const DEFAULT_BAYS = 2
+    const DEFAULT_DURATION = 60
+    const capacity = dealershipBays ?? DEFAULT_BAYS
+    const toMinutes = (t: string): number => {
+      const [h, m] = String(t).split(':').map(Number)
+      return (h || 0) * 60 + (m || 0)
+    }
+
+    // Build a service name -> duration map so overlaps use each service's real length.
+    const durationByService = new Map<string, number>()
+    const { data: svcTypes } = await supabase
+      .from('service_types').select('name, duration_minutes')
+    for (const s of (svcTypes || []) as Array<{ name: string; duration_minutes: number }>) {
+      durationByService.set(s.name, s.duration_minutes)
+    }
+    const resolveDuration = (name: string) => durationByService.get(name) ?? DEFAULT_DURATION
+
+    const { data: dayRes } = await supabase
+      .from('reservations')
+      .select('reservation_time, service_type')
+      .eq('dealership_id', dealershipId)
+      .eq('reservation_date', reservationDate)
+      .neq('status', 'cancelada')
+
+    const existing = (dayRes || []) as Array<{ reservation_time: string; service_type: string }>
+    const startMin = toMinutes(horaCita)
+    const endMin = startMin + resolveDuration(servicioCita)
+    let full = false
+    for (let min = startMin; min < endMin && !full; min++) {
+      let occupied = 0
+      for (const r of existing) {
+        const rStart = toMinutes(r.reservation_time)
+        const rEnd = rStart + resolveDuration(r.service_type)
+        if (min >= rStart && min < rEnd) occupied++
+      }
+      if (occupied >= capacity) full = true
+    }
+
+    if (full) {
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'webhook_reservation_auto_create_skipped_full',
+        kommo_lead_id: kommoLeadId, status: 'error',
+        details: {
+          reason: 'no_bay_capacity', dealership_id: dealershipId, capacity,
+          reservation_date: reservationDate, reservation_time: horaCita, service_type: servicioCita,
+        },
+      })
+      return
+    }
+  }
+
   const newReservation: Record<string, unknown> = {
     status: initialStatus,
     kommo_lead_id: kommoLeadId,
-    reservation_date: fechaCita || new Date().toISOString().slice(0, 10),
+    reservation_date: reservationDate,
     reservation_time: horaCita,
     service_type: servicioCita,
     ...(clientId && { client_id: clientId }),
@@ -983,8 +1042,7 @@ async function autoCreateProspectFromKommo(
   const notes = getCFText(cfValues, CF.notes)
   const estadoVzla = getCFText(cfValues, CF.estado_vzla)
 
-  const eventEnumId = getCFEnum(cfValues, CF.event_name)
-  const eventName = eventEnumId ? (KOMMO_EVENT_ID_TO_NAME[eventEnumId] ?? null) : null
+  const eventName = getCFText(cfValues, CF.event_name)
 
   const sourceEnumId = getCFEnum(cfValues, CF.fuente)
   const source = sourceEnumId ? (KOMMO_TO_SOURCE[String(sourceEnumId)] || 'concesionario') : 'concesionario'
