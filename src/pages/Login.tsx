@@ -22,6 +22,7 @@ const Login = () => {
 
   // Plate login state
   const [plate, setPlate] = useState('');
+  const [plateCedula, setPlateCedula] = useState('');
   const [plateLoading, setPlateLoading] = useState(false);
 
   // PIN login state
@@ -88,11 +89,15 @@ const Login = () => {
       toast.error('Ingresa la placa de tu vehículo');
       return;
     }
+    if (!plateCedula.trim()) {
+      toast.error('Ingresa la cédula del titular');
+      return;
+    }
     setPlateLoading(true);
 
     try {
       const { data, error } = await supabase.functions.invoke('login-by-plate', {
-        body: { plate: plate.trim() },
+        body: { plate: plate.trim(), cedula: plateCedula.trim() },
       });
 
       if (error || data?.error) {
@@ -315,7 +320,7 @@ const Login = () => {
                   <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center mb-2">
                     <Car className="w-10 h-10 text-primary mx-auto mb-2" />
                     <p className="text-sm text-muted-foreground">
-                      Ingresa la placa de tu vehículo para acceder directamente a tu portal de cliente
+                      Ingresa la placa de tu vehículo y la cédula del titular para acceder a tu portal de cliente
                     </p>
                   </div>
 
@@ -332,6 +337,23 @@ const Login = () => {
                         className="pl-9 uppercase font-mono text-lg tracking-widest"
                         required
                         maxLength={10}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="plateCedula">Cédula del Titular</Label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input
+                        id="plateCedula"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="V-12345678"
+                        value={plateCedula}
+                        onChange={(e) => setPlateCedula(e.target.value)}
+                        className="pl-9 font-mono tracking-wide"
+                        required
                       />
                     </div>
                   </div>
