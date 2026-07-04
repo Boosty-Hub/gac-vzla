@@ -204,11 +204,11 @@ Los 4 buckets son `public: true`. **`technical-reports` (88 archivos) y `prospec
 
 **Objetivo:** que la seguridad no se degrade con el tiempo.
 
-- [ ] **6.1** Escaneo de secretos en cada commit (gitleaks/trufflehog en pre-commit + CI).
-- [ ] **6.2** Rotación periódica de keys y tokens (calendario).
-- [ ] **6.3** Alertas de Supabase (logs de auth fallida, picos de tráfico anómalo).
+- [x] **6.1** Escaneo de secretos en CI: `.github/workflows/gitleaks.yml` + `.gitleaks.toml` (allowlist del token ya revocado). Corre en cada push/PR.
+- [ ] **6.2** Rotación periódica de keys y tokens (calendario) — operativo, del equipo.
+- [ ] **6.3** Alertas de Supabase (auth fallida, picos de tráfico) — requiere config en el dashboard.
 - [ ] **6.4** Revisión de seguridad trimestral (re-correr esta auditoría).
-- [ ] **6.5** Documentar el modelo de amenazas y las decisiones de RLS para el equipo.
+- [x] **6.5** `SECURITY.md`: modelo de seguridad, principios de RLS, regla de deploy coordinado y manejo de secretos.
 
 ---
 

@@ -1,0 +1,13 @@
+# Configuración de gitleaks (escaneo de secretos).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Token de Management API sbp_ ya REVOCADO (presente en historial antiguo; rotado el 2026-07-03). Se permite para que el escaneo no falle por su presencia histórica; cualquier secreto NUEVO/distinto sí se detecta."
+regexes = [
+  '''sbp_b715f486726674624577159f19c827fc1a9d7d4c''',
+]
+# La anon/publishable key de Supabase es pública por diseño (va en el frontend).
+paths = [
+  '''\.env\.example$''',
+]
