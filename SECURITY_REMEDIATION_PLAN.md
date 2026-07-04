@@ -113,19 +113,36 @@ Migración `20260703130000`: trigger `prevent_profile_privilege_escalation` en `
 - [x] Carve-out por `auth.role()='authenticated'` (no por `auth.uid() IS NULL`) → anón/backend/admin no afectados.
 - [x] **Probado con simulación de rol**: vendedor→admin CONGELADO ✓; is_active CONGELADO ✓; admin sigue gestionando roles ✓; update propio (nombre/pin) sigue funcionando ✓.
 
-### FASE 2B — Aislamiento entre concesionarios/vendedores/clientes ⏳ DISEÑADO, REQUIERE DEPLOY COORDINADO
-Reescribir RLS de `prospects`/`clients`/`vehicles`/`reservations` + RPCs `SECURITY DEFINER` + cambios de frontend. **No aplicable a la DB en vivo hasta desplegar el frontend correlativo** (si no, rompe producción). Incorpora fixes del review adversarial:
-- [ ] **2B.1** `prospects`: scope real. Vendedor por `salespersons.name WHERE profile_id=auth.uid()` (**NO** por `full_name` editable — evita impersonación). Concesionario por `dealership_users`. Admin todo. (A1)
-- [ ] **2B.2** `clients`/`vehicles` SELECT acotado (decisión de producto: alcance del staff — ver preguntas). (A2)
-- [ ] **2B.3** `reservations`: vendedor por `created_by_profile_id=auth.uid()`, concesionario por dealership, cliente por `client_users`. (A2)
-- [ ] **2B.4** Quitar `anon_read_vehicles_by_plate`; RPC `lookup_vehicle_by_plate` que NO exponga PII de contacto a anón. Frontend `PublicReserva` usa la RPC. (C1-fuga)
-- [ ] **2B.5** RPC `get_taken_reservation_times` para el calendario (cliente/anón) — evita romper disponibilidad. Frontend correlativo.
-- [ ] **2B.6** RPC `prospect_phone_exists` / `find_prospects_by_phone` (acotada al scope) para dedupe. Frontend correlativo.
-- [ ] **2B.7** `notifications`: mover fan-out de cancelación del cliente a trigger/RPC (evita romper el insert multi-fila).
-- [ ] **2B.8** `prospect_events`/`prospect_updates`/`prospect_vehicles`: acotar por `can_access_prospect()`. (M4)
-- [ ] **2B.9** INSERT anón de `prospects`/`reservations`: `WITH CHECK` acotado (status whitelist, sin client_id/vehicle_id arbitrarios) + captcha (Fase 4). (M4)
+### FASE 2B — Aislamiento entre concesionarios/vendedores/clientes ⏳ DB LISTA Y VERIFICADA, FRONTEND EN CURSO
+Migraciones: `20260703140000` (part1 RPCs+helpers, **APLICADA**), `20260703160000` (part1b staff lookup, **APLICADA**), `20260703150000` (part2 políticas, **escrita+verificada, NO aplicada**).
 
-**Validación 2B:** simular cada rol (`SET LOCAL request.jwt.claims`) y confirmar aislamiento; re-atacar (volcado anon de vehicles, lectura cruzada de prospects/clients); confirmar que PublicReserva/portal cliente/portal vendedor siguen funcionando con el frontend nuevo.
+**Aislamiento verificado con simulación de rol (predicados evaluados con identidades reales):**
+| Tabla | Total | Vendedor | Concesionario | Cliente | Admin |
+|---|---|---|---|---|---|
+| prospects | 2370 | **90** | **41** | — | 2370 |
+| vehicles | 2571 | 83 | — | **1** | — |
+| clients | 1326 | — | 42 | **1** | — |
+| reservations | 272 | 0 (creó 0) | 47 | — | — |
+
+- [x] **2B.1** `prospects`: scope por rol. Vendedor por `salespersons.name ∪ full_name` (ambos **congelados**, no editables). Concesionario por dealership. Asesor NO ve prospects. (A1)
+- [x] **2B.2** `clients`/`vehicles` SELECT acotado: cliente lo suyo; staff los ligados a reservas de su concesionario; +RPC `staff_lookup_vehicle_by_plate` para buscar al crear reserva. (A2)
+- [x] **2B.3** `reservations`: vendedor por `created_by_profile_id`, concesionario/asesor por dealership, cliente por `client_users`. (A2)
+- [x] **2B.4** `anon_read_vehicles_by_plate` eliminada; RPC `lookup_vehicle_by_plate` devuelve nombre **enmascarado**, SIN teléfono/email. Verificado como anón. (C1-fuga)
+- [x] **2B.5** RPC `get_taken_reservation_times` (calendario) + `create_public_reservation` (alta pública server-side, status forzado). Verificadas.
+- [x] **2B.6** RPC `prospect_phone_exists` (anón, boolean) / `find_prospects_by_phone` (staff, acotada). Verificadas.
+- [x] **2B.7** `notify_reservation_cancellation` RPC (fan-out server-side, verifica ownership).
+- [x] **2B.8** `prospect_updates`/`prospect_vehicles` acotadas por `can_access_prospect()`. `prospect_events` = catálogo (sin PII), se deja. (M4)
+- [x] **2B.9** INSERT anón `prospects` acotado a `status='nuevo'`; INSERT anón `reservations` eliminado (→ RPC). Captcha/rate-limit → Fase 4.
+- [~] **Frontend correlativo**: PublicReserva, PublicProspectos, UserPortal, DealershipReservas, DealershipPanel, DealershipProspectos → usar RPCs (en curso).
+
+### 🚀 RUNBOOK DE DEPLOY 2B (orden obligatorio para no romper producción)
+1. ✅ Aplicar part1 + part1b (RPCs/helpers) — **YA HECHO** (aditivo, no rompe nada).
+2. Mergear el frontend nuevo (rama `security/hardening`) a `main` → Netlify despliega. El frontend usa las RPCs (ya existen).
+3. Aplicar part2 (`20260703150000_2b_part2_tenant_isolation_policies.sql`) a la DB. A partir de aquí el aislamiento está activo y el frontend ya no hace queries directas.
+4. Desplegar `login-by-plate` (Fase 1) en el mismo release del frontend con cédula.
+5. Re-atacar (Fase 5) para confirmar cierre.
+
+**Decisiones aplicadas** (usuario confirmó "con tu recomendación"): clients/vehicles staff = ligados a reservas del dealership + RPC lookup; Asesor de Servicio NO ve prospects; reserva pública = por placa sin cédula, sin fuga de PII.
 
 ---
 
