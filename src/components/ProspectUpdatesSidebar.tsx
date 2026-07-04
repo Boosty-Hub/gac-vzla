@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { getSignedFileUrl } from '@/lib/storage';
 import { toast } from 'sonner';
 import {
   X, Send, Paperclip, Mic, MicOff, CornerDownRight,
@@ -44,6 +45,8 @@ export default function ProspectUpdatesSidebar({ prospectId, prospectName, onClo
   const [updates, setUpdates] = useState<ProspectUpdate[]>([]);
   const [loading, setLoading] = useState(true);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  // URLs firmadas temporales por update (bucket privado 'prospect-updates')
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
 
   // composer
   const [text, setText] = useState('');
@@ -121,6 +124,39 @@ export default function ProspectUpdatesSidebar({ prospectId, prospectName, onClo
     }
   }, [updates]);
 
+  // Resolver URLs firmadas temporales para cada update con archivo (audio/file).
+  // file_url puede ser un path nuevo o una URL pública antigua; ninguno sirve
+  // directo en un bucket privado, así que firmamos y guardamos por update id.
+  useEffect(() => {
+    const all: ProspectUpdate[] = [];
+    updates.forEach(u => {
+      all.push(u);
+      if (u.replies) all.push(...u.replies);
+    });
+    const withFiles = all.filter(u => u.file_url && (u.type === 'voice' || u.type === 'file'));
+    if (withFiles.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(
+        withFiles.map(async (u) => {
+          const url = await getSignedFileUrl('prospect-updates', u.file_url);
+          return [u.id, url] as const;
+        })
+      );
+      if (cancelled) return;
+      setSignedUrls(prev => {
+        const next = { ...prev };
+        for (const [id, url] of entries) {
+          if (url) next[id] = url;
+        }
+        return next;
+      });
+    })();
+
+    return () => { cancelled = true; };
+  }, [updates]);
+
   // ---- MENTION HANDLING ----
   const handleTextChange = (val: string) => {
     setText(val);
@@ -196,8 +232,8 @@ export default function ProspectUpdatesSidebar({ prospectId, prospectName, onClo
     const path = `${user?.id}/${folder}/${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('prospect-updates').upload(path, file);
     if (error) { toast.error('Error al subir archivo'); return null; }
-    const { data } = supabase.storage.from('prospect-updates').getPublicUrl(path);
-    return data.publicUrl;
+    // Bucket privado: guardamos el PATH del objeto, no una URL pública.
+    return path;
   };
 
   // ---- SUBMIT ----
@@ -310,17 +346,29 @@ export default function ProspectUpdatesSidebar({ prospectId, prospectName, onClo
               : 'bg-muted text-foreground rounded-tl-sm'
           )}>
             {u.type === 'voice' && u.file_url && (
-              <audio controls src={u.file_url} className="h-8 w-48 max-w-full" />
+              signedUrls[u.id]
+                ? <audio controls src={signedUrls[u.id]} className="h-8 w-48 max-w-full" />
+                : <div className="h-8 w-48 max-w-full flex items-center text-[10px] opacity-70">Cargando audio…</div>
             )}
             {u.type === 'file' && u.file_url && (
-              <a href={u.file_url} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1.5 underline underline-offset-2">
-                {u.file_url.match(/\.(jpg|jpeg|png|gif|webp)/i)
-                  ? <Image className="w-3.5 h-3.5 shrink-0" />
-                  : <FileText className="w-3.5 h-3.5 shrink-0" />}
-                <span className="truncate max-w-[160px]">{u.file_name || 'Archivo'}</span>
-                <Download className="w-3 h-3 shrink-0" />
-              </a>
+              signedUrls[u.id] ? (
+                <a href={signedUrls[u.id]} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 underline underline-offset-2">
+                  {u.file_url.match(/\.(jpg|jpeg|png|gif|webp)/i)
+                    ? <Image className="w-3.5 h-3.5 shrink-0" />
+                    : <FileText className="w-3.5 h-3.5 shrink-0" />}
+                  <span className="truncate max-w-[160px]">{u.file_name || 'Archivo'}</span>
+                  <Download className="w-3 h-3 shrink-0" />
+                </a>
+              ) : (
+                <div className="flex items-center gap-1.5 opacity-70">
+                  {u.file_url.match(/\.(jpg|jpeg|png|gif|webp)/i)
+                    ? <Image className="w-3.5 h-3.5 shrink-0" />
+                    : <FileText className="w-3.5 h-3.5 shrink-0" />}
+                  <span className="truncate max-w-[160px]">{u.file_name || 'Archivo'}</span>
+                  <span className="text-[10px]">…</span>
+                </div>
+              )
             )}
             {u.content && <p className="whitespace-pre-wrap leading-relaxed">{renderContent(u.content)}</p>}
           </div>

@@ -19,6 +19,7 @@ import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 import { toast } from 'sonner';
+import { getSignedFileUrl } from '@/lib/storage';
 
 interface Dealership {
   id: string;
@@ -507,8 +508,15 @@ const DealershipPanel = () => {
       else toast.error(`Error al subir: ${msg || 'Error desconocido'}`);
       return null;
     }
-    const { data: urlData } = supabase.storage.from('technical-reports').getPublicUrl(path);
-    return urlData?.publicUrl || null;
+    // Guardamos el PATH del objeto (bucket privado); la URL firmada se resuelve al abrir.
+    return path;
+  };
+
+  // Abre un informe técnico (bucket privado) resolviendo una URL firmada temporal.
+  const openReport = async (value: string | null | undefined) => {
+    const url = await getSignedFileUrl('technical-reports', value);
+    if (url) window.open(url, '_blank');
+    else toast.error('No se pudo abrir el informe técnico');
   };
 
   const handleCompleteService = async () => {
@@ -800,7 +808,7 @@ const DealershipPanel = () => {
                                 </Button>
                               )}
                               {r.technical_report_url && (
-                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); window.open(r.technical_report_url!, '_blank'); }}>
+                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); openReport(r.technical_report_url); }}>
                                   <FileText className="w-3 h-3" /> PDF
                                 </Button>
                               )}
@@ -1124,7 +1132,7 @@ const DealershipPanel = () => {
                   {detailRes.status === 'completada' && (
                     <div className="flex items-center gap-2">
                       {detailRes.technical_report_url ? (
-                        <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => window.open(detailRes.technical_report_url!, '_blank')}>
+                        <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => openReport(detailRes.technical_report_url)}>
                           <FileText className="w-3.5 h-3.5" /> Ver Informe Técnico
                           <ExternalLink className="w-3 h-3" />
                         </Button>
