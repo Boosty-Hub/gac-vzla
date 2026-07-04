@@ -16,32 +16,32 @@ DROP POLICY IF EXISTS "anon_insert_prospects" ON public.prospects;
 
 CREATE POLICY prospects_select ON public.prospects FOR SELECT TO authenticated USING (
   public.is_admin_user()
-  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY((SELECT public.current_user_dealership_ids())))
-  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY((SELECT public.current_user_salesperson_names())))
+  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY(public.current_user_dealership_ids()))
+  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY(public.current_user_salesperson_names()))
 );
 
 CREATE POLICY prospects_insert ON public.prospects FOR INSERT TO authenticated WITH CHECK (
   public.is_admin_user()
-  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY((SELECT public.current_user_dealership_ids())))
-  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY((SELECT public.current_user_salesperson_names())))
+  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY(public.current_user_dealership_ids()))
+  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY(public.current_user_salesperson_names()))
 );
 
 CREATE POLICY prospects_update ON public.prospects FOR UPDATE TO authenticated
 USING (
   public.is_admin_user()
-  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY((SELECT public.current_user_dealership_ids())))
-  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY((SELECT public.current_user_salesperson_names())))
+  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY(public.current_user_dealership_ids()))
+  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY(public.current_user_salesperson_names()))
 )
 WITH CHECK (
   public.is_admin_user()
-  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY((SELECT public.current_user_dealership_ids())))
-  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY((SELECT public.current_user_salesperson_names())))
+  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY(public.current_user_dealership_ids()))
+  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY(public.current_user_salesperson_names()))
 );
 
 CREATE POLICY prospects_delete ON public.prospects FOR DELETE TO authenticated USING (
   public.is_admin_user()
-  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY((SELECT public.current_user_dealership_ids())))
-  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY((SELECT public.current_user_salesperson_names())))
+  OR (public.get_user_role() = 'concesionario' AND dealership_id = ANY(public.current_user_dealership_ids()))
+  OR (public.get_user_role() = 'vendedor'      AND salesperson  = ANY(public.current_user_salesperson_names()))
 );
 
 -- Landing publico: solo puede crear prospectos con status inicial 'nuevo'.
@@ -57,11 +57,11 @@ CREATE POLICY anon_insert_prospects ON public.prospects FOR INSERT TO anon WITH 
 DROP POLICY IF EXISTS clients_select ON public.clients;
 CREATE POLICY clients_select ON public.clients FOR SELECT TO authenticated USING (
   public.is_admin_user()
-  OR id = ANY((SELECT public.current_user_client_ids()))
+  OR id = ANY(public.current_user_client_ids())
   OR (public.get_user_role() IN ('concesionario','vendedor','Asesor de Servicio')
       AND id IN (
         SELECT client_id FROM public.reservations
-        WHERE dealership_id = ANY((SELECT public.current_user_dealership_ids())) AND client_id IS NOT NULL
+        WHERE dealership_id = ANY(public.current_user_dealership_ids()) AND client_id IS NOT NULL
       ))
 );
 
@@ -74,11 +74,11 @@ DROP POLICY IF EXISTS anon_read_vehicles_by_plate ON public.vehicles;
 DROP POLICY IF EXISTS vehicles_select ON public.vehicles;
 CREATE POLICY vehicles_select ON public.vehicles FOR SELECT TO authenticated USING (
   public.is_admin_user()
-  OR client_id = ANY((SELECT public.current_user_client_ids()))
+  OR client_id = ANY(public.current_user_client_ids())
   OR (public.get_user_role() IN ('concesionario','vendedor','Asesor de Servicio')
       AND id IN (
         SELECT vehicle_id FROM public.reservations
-        WHERE dealership_id = ANY((SELECT public.current_user_dealership_ids())) AND vehicle_id IS NOT NULL
+        WHERE dealership_id = ANY(public.current_user_dealership_ids()) AND vehicle_id IS NOT NULL
       ))
 );
 
@@ -94,20 +94,20 @@ DROP POLICY IF EXISTS "anon_insert_reservations" ON public.reservations;
 
 CREATE POLICY reservations_select ON public.reservations FOR SELECT TO authenticated USING (
   public.is_admin_user()
-  OR (public.get_user_role() IN ('concesionario','Asesor de Servicio') AND dealership_id = ANY((SELECT public.current_user_dealership_ids())))
+  OR (public.get_user_role() IN ('concesionario','Asesor de Servicio') AND dealership_id = ANY(public.current_user_dealership_ids()))
   OR (public.get_user_role() = 'vendedor' AND created_by_profile_id = (SELECT auth.uid()))
-  OR client_id = ANY((SELECT public.current_user_client_ids()))
+  OR client_id = ANY(public.current_user_client_ids())
 );
 
 CREATE POLICY "Staff can update reservations" ON public.reservations FOR UPDATE TO authenticated USING (
   public.is_admin_user()
-  OR (public.get_user_role() IN ('concesionario','Asesor de Servicio') AND dealership_id = ANY((SELECT public.current_user_dealership_ids())))
+  OR (public.get_user_role() IN ('concesionario','Asesor de Servicio') AND dealership_id = ANY(public.current_user_dealership_ids()))
   OR (public.get_user_role() = 'vendedor' AND created_by_profile_id = (SELECT auth.uid()))
 );
 
 CREATE POLICY "Staff can delete reservations" ON public.reservations FOR DELETE TO authenticated USING (
   public.is_admin_user()
-  OR (public.get_user_role() IN ('concesionario','Asesor de Servicio') AND dealership_id = ANY((SELECT public.current_user_dealership_ids())))
+  OR (public.get_user_role() IN ('concesionario','Asesor de Servicio') AND dealership_id = ANY(public.current_user_dealership_ids()))
   OR (public.get_user_role() = 'vendedor' AND created_by_profile_id = (SELECT auth.uid()))
 );
 -- Se mantienen: "Clients can cancel own reservations" (UPDATE) y
