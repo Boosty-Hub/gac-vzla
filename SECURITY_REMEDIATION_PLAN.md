@@ -170,10 +170,20 @@ Migraciones: `20260703140000` (part1 RPCs+helpers, **APLICADA**), `2026070316000
 - [ ] **4.1** Rate limiting global en el borde (por IP + por identidad) para todos los endpoints de funciones.
 - [ ] **4.2** Captcha (hCaptcha/Turnstile) en el landing público de prospectos y en los logins.
 - [x] **4.3** Security headers (`public/_headers`): X-Frame-Options, X-Content-Type-Options, Referrer-Policy, HSTS, Permissions-Policy. **CSP** dejada como plantilla comentada (requiere probar contra la app antes de activar).
-- [ ] **4.4** Revisar almacenamiento de sesión: JWT en localStorage vs cookies httpOnly.
-- [ ] **4.5** Sanitización/escape consistente de datos de usuario renderizados (revisión XSS preventiva).
-- [ ] **4.7** Auditoría de dependencias: `npm audit` reporta ~24 vulnerabilidades (mayormente transitivas de build). Revisar altas/críticas sin romper deps (no auto-fix).
-- [ ] **4.8** Tabla/registro de auditoría de accesos sensibles (quién leyó/editó qué).
+- [~] **4.4** Sesión: JWT en localStorage (default de Supabase). Cambiar a cookies httpOnly es un refactor mayor; se deja documentado (mitigado porque no hay XSS explotable — ver 4.5).
+- [x] **4.5** Revisión XSS: **limpia**. Único `dangerouslySetInnerHTML` es `ui/chart.tsx:70` (shadcn, inyecta CSS de colores del config, sin input de usuario). Sin `eval`/`innerHTML`/`new Function`.
+- [x] **4.7** `npm audit`: **24 → 5** vulnerabilidades (`npm audit fix` no-force, build verificado). Restantes (necesitan `--force`/bump mayor, bajo riesgo real): esbuild/vite y uuid/exceljs (tooling de build); **xlsx** (high, sin fix en npm — migrar a la versión CDN de SheetJS es el follow-up; runtime, solo import por staff).
+- [ ] **4.8** Registro de auditoría de accesos sensibles (nice-to-have, futuro).
+- [ ] **4.1/4.2** Rate-limit global anon / captcha: **captcha descartado por el usuario**. Rate-limit global sobre PostgREST anon requiere proxy/edge o WAF (los endpoints de login sí tienen rate-limit). Diferido.
+
+### Hardening adicional de la revisión adversarial (aplicado y verificado en prod)
+- [x] **HIGH** `integration_configs` (access_token de Kommo) → solo admin (antes: cualquier authenticated). Verificado: vendedor → 0.
+- [x] `integration_logs` → solo admin (PII de leads).
+- [x] `clients`/`vehicles` UPDATE/DELETE scopeados por concesionario (antes: cross-tenant con el UUID).
+- [x] `salespersons` → solo staff (antes: cualquier authenticated, incl. cliente). Verificado: cliente → 0.
+- [x] `prospect_vehicles`: quitado el insert anon sin scoping.
+- [x] **Bug preexistente arreglado**: landing público de prospectos (`notify_on_prospect_insert` → SECURITY DEFINER). Verificado: anon → 201.
+- Trade-offs documentados (aceptados): `staff_lookup_vehicle_by_plate` PII (necesario walk-ins), inserts anon del form público (por diseño).
 
 ### 🔴 A6 (NUEVO HALLAZGO — CRÍTICO) — Buckets de Storage públicos con PII
 Los 4 buckets son `public: true`. **`technical-reports` (88 archivos) y `prospect-updates` (10)** contienen datos sensibles de clientes (reportes de servicio, documentos, audios) y son **legibles por cualquiera con la URL, sin autenticación**. La app usa `getPublicUrl` (DealershipPanel:510, TechnicalReportUploader:154, ProspectUpdatesSidebar:199) y guarda esas URLs públicas en la DB (`reservations.technical_report_url`, `prospect_updates.file_url`).
