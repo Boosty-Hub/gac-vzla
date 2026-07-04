@@ -79,10 +79,9 @@ const PublicProspectos = () => {
 
     const normalizedPhone = phone.trim().replace(/\D/g, '');
     if (normalizedPhone) {
-      const { data: existing } = await supabase.from('prospects').select('id, name, phone').not('phone', 'is', null);
-      const duplicate = (existing || []).find((p: any) => p.phone.replace(/\D/g, '') === normalizedPhone);
-      if (duplicate) {
-        toast.error(`Ya existe un registro con ese teléfono: ${duplicate.name}`);
+      const { data: exists } = await supabase.rpc('prospect_phone_exists', { p_phone: phone.trim() });
+      if (exists) {
+        toast.error('Ya existe un registro con este número de teléfono.');
         return;
       }
     }

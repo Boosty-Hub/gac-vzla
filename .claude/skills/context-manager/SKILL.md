@@ -81,7 +81,7 @@ Si estás en una sesión nueva y necesitas recordar el contexto:
 
 **Credenciales Supabase:**
 - Project ref: `wsbuqiznddvxcwvpnbxm`
-- Management API: `sbp_b715f486726674624577159f19c827fc1a9d7d4c`
+- Management API: en variable de entorno local `SUPABASE_ACCESS_TOKEN` (**nunca en el repo**)
 
 **Reglas de workflow:**
 - **Local first**: hacer todos los cambios localmente, el usuario decide cuándo subir

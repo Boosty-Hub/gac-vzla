@@ -1,17 +1,15 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-};
+import { buildCorsHeaders } from "../_shared/cors.ts";
+import { getClientIp, isRateLimited, recordAttempt } from "../_shared/rateLimit.ts";
 
 Deno.serve(async (req) => {
+  const corsHeaders = buildCorsHeaders(req);
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
+    const ip = getClientIp(req);
     const { token } = await req.json();
     if (!token) {
       return new Response(JSON.stringify({ error: "Token es requerido" }), {
@@ -24,17 +22,27 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-    // Find the magic link
+    // Rate limiting por IP (frena enumeración de tokens).
+    if (await isRateLimited(adminClient, { ip, kind: "magic", ipMax: 30 })) {
+      return new Response(
+        JSON.stringify({ error: "Demasiados intentos. Espera unos minutos." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Buscar el magic link: no usado y no revocado.
     const { data: magicLink, error: findError } = await adminClient
       .from("magic_links")
       .select("*")
       .eq("token", token)
       .is("used_at", null)
+      .is("revoked_at", null)
       .single();
 
     if (findError || !magicLink) {
+      await recordAttempt(adminClient, { ip, kind: "magic", success: false });
       return new Response(
-        JSON.stringify({ error: "Link inválido o ya fue utilizado" }),
+        JSON.stringify({ error: "Link inválido, revocado o ya fue utilizado" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -70,8 +78,9 @@ Deno.serve(async (req) => {
       );
     }
 
-    // Don't mark as used — allow reuse until expiry
-    // The magic link acts as a persistent access token
+    // No se marca como usado — el link de portal es reutilizable hasta expirar
+    // (o hasta que un admin lo revoque vía revoked_at).
+    await recordAttempt(adminClient, { ip, kind: "magic", success: true });
 
     return new Response(
       JSON.stringify({

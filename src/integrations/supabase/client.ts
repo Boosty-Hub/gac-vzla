@@ -2,8 +2,14 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = "https://wsbuqiznddvxcwvpnbxm.supabase.co";
-const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzYnVxaXpuZGR2eGN3dnBuYnhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4NjQyNTAsImV4cCI6MjA4NjQ0MDI1MH0.zLMDg_dO2U64ogcaqLTKHzq9lhWYyEJAFiZdPaZ2mNU";
+// La clave publishable/anon es pública por diseño; la seguridad recae en RLS.
+// Se lee del entorno (VITE_*) para poder rotarla sin tocar código; con fallback
+// al valor actual para no romper builds donde aún no esté configurada.
+const SUPABASE_URL =
+  import.meta.env.VITE_SUPABASE_URL ?? "https://wsbuqiznddvxcwvpnbxm.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY =
+  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzYnVxaXpuZGR2eGN3dnBuYnhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4NjQyNTAsImV4cCI6MjA4NjQ0MDI1MH0.zLMDg_dO2U64ogcaqLTKHzq9lhWYyEJAFiZdPaZ2mNU";
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";

@@ -352,6 +352,20 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
+    // ── Verificacion de origen (A3) ──────────────────────────────────────────
+    // Secreto compartido opt-in: si KOMMO_WEBHOOK_SECRET esta configurado, Kommo
+    // debe llamar el webhook con ?secret=... (o cabecera x-webhook-secret). Sin
+    // secreto configurado, se mantiene abierto (interino, no rompe la integracion
+    // existente) pero con el chequeo de subdomain de abajo como barrera minima.
+    const expectedSecret = Deno.env.get('KOMMO_WEBHOOK_SECRET')
+    if (expectedSecret) {
+      const provided = new URL(req.url).searchParams.get('secret')
+        ?? req.headers.get('x-webhook-secret')
+      if (provided !== expectedSecret) {
+        return new Response('Unauthorized', { status: 401 })
+      }
+    }
+
     const text = await req.text()
     const params = new URLSearchParams(text)
 
@@ -365,6 +379,13 @@ Deno.serve(async (req) => {
     if (!configRow) return new Response('OK', { status: 200 })
 
     const config = configRow.config as Record<string, unknown>
+
+    // Barrera minima: ignorar payloads cuyo account[subdomain] no sea el nuestro.
+    const payloadSubdomain = params.get('account[subdomain]')
+    if (payloadSubdomain && payloadSubdomain !== config.subdomain) {
+      return new Response('OK', { status: 200 })
+    }
+
     const baseUrl = `https://${config.subdomain}.kommo.com/api/v4`
     const authHeaders = {
       Authorization: `Bearer ${config.access_token}`,
