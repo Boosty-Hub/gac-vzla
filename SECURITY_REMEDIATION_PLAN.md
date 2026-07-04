@@ -177,11 +177,11 @@ Migraciones: `20260703140000` (part1 RPCs+helpers, **APLICADA**), `2026070316000
 
 ### 🔴 A6 (NUEVO HALLAZGO — CRÍTICO) — Buckets de Storage públicos con PII
 Los 4 buckets son `public: true`. **`technical-reports` (88 archivos) y `prospect-updates` (10)** contienen datos sensibles de clientes (reportes de servicio, documentos, audios) y son **legibles por cualquiera con la URL, sin autenticación**. La app usa `getPublicUrl` (DealershipPanel:510, TechnicalReportUploader:154, ProspectUpdatesSidebar:199) y guarda esas URLs públicas en la DB (`reservations.technical_report_url`, `prospect_updates.file_url`).
-- [ ] **A6.1** Poner `technical-reports` y `prospect-updates` en `public: false`. (`vehicle-models` y `branding` pueden quedar públicos — son catálogo/logos.)
-- [ ] **A6.2** Frontend: cambiar `getPublicUrl` → `createSignedUrl` (URL firmada temporal) al mostrar esos archivos.
-- [ ] **A6.3** Migrar/generar bajo demanda: guardar el **path** del objeto (no la URL pública) y firmar al leer. Las URLs públicas ya guardadas dejan de servir al hacer privado el bucket.
-- [ ] **A6.4** Confirmar que las políticas RLS de `storage.objects` acotan la lectura a quien corresponde (hoy `technical-reports` tiene "Public can read"; al hacer el bucket privado, ajustar a authenticated/scoped).
-> **Es un cambio coordinado** (frontend + migración de URLs), igual que 2B. Severidad alta: exposición de PII de clientes.
+- [x] **A6.1** Migración `20260703170000`: `technical-reports` y `prospect-updates` → `public: false`. (En deploy — se aplica tras Netlify.)
+- [x] **A6.2** Frontend: `getPublicUrl` → URL firmada (`getSignedFileUrl` en `src/lib/storage.ts`) en TechnicalReportUploader, ProspectUpdatesSidebar, DealershipPanel. Build ok, sin residuales.
+- [x] **A6.3** La subida guarda el **path**; el helper `extractStoragePath` acepta URLs públicas viejas Y paths → **sin migración de datos**.
+- [ ] **A6.4** (residual, no bloqueante) La lectura de `storage.objects` es `authenticated`-wide (cualquier autenticado firma cualquier reporte si conoce el path). Gran mejora sobre el acceso anónimo público; el scoping por concesionario/cliente queda como refinamiento futuro (requiere codificar ownership en el path).
+> Deploy coordinado (igual que 2B): frontend a `main` → Netlify → aplicar migración de buckets privados → verificar.
 
 **Validación:** `npm audit` sin críticas; headers presentes en respuesta; captcha bloquea envíos automatizados.
 
