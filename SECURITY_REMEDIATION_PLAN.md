@@ -102,17 +102,30 @@ npx supabase secrets set ALLOWED_ORIGINS="https://TU-DOMINIO,http://localhost:80
 
 **Objetivo:** cada rol lee y escribe solo lo que le corresponde, verificado en la base de datos (no en la UI).
 
-- [ ] **2.1** Trigger `BEFORE UPDATE` en `profiles` que fuerce `NEW.role_id = OLD.role_id` y `NEW.is_active = OLD.is_active` salvo `is_admin_user()`. Cierra C3.
-- [ ] **2.2** Reescribir políticas de `prospects` (hoy `ALL` = authenticated): SELECT/UPDATE/DELETE/INSERT con scope por `is_admin_user()` / `dealership_users` / `salesperson = full_name`. Cierra A1.
-- [ ] **2.3** Reescribir `clients_select` con scope (admin, staff del dealership, o vínculo `client_users`). Cierra A2.
-- [ ] **2.4** Reescribir `vehicles_select` con el mismo scope. Cierra A2.
-- [ ] **2.5** Reescribir `reservations` SELECT/UPDATE/DELETE con scope por dealership/cliente. Cierra A2.
-- [ ] **2.6** Eliminar la política amplia `anon_read_vehicles_by_plate`; sustituir por RPC `SECURITY DEFINER` que reciba placa y devuelva solo esa fila. Cierra la fuga de C1.
-- [ ] **2.7** Revisar `anon_read_dealerships` — dejar solo campos públicos necesarios.
-- [ ] **2.8** Auditar TODAS las políticas restantes con `qual = auth.role()='authenticated'` o `true` y aplicar scope real donde haya PII (`prospect_updates`, `prospect_vehicles`, `notifications`, etc.). Cierra M4.
-- [ ] **2.9** Añadir `WITH CHECK` a políticas INSERT `anon` de `prospects`/`prospect_vehicles` (validar formato/campos) + captcha (ver Fase 4).
+**Análisis:** workflow multi-agente (`phase2-rls-design`) mapeó el modelo de datos en vivo, las dependencias del frontend y las políticas actuales; 3 revisores adversariales atacaron el diseño. Hallazgos clave verificados contra la DB:
+- **Falsos positivos** (ya cerrado): escalada vía `roles`/`role_permissions` (escrituras ya solo-superadmin), auto-insert en `dealership_users`/`client_users` (ya read-own + admin-manage). No requieren cambios.
+- **Vector real de escalada**: solo `profiles` (WITH CHECK nulo en `profiles_update_own`).
+- **La parte de aislamiento entre concesionarios ROMPE flujos de producción** (PublicReserva, calendario del cliente, dedupe de teléfono) → requiere **cambios coordinados en el frontend + RPCs** desplegados junto con la RLS.
 
-**Validación:** repetir cada ataque probado en la auditoría con un JWT de `vendedor`/`cliente` y confirmar `[]` o 403 donde antes había datos; confirmar que los flujos legítimos (portal cliente, portal vendedor) siguen funcionando.
+### FASE 2A — Bloqueo de escalada de privilegios ✅ APLICADO Y VERIFICADO (cierra C3)
+Migración `20260703130000`: trigger `prevent_profile_privilege_escalation` en `profiles` (BEFORE INSERT OR UPDATE) que congela `role_id`/`is_active` para usuarios finales autenticados no-admin. + hardening de `has_permission()` (search_path).
+- [x] Trigger cubre UPDATE **y** INSERT (evita el bypass por re-insert).
+- [x] Carve-out por `auth.role()='authenticated'` (no por `auth.uid() IS NULL`) → anón/backend/admin no afectados.
+- [x] **Probado con simulación de rol**: vendedor→admin CONGELADO ✓; is_active CONGELADO ✓; admin sigue gestionando roles ✓; update propio (nombre/pin) sigue funcionando ✓.
+
+### FASE 2B — Aislamiento entre concesionarios/vendedores/clientes ⏳ DISEÑADO, REQUIERE DEPLOY COORDINADO
+Reescribir RLS de `prospects`/`clients`/`vehicles`/`reservations` + RPCs `SECURITY DEFINER` + cambios de frontend. **No aplicable a la DB en vivo hasta desplegar el frontend correlativo** (si no, rompe producción). Incorpora fixes del review adversarial:
+- [ ] **2B.1** `prospects`: scope real. Vendedor por `salespersons.name WHERE profile_id=auth.uid()` (**NO** por `full_name` editable — evita impersonación). Concesionario por `dealership_users`. Admin todo. (A1)
+- [ ] **2B.2** `clients`/`vehicles` SELECT acotado (decisión de producto: alcance del staff — ver preguntas). (A2)
+- [ ] **2B.3** `reservations`: vendedor por `created_by_profile_id=auth.uid()`, concesionario por dealership, cliente por `client_users`. (A2)
+- [ ] **2B.4** Quitar `anon_read_vehicles_by_plate`; RPC `lookup_vehicle_by_plate` que NO exponga PII de contacto a anón. Frontend `PublicReserva` usa la RPC. (C1-fuga)
+- [ ] **2B.5** RPC `get_taken_reservation_times` para el calendario (cliente/anón) — evita romper disponibilidad. Frontend correlativo.
+- [ ] **2B.6** RPC `prospect_phone_exists` / `find_prospects_by_phone` (acotada al scope) para dedupe. Frontend correlativo.
+- [ ] **2B.7** `notifications`: mover fan-out de cancelación del cliente a trigger/RPC (evita romper el insert multi-fila).
+- [ ] **2B.8** `prospect_events`/`prospect_updates`/`prospect_vehicles`: acotar por `can_access_prospect()`. (M4)
+- [ ] **2B.9** INSERT anón de `prospects`/`reservations`: `WITH CHECK` acotado (status whitelist, sin client_id/vehicle_id arbitrarios) + captcha (Fase 4). (M4)
+
+**Validación 2B:** simular cada rol (`SET LOCAL request.jwt.claims`) y confirmar aislamiento; re-atacar (volcado anon de vehicles, lectura cruzada de prospects/clients); confirmar que PublicReserva/portal cliente/portal vendedor siguen funcionando con el frontend nuevo.
 
 ---
 
