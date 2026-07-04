@@ -649,6 +649,60 @@ Deno.serve(async (req) => {
     const body = await req.json()
     const { action, prospect_id, kommo_lead_id, new_status, reservation_id } = body
 
+    // ── Autorizacion del llamante (M1) ────────────────────────────────────────
+    // Resolver el usuario del JWT y gatear por rol/accion. Sin esto, cualquier
+    // usuario autenticado (incluido un cliente) podia invocar TODAS las acciones,
+    // incluidas migraciones masivas y sincronizaciones batch.
+    const authHeader = req.headers.get('Authorization') ?? ''
+    const callerClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    )
+    const { data: { user: caller } } = await callerClient.auth.getUser()
+    if (!caller) {
+      return new Response(JSON.stringify({ error: 'No autorizado' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const { data: callerProfile } = await supabase
+      .from('profiles')
+      .select('roles(name)')
+      .eq('id', caller.id)
+      .single()
+    const callerRole = (callerProfile as { roles?: { name?: string } } | null)?.roles?.name ?? null
+    const isAdmin = callerRole === 'superadmin' || callerRole === 'admin'
+    const isStaff = isAdmin || ['concesionario', 'vendedor', 'Asesor de Servicio'].includes(callerRole ?? '')
+
+    // Acciones masivas/administrativas: solo superadmin.
+    const SUPERADMIN_ACTIONS = ['batch_sync_reservations', 'batch_update_reservations', 'migrate_clients', 'precreate_dealership_leads']
+    // Acciones que un cliente puede disparar sobre SU propia reserva.
+    const CLIENT_ALLOWED_ACTIONS = ['create_reservation']
+
+    if (SUPERADMIN_ACTIONS.includes(action)) {
+      if (callerRole !== 'superadmin') {
+        return new Response(JSON.stringify({ error: 'Solo superadmin puede ejecutar esta accion' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+    } else if (CLIENT_ALLOWED_ACTIONS.includes(action) && !isStaff) {
+      // Cliente: solo puede sincronizar una reserva de la que es dueno.
+      const { data: resv } = await supabase.from('reservations').select('client_id').eq('id', reservation_id).single()
+      const { data: links } = await supabase.from('client_users').select('client_id').eq('profile_id', caller.id)
+      const ownClientIds = (links ?? []).map((l: { client_id: string }) => l.client_id)
+      if (!resv || !ownClientIds.includes(resv.client_id)) {
+        return new Response(JSON.stringify({ error: 'No autorizado sobre esta reserva' }), {
+          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+    } else if (!isStaff) {
+      // Resto de acciones: requieren rol de staff.
+      return new Response(JSON.stringify({ error: 'Requiere rol de staff' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     const { data: configRow } = await supabase
       .from('integration_configs')
       .select('config')

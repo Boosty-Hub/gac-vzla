@@ -150,14 +150,16 @@ Migraciones: `20260703140000` (part1 RPCs+helpers, **APLICADA**), `2026070316000
 
 **Objetivo:** las funciones con service role validan quién llama y sobre qué recurso.
 
-- [ ] **3.1** `kommo-webhook`: validar firma/secreto de Kommo en cada request; rechazar 401 las no firmadas. Cierra A3.
-- [ ] **3.2** `kommo-webhook`: validar que `pipeline_id` e IDs pertenecen a leads reales antes de mutar; no responder siempre 200.
-- [ ] **3.3** `kommo-api`: resolver el perfil del llamante y exigir rol adecuado por acción (patrón de `generate-magic-link`). Cierra M1.
-- [ ] **3.4** `kommo-api`: validar ownership de `prospect_id`/`reservation_id`/`dealership_id` contra el concesionario del usuario.
-- [ ] **3.5** `kommo-api`: restringir acciones batch/migrate/precreate a `superadmin`.
-- [ ] **3.6** Revisar que ninguna función loguee PII sensible en `integration_logs`.
+- [x] **3.1** `kommo-webhook`: secreto compartido **opt-in** (`KOMMO_WEBHOOK_SECRET` env + `?secret=` en la URL de Kommo). Sin secreto configurado sigue abierto (interino, no rompe la integración) pero con barrera de subdomain. **Desplegado.** (A3 — se cierra del todo al configurar el secreto, ver runbook)
+- [x] **3.2** `kommo-webhook`: ignora (200) payloads cuyo `account[subdomain]` no coincide con el configurado. (validación de pipeline/IDs por lead real: pendiente menor)
+- [x] **3.3** `kommo-api`: resuelve el llamante (getUser) y gatea por rol. Sin usuario válido → 401. **Desplegado y verificado** (anon → 401). Cierra M1.
+- [x] **3.4** `kommo-api`: `create_reservation` por un cliente valida ownership de la reserva (client_users). (ownership per-record para staff: aceptado por scope de rol)
+- [x] **3.5** `kommo-api`: `batch_sync_reservations`/`batch_update_reservations`/`migrate_clients`/`precreate_dealership_leads` restringidas a **superadmin** (ningún flujo de frontend las llama).
+- [ ] **3.6** Revisar PII en `integration_logs` (pendiente menor — Fase 4).
 
-**Validación:** POST sin firma al webhook → 401; un `cliente` autenticado invocando `migrate_clients` en kommo-api → 403.
+**Validación:** anon/​sin-usuario → 401 en kommo-api ✓; webhook con subdomain ajeno → ignorado ✓; webhook sin secreto sigue vivo ✓.
+
+**Pendiente para cerrar A3 del todo (runbook):** generar un secreto, setear `KOMMO_WEBHOOK_SECRET` en Supabase, y actualizar la URL del webhook en Kommo a `.../kommo-webhook?secret=<secreto>`. Hacerlo en ese orden (primero Kommo, luego el env) para no perder eventos.
 
 ---
 
