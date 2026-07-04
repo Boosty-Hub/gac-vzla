@@ -3,11 +3,12 @@
 useDefault = true
 
 [allowlist]
-description = "Token de Management API sbp_ ya REVOCADO (presente en historial antiguo; rotado el 2026-07-03). Se permite para que el escaneo no falle por su presencia histórica; cualquier secreto NUEVO/distinto sí se detecta."
+description = "Valores públicos/ya-revocados que no deben marcar el escaneo."
 regexes = [
+  # Token de Management API sbp_ ya REVOCADO (rotado el 2026-07-03). Aparece en
+  # docs/config históricos; cualquier secreto NUEVO/distinto sí se detecta.
   '''sbp_b715f486726674624577159f19c827fc1a9d7d4c''',
-]
-# La anon/publishable key de Supabase es pública por diseño (va en el frontend).
-paths = [
-  '''\.env\.example$''',
+  # Anon/publishable key de Supabase (payload role:anon de este proyecto). Es
+  # PÚBLICA por diseño: va en el frontend. La seguridad recae en RLS.
+  '''eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzYnVxaXpuZGR2eGN3dnBuYnhtIiwicm9sZSI6ImFub24i''',
 ]
