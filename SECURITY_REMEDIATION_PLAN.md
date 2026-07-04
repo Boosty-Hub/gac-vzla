@@ -135,12 +135,12 @@ Migraciones: `20260703140000` (part1 RPCs+helpers, **APLICADA**), `2026070316000
 - [x] **2B.9** INSERT anón `prospects` acotado a `status='nuevo'`; INSERT anón `reservations` eliminado (→ RPC). Captcha/rate-limit → Fase 4.
 - [~] **Frontend correlativo**: PublicReserva, PublicProspectos, UserPortal, DealershipReservas, DealershipPanel, DealershipProspectos → usar RPCs (en curso).
 
-### 🚀 RUNBOOK DE DEPLOY 2B (orden obligatorio para no romper producción)
-1. ✅ Aplicar part1 + part1b (RPCs/helpers) — **YA HECHO** (aditivo, no rompe nada).
-2. Mergear el frontend nuevo (rama `security/hardening`) a `main` → Netlify despliega. El frontend usa las RPCs (ya existen).
-3. Aplicar part2 (`20260703150000_2b_part2_tenant_isolation_policies.sql`) a la DB. A partir de aquí el aislamiento está activo y el frontend ya no hace queries directas.
-4. Desplegar `login-by-plate` (Fase 1) en el mismo release del frontend con cédula.
-5. Re-atacar (Fase 5) para confirmar cierre.
+### 🚀 RUNBOOK DE DEPLOY 2B — ✅ COMPLETADO Y VERIFICADO (2026-07-04)
+1. ✅ part1 + part1b (RPCs/helpers) aplicadas.
+2. ✅ Frontend mergeado a `main` (PR #1) → Netlify desplegó (bundle `index-Vfg-LAAj.js`).
+3. ✅ part2 aplicada (tras corregir `ANY((SELECT ...))` → `ANY(...)`). **Aislamiento ACTIVO.**
+4. ✅ `login-by-plate` desplegado (exige cédula — probado: sin cédula → 400).
+5. ✅ Re-ataque verificado: **anon vehicles 2571→0**, vendedor prospectos 2370→90, cliente flota→1, concesionario ve solo su dealership (47 reservas), admin ve todo (272). Staff reads intactos.
 
 **Decisiones aplicadas** (usuario confirmó "con tu recomendación"): clients/vehicles staff = ligados a reservas del dealership + RPC lookup; Asesor de Servicio NO ve prospects; reserva pública = por placa sin cédula, sin fuga de PII.
 
