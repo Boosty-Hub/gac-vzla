@@ -16,10 +16,14 @@ description: >
 |---|---|
 | Project ref | `wsbuqiznddvxcwvpnbxm` |
 | URL | `https://wsbuqiznddvxcwvpnbxm.supabase.co` |
-| Management API token | `sbp_b715f486726674624577159f19c827fc1a9d7d4c` |
+| Management API token | En variable de entorno local `SUPABASE_ACCESS_TOKEN` — **NUNCA en el repo** |
 | Anon key | En `src/integrations/supabase/client.ts` |
 
 > **NUNCA usar el MCP de Supabase de claude.ai.** Siempre usar la Management API directamente.
+>
+> **NUNCA escribir el token en el repo.** Debe estar solo en una variable de entorno local
+> (`$env:SUPABASE_ACCESS_TOKEN` en PowerShell). Antes de usar los comandos de abajo, define:
+> `$env:SUPABASE_ACCESS_TOKEN = "<tu-token>"` (en la sesión, no en un archivo commiteado).
 
 ---
 
@@ -30,7 +34,7 @@ $sql = "SELECT * FROM public.profiles LIMIT 5;"
 $body = ConvertTo-Json @{ query = $sql } -Depth 3
 $resp = Invoke-RestMethod -Uri "https://api.supabase.com/v1/projects/wsbuqiznddvxcwvpnbxm/database/query" `
   -Method POST `
-  -Headers @{ "Authorization" = "Bearer sbp_b715f486726674624577159f19c827fc1a9d7d4c" } `
+  -Headers @{ "Authorization" = "Bearer $($env:SUPABASE_ACCESS_TOKEN)" } `
   -Body $body -ContentType "application/json"
 $resp | ConvertTo-Json
 ```
@@ -95,7 +99,7 @@ Aplicar migración:
 $sql = Get-Content "supabase/migrations/mi_migracion.sql" -Raw
 $body = ConvertTo-Json @{ query = $sql } -Depth 3
 Invoke-RestMethod -Uri "https://api.supabase.com/v1/projects/wsbuqiznddvxcwvpnbxm/database/query" `
-  -Method POST -Headers @{ "Authorization" = "Bearer sbp_b715f486726674624577159f19c827fc1a9d7d4c" } `
+  -Method POST -Headers @{ "Authorization" = "Bearer $($env:SUPABASE_ACCESS_TOKEN)" } `
   -Body $body -ContentType "application/json"
 ```
 
@@ -119,12 +123,11 @@ ALTER TABLE public.tabla ADD COLUMN IF NOT EXISTS columna text;
 
 ### Deploy
 ```bash
+# El token debe estar exportado en el entorno: export SUPABASE_ACCESS_TOKEN="<tu-token>"
 # Con verificación JWT (funciones internas)
-SUPABASE_ACCESS_TOKEN=sbp_b715f486726674624577159f19c827fc1a9d7d4c \
 npx supabase functions deploy NOMBRE_FUNCION --project-ref wsbuqiznddvxcwvpnbxm --use-api
 
 # Sin verificación JWT (webhooks externos como Kommo)
-SUPABASE_ACCESS_TOKEN=sbp_b715f486726674624577159f19c827fc1a9d7d4c \
 npx supabase functions deploy kommo-webhook --project-ref wsbuqiznddvxcwvpnbxm --use-api --no-verify-jwt
 ```
 

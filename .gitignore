@@ -25,3 +25,8 @@ dist-ssr
 
 # Supabase CLI local state
 supabase/.temp/
+
+# Secretos y variables de entorno — NUNCA commitear
+.env
+.env.*
+!.env.example
