@@ -169,12 +169,19 @@ Migraciones: `20260703140000` (part1 RPCs+helpers, **APLICADA**), `2026070316000
 
 - [ ] **4.1** Rate limiting global en el borde (por IP + por identidad) para todos los endpoints de funciones.
 - [ ] **4.2** Captcha (hCaptcha/Turnstile) en el landing público de prospectos y en los logins.
-- [ ] **4.3** Security headers en el frontend (CSP, X-Frame-Options, HSTS, Referrer-Policy).
-- [ ] **4.4** Revisar almacenamiento de sesión: evaluar riesgo de JWT en localStorage vs cookies httpOnly.
+- [x] **4.3** Security headers (`public/_headers`): X-Frame-Options, X-Content-Type-Options, Referrer-Policy, HSTS, Permissions-Policy. **CSP** dejada como plantilla comentada (requiere probar contra la app antes de activar).
+- [ ] **4.4** Revisar almacenamiento de sesión: JWT en localStorage vs cookies httpOnly.
 - [ ] **4.5** Sanitización/escape consistente de datos de usuario renderizados (revisión XSS preventiva).
-- [ ] **4.6** Storage buckets de Supabase: revisar políticas de acceso a archivos (reportes técnicos, imágenes).
-- [ ] **4.7** Auditoría de dependencias: resolver los `npm audit` de severidad alta/crítica.
+- [ ] **4.7** Auditoría de dependencias: `npm audit` reporta ~24 vulnerabilidades (mayormente transitivas de build). Revisar altas/críticas sin romper deps (no auto-fix).
 - [ ] **4.8** Tabla/registro de auditoría de accesos sensibles (quién leyó/editó qué).
+
+### 🔴 A6 (NUEVO HALLAZGO — CRÍTICO) — Buckets de Storage públicos con PII
+Los 4 buckets son `public: true`. **`technical-reports` (88 archivos) y `prospect-updates` (10)** contienen datos sensibles de clientes (reportes de servicio, documentos, audios) y son **legibles por cualquiera con la URL, sin autenticación**. La app usa `getPublicUrl` (DealershipPanel:510, TechnicalReportUploader:154, ProspectUpdatesSidebar:199) y guarda esas URLs públicas en la DB (`reservations.technical_report_url`, `prospect_updates.file_url`).
+- [ ] **A6.1** Poner `technical-reports` y `prospect-updates` en `public: false`. (`vehicle-models` y `branding` pueden quedar públicos — son catálogo/logos.)
+- [ ] **A6.2** Frontend: cambiar `getPublicUrl` → `createSignedUrl` (URL firmada temporal) al mostrar esos archivos.
+- [ ] **A6.3** Migrar/generar bajo demanda: guardar el **path** del objeto (no la URL pública) y firmar al leer. Las URLs públicas ya guardadas dejan de servir al hacer privado el bucket.
+- [ ] **A6.4** Confirmar que las políticas RLS de `storage.objects` acotan la lectura a quien corresponde (hoy `technical-reports` tiene "Public can read"; al hacer el bucket privado, ajustar a authenticated/scoped).
+> **Es un cambio coordinado** (frontend + migración de URLs), igual que 2B. Severidad alta: exposición de PII de clientes.
 
 **Validación:** `npm audit` sin críticas; headers presentes en respuesta; captcha bloquea envíos automatizados.
 
