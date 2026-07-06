@@ -509,8 +509,10 @@ const AdminProspectos = () => {
     if (!pDealership) { toast.error('Seleccione un concesionario'); return; }
     // When editing, allow saving directly (all fields were previously validated)
     if (editing) { await doSave(); return; }
+    // El correo electrónico es obligatorio al crear un prospecto: bloqueo duro, no advertencia.
+    if (!pEmail.trim()) { toast.error('El correo electrónico es requerido'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pEmail.trim())) { toast.error('El correo electrónico no es válido'); return; }
     const missing: string[] = [];
-    if (!pEmail.trim()) missing.push('Correo electrónico');
     if (!pModel.trim() || pModel === '__none') missing.push('Modelo de interés');
     if (!pSalesperson || pSalesperson === '__none') missing.push('Vendedor');
     if (missing.length > 0) {
@@ -1813,7 +1815,7 @@ const AdminProspectos = () => {
                 <Input value={pPhone} onChange={e => setPPhone(e.target.value)} placeholder="+58 412 1234567" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
-                <Label className="text-xs">Email</Label>
+                <Label className="text-xs">Email *</Label>
                 <Input type="email" value={pEmail} onChange={e => setPEmail(e.target.value)} placeholder="correo@ejemplo.com" className="h-9 text-xs" />
               </div>
               <div className="space-y-1">
