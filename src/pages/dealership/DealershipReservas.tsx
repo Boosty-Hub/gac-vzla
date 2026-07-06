@@ -334,11 +334,9 @@ const DealershipReservas = () => {
     const timer = setTimeout(async () => {
       setUnifiedSearching(true);
       const [vehicleRes, clientRes] = await Promise.all([
-        supabase
-          .from('vehicles')
-          .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
-          .ilike('plate', `%${q}%`)
-          .limit(4),
+        // RLS: el staff ya no puede hacer SELECT directo de vehículos por placa;
+        // se usa la RPC staff_lookup_vehicle_by_plate (gateada a rol staff). Devuelve array → [0].
+        supabase.rpc('staff_lookup_vehicle_by_plate', { p_plate: q }),
         supabase
           .from('clients')
           .select('id, full_name')
@@ -346,7 +344,26 @@ const DealershipReservas = () => {
           .limit(5),
       ]);
       const results: Array<{kind: 'vehicle'; data: PlateResult} | {kind: 'client'; id: string; full_name: string}> = [];
-      (vehicleRes.data || []).forEach(v => results.push({ kind: 'vehicle', data: v as any }));
+      const vehicleRow = ((vehicleRes.data || []) as any[])[0];
+      if (vehicleRow) {
+        const pr: PlateResult = {
+          id: vehicleRow.vehicle_id,
+          plate: vehicleRow.plate,
+          year: vehicleRow.year,
+          color: vehicleRow.color ?? null,
+          client_id: vehicleRow.client_id,
+          vehicle_models: vehicleRow.model_name
+            ? { name: vehicleRow.model_name, brand: vehicleRow.model_brand }
+            : null,
+          clients: {
+            id: vehicleRow.client_id,
+            full_name: vehicleRow.client_full_name,
+            phone: vehicleRow.client_phone ?? null,
+            cedula: vehicleRow.client_cedula ?? null,
+          },
+        };
+        results.push({ kind: 'vehicle', data: pr });
+      }
       (clientRes.data || []).forEach(c => results.push({ kind: 'client', id: c.id, full_name: c.full_name }));
       setUnifiedResults(results);
       setUnifiedDropdown(results.length > 0);

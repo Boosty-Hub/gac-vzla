@@ -20,6 +20,7 @@ import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
 import { toast } from 'sonner';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
+import { getSignedFileUrl } from '@/lib/storage';
 
 interface Dealership {
   id: string;
@@ -396,14 +397,19 @@ const DealershipPanel = () => {
     setPlateResult(null);
     setPlateSearched(true);
 
-    const { data } = await supabase
-      .from('vehicles')
-      .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
-      .ilike('plate', plateSearch.trim())
-      .limit(1);
+    const { data } = await supabase.rpc('staff_lookup_vehicle_by_plate', { p_plate: plateSearch.trim() });
 
-    if (data && data.length > 0) {
-      setPlateResult(data[0] as any);
+    const row = data?.[0];
+    if (row) {
+      setPlateResult({
+        id: row.vehicle_id,
+        plate: row.plate,
+        year: row.year,
+        color: row.color,
+        client_id: row.client_id,
+        vehicle_models: { name: row.model_name, brand: row.model_brand },
+        clients: { id: row.client_id, full_name: row.client_full_name, phone: row.client_phone, cedula: row.client_cedula },
+      });
     }
     setSearchingPlate(false);
   };
@@ -487,12 +493,19 @@ const DealershipPanel = () => {
 
     if (r.vehicle_id) {
       setLoadingDetail(true);
-      const { data: veh } = await supabase
-        .from('vehicles')
-        .select('id, plate, year, color, vin, mileage, warranty_active, vehicle_models(name, brand), clients(full_name, cedula, phone)')
-        .eq('id', r.vehicle_id)
-        .single();
-      if (veh) setVehicleDetail(veh as unknown as VehicleDetail);
+      const { data: vehRows } = await supabase.rpc('staff_lookup_vehicle_by_plate', { p_plate: r.vehicles?.plate || '' });
+      const veh = vehRows?.[0];
+      if (veh) setVehicleDetail({
+        id: veh.vehicle_id,
+        plate: veh.plate,
+        year: veh.year,
+        color: veh.color,
+        vin: veh.vin,
+        mileage: veh.mileage,
+        warranty_active: veh.warranty_active,
+        vehicle_models: { name: veh.model_name, brand: veh.model_brand },
+        clients: { full_name: veh.client_full_name, cedula: veh.client_cedula, phone: veh.client_phone },
+      });
 
       const { data: history } = await supabase
         .from('reservations')
@@ -536,8 +549,15 @@ const DealershipPanel = () => {
       else toast.error(`Error al subir: ${msg || 'Error desconocido'}`);
       return null;
     }
-    const { data: urlData } = supabase.storage.from('technical-reports').getPublicUrl(path);
-    return urlData?.publicUrl || null;
+    // Guardamos el PATH del objeto (bucket privado); la URL firmada se resuelve al abrir.
+    return path;
+  };
+
+  // Abre un informe técnico (bucket privado) resolviendo una URL firmada temporal.
+  const openReport = async (value: string | null | undefined) => {
+    const url = await getSignedFileUrl('technical-reports', value);
+    if (url) window.open(url, '_blank');
+    else toast.error('No se pudo abrir el informe técnico');
   };
 
   const handleCompleteService = async () => {
@@ -578,8 +598,8 @@ const DealershipPanel = () => {
   const checkDuplicateProspectPhone = async (phone: string): Promise<boolean> => {
     const normalized = phone.replace(/\D/g, '');
     if (!normalized) return false;
-    const { data } = await supabase.from('prospects').select('id, name, phone').not('phone', 'is', null);
-    const duplicate = (data || []).find((p: any) => p.phone.replace(/\D/g, '') === normalized);
+    const { data } = await supabase.rpc('find_prospects_by_phone', { p_phone: phone.trim() });
+    const duplicate = (data || [])[0];
     if (duplicate) {
       toast.error(`Ya existe un prospecto con ese teléfono: ${duplicate.name}`);
       return true;
@@ -829,7 +849,7 @@ const DealershipPanel = () => {
                                 </Button>
                               )}
                               {r.technical_report_url && (
-                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); window.open(r.technical_report_url!, '_blank'); }}>
+                                <Button size="sm" variant="outline" className="text-[10px] h-6 px-2 gap-1" onClick={(e) => { e.stopPropagation(); openReport(r.technical_report_url); }}>
                                   <FileText className="w-3 h-3" /> PDF
                                 </Button>
                               )}
@@ -1153,7 +1173,7 @@ const DealershipPanel = () => {
                   {detailRes.status === 'completada' && (
                     <div className="flex items-center gap-2">
                       {detailRes.technical_report_url ? (
-                        <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => window.open(detailRes.technical_report_url!, '_blank')}>
+                        <Button size="sm" variant="outline" className="text-xs gap-1" onClick={() => openReport(detailRes.technical_report_url)}>
                           <FileText className="w-3.5 h-3.5" /> Ver Informe Técnico
                           <ExternalLink className="w-3 h-3" />
                         </Button>

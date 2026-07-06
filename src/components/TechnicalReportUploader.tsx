@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { getSignedFileUrl } from '@/lib/storage';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Upload, FileText, Download, Eye, Trash2, Loader2, Image, FileSpreadsheet, File, Film } from 'lucide-react';
@@ -64,11 +65,12 @@ function FileTypeIcon({ url, className }: { url: string; className?: string }) {
 interface FileChipProps {
   url: string;
   onPreview: () => void;
+  onDownload: () => void;
   onRemove?: () => void;
   readonly?: boolean;
 }
 
-function FileChip({ url, onPreview, onRemove, readonly }: FileChipProps) {
+function FileChip({ url, onPreview, onDownload, onRemove, readonly }: FileChipProps) {
   const name = getFileName(url);
   return (
     <div className="flex items-center justify-between gap-2 bg-blue-50 border border-blue-200 rounded-md px-3 py-2 overflow-hidden min-w-0">
@@ -81,10 +83,8 @@ function FileChip({ url, onPreview, onRemove, readonly }: FileChipProps) {
         <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-blue-700 hover:bg-blue-100" onClick={onPreview} title="Previsualizar">
           <Eye className="w-3.5 h-3.5" />
         </Button>
-        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-blue-700 hover:bg-blue-100" asChild title="Descargar">
-          <a href={url} download target="_blank" rel="noopener noreferrer">
-            <Download className="w-3.5 h-3.5" />
-          </a>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-blue-700 hover:bg-blue-100" onClick={onDownload} title="Descargar">
+          <Download className="w-3.5 h-3.5" />
         </Button>
         {!readonly && onRemove && (
           <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:bg-red-50" onClick={onRemove} title="Eliminar">
@@ -108,9 +108,37 @@ interface Props {
 export function TechnicalReportUploader({ reservationId, value, onChange, readonly = false, maxSizeMB = 40 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  // previewUrl = valor guardado (path nuevo o URL pública antigua) — se usa para detectType/nombre/etiqueta.
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // previewSignedUrl = URL firmada temporal — se usa para el src del iframe/img/video y para descargar.
+  const [previewSignedUrl, setPreviewSignedUrl] = useState<string | null>(null);
 
   const urls = value ? value.split('|').filter(Boolean) : [];
+
+  const openPreview = async (stored: string) => {
+    setPreviewUrl(stored);
+    setPreviewSignedUrl(null);
+    const signed = await getSignedFileUrl('technical-reports', stored);
+    if (!signed) {
+      toast.error('No se pudo generar el enlace del archivo');
+      return;
+    }
+    setPreviewSignedUrl(signed);
+  };
+
+  const closePreview = () => {
+    setPreviewUrl(null);
+    setPreviewSignedUrl(null);
+  };
+
+  const downloadFile = async (stored: string) => {
+    const signed = await getSignedFileUrl('technical-reports', stored);
+    if (!signed) {
+      toast.error('No se pudo generar el enlace del archivo');
+      return;
+    }
+    window.open(signed, '_blank', 'noopener,noreferrer');
+  };
 
   const handleFiles = async (files: FileList | File[]) => {
     const fileArray = Array.from(files);
@@ -151,8 +179,8 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
         toast.error(`Error al subir "${file.name}": ${error.message}`);
         console.error(error);
       } else {
-        const { data: urlData } = supabase.storage.from('technical-reports').getPublicUrl(path);
-        newUrls.push(urlData.publicUrl);
+        // Guardar el PATH del objeto (bucket privado). La URL firmada se resuelve al mostrar/descargar.
+        newUrls.push(path);
       }
     }
 
@@ -172,8 +200,13 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
 
   const previewFileName = previewUrl ? getFileName(previewUrl) : '';
 
+  // El tipo de archivo (pdf/image/video/other) se detecta sobre el valor guardado.
+  const previewType = previewUrl ? detectType(previewUrl) : 'other';
+  // El src real requiere la URL firmada; mientras se resuelve se muestra un loader.
+  const previewSrcReady = !!previewSignedUrl;
+
   const PreviewModal = (
-    <Dialog open={!!previewUrl} onOpenChange={open => { if (!open) setPreviewUrl(null); }}>
+    <Dialog open={!!previewUrl} onOpenChange={open => { if (!open) closePreview(); }}>
       <DialogContent className="max-w-3xl w-full flex flex-col max-h-[90vh]">
         <DialogHeader className="min-w-0 overflow-hidden">
           <DialogTitle className="flex items-center gap-2 text-sm font-medium min-w-0 overflow-hidden">
@@ -183,18 +216,24 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
           </DialogTitle>
         </DialogHeader>
         <div className="flex-1 overflow-hidden min-h-0">
-          {previewUrl && detectType(previewUrl) === 'pdf' && (
-            <iframe src={previewUrl} className="w-full h-[60vh] rounded border" title="Vista previa" />
-          )}
-          {previewUrl && detectType(previewUrl) === 'image' && (
-            <div className="flex items-center justify-center h-[60vh] bg-muted/20 rounded border overflow-hidden">
-              <img src={previewUrl} alt={previewFileName} className="max-h-full max-w-full object-contain" />
+          {previewUrl && previewType !== 'other' && !previewSrcReady && (
+            <div className="flex flex-col items-center justify-center h-[60vh] gap-3 text-muted-foreground">
+              <Loader2 className="w-8 h-8 animate-spin" />
+              <p className="text-sm">Cargando archivo...</p>
             </div>
           )}
-          {previewUrl && detectType(previewUrl) === 'video' && (
-            <video controls src={previewUrl} className="w-full max-h-[60vh] rounded border" />
+          {previewUrl && previewSrcReady && previewType === 'pdf' && (
+            <iframe src={previewSignedUrl!} className="w-full h-[60vh] rounded border" title="Vista previa" />
           )}
-          {previewUrl && detectType(previewUrl) === 'other' && (
+          {previewUrl && previewSrcReady && previewType === 'image' && (
+            <div className="flex items-center justify-center h-[60vh] bg-muted/20 rounded border overflow-hidden">
+              <img src={previewSignedUrl!} alt={previewFileName} className="max-h-full max-w-full object-contain" />
+            </div>
+          )}
+          {previewUrl && previewSrcReady && previewType === 'video' && (
+            <video controls src={previewSignedUrl!} className="w-full max-h-[60vh] rounded border" />
+          )}
+          {previewUrl && previewType === 'other' && (
             <div className="flex flex-col items-center justify-center h-40 gap-3 text-muted-foreground">
               <File className="w-12 h-12 opacity-40" />
               <p className="text-sm text-center">Este tipo de archivo no puede previsualizarse en el navegador.<br />Descárgalo para abrirlo.</p>
@@ -202,12 +241,10 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setPreviewUrl(null)}>Cerrar</Button>
+          <Button variant="outline" onClick={closePreview}>Cerrar</Button>
           {previewUrl && (
-            <Button asChild className="gac-gradient">
-              <a href={previewUrl} download target="_blank" rel="noopener noreferrer">
-                <Download className="w-4 h-4 mr-2" /> Descargar
-              </a>
+            <Button className="gac-gradient" onClick={() => downloadFile(previewUrl)}>
+              <Download className="w-4 h-4 mr-2" /> Descargar
             </Button>
           )}
         </DialogFooter>
@@ -222,7 +259,7 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
         {PreviewModal}
         <div className="space-y-1.5">
           {urls.map(url => (
-            <FileChip key={url} url={url} onPreview={() => setPreviewUrl(url)} readonly />
+            <FileChip key={url} url={url} onPreview={() => openPreview(url)} onDownload={() => downloadFile(url)} readonly />
           ))}
         </div>
       </>
@@ -244,7 +281,7 @@ export function TechnicalReportUploader({ reservationId, value, onChange, readon
       />
       <div className="space-y-1.5">
         {urls.map(url => (
-          <FileChip key={url} url={url} onPreview={() => setPreviewUrl(url)} onRemove={() => removeUrl(url)} />
+          <FileChip key={url} url={url} onPreview={() => openPreview(url)} onDownload={() => downloadFile(url)} onRemove={() => removeUrl(url)} />
         ))}
         {canAddMore && (
           <div

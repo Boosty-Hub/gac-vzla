@@ -25,27 +25,31 @@ npm run test      # Vitest (pruebas unitarias)
 |---|---|
 | Project ID / ref | `wsbuqiznddvxcwvpnbxm` |
 | URL del proyecto | `https://wsbuqiznddvxcwvpnbxm.supabase.co` |
-| Management API token | `sbp_b715f486726674624577159f19c827fc1a9d7d4c` |
+| Management API token | En variable de entorno local `SUPABASE_ACCESS_TOKEN` — **NUNCA en el repo** |
 | Región | `us-east-2` |
+
+> El token de Management API **nunca** debe escribirse en el repo. Define la variable en tu sesión
+> antes de usar los comandos: `export SUPABASE_ACCESS_TOKEN="<tu-token>"` (bash) o
+> `$env:SUPABASE_ACCESS_TOKEN = "<tu-token>"` (PowerShell).
 
 ### Ejemplos de uso
 
 ```bash
 # Ejecutar SQL
 curl -s "https://api.supabase.com/v1/projects/wsbuqiznddvxcwvpnbxm/database/query" \
-  -H "Authorization: Bearer sbp_b715f486726674624577159f19c827fc1a9d7d4c" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "SELECT * FROM public.dealerships LIMIT 5;"}'
 
 # Aplicar migración SQL (archivo local)
 curl -s "https://api.supabase.com/v1/projects/wsbuqiznddvxcwvpnbxm/database/query" \
-  -H "Authorization: Bearer sbp_b715f486726674624577159f19c827fc1a9d7d4c" \
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"query\": \"$(cat supabase/migrations/archivo.sql | tr '\n' ' ')\"}"
 
 # Listar proyectos
 curl -s "https://api.supabase.com/v1/projects" \
-  -H "Authorization: Bearer sbp_b715f486726674624577159f19c827fc1a9d7d4c"
+  -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN"
 ```
 
 > Para queries con comillas o caracteres especiales, usar `$'...'` o archivos temporales para evitar problemas de escapado. Dollar-quoting en SQL (`$$...$$`) para funciones PL/pgSQL.

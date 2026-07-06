@@ -1,0 +1,24 @@
+name: gitleaks
+
+# Escaneo de secretos en cada push y PR. Previene que credenciales entren al
+# repo — la causa raíz del hallazgo C4. Usa el binario open-source de gitleaks
+# directamente (el action gitleaks/gitleaks-action exige licencia paga en orgs).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  scan:
+    name: Detectar secretos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalar y correr gitleaks
+        run: |
+          VERSION=8.18.4
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+          ./gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose --exit-code 1

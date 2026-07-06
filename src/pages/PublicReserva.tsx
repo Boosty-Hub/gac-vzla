@@ -18,15 +18,16 @@ import { createKommoReservation } from '@/lib/kommo';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 
 interface VehicleResult {
-  id: string;
+  vehicle_id: string;
   plate: string;
   year: number;
   color: string | null;
   mileage: number;
-  vin: string | null;
   warranty_active: boolean;
-  vehicle_models: { name: string; brand: string } | null;
-  clients: { id: string; full_name: string; phone: string | null; email: string | null } | null;
+  model_name: string | null;
+  model_brand: string | null;
+  client_id: string | null;
+  client_masked_name: string | null;
 }
 
 interface Dealership {
@@ -59,6 +60,7 @@ const PublicReserva = () => {
 
   // Plate search
   const [plate, setPlate] = useState('');
+  const [confirmedPlate, setConfirmedPlate] = useState('');
   const [searching, setSearching] = useState(false);
   const [plateError, setPlateError] = useState('');
   const [vehicle, setVehicle] = useState<VehicleResult | null>(null);
@@ -95,14 +97,15 @@ const PublicReserva = () => {
     setSelectedTime('');
 
     const dateStr = format(date, 'yyyy-MM-dd');
-    const { data } = await supabase
-      .from('reservations')
-      .select('reservation_time, service_type')
-      .eq('dealership_id', dealershipId)
-      .eq('reservation_date', dateStr)
-      .neq('status', 'cancelada');
+    // Security: read taken slots through the security-definer RPC (no direct anon
+    // SELECT on reservations). The RPC returns time + service_type, which feeds the
+    // bay-capacity computation (re2) without exposing any client data.
+    const { data } = await supabase.rpc('get_taken_reservation_times', {
+      p_dealership_id: dealershipId,
+      p_date: dateStr,
+    });
 
-    if (data) setDayReservations(data as CapacityReservation[]);
+    if (data) setDayReservations(data as unknown as CapacityReservation[]);
     setLoadingTimes(false);
   };
 
@@ -140,12 +143,7 @@ const PublicReserva = () => {
     setSearching(true);
     setPlateError('');
 
-    const { data, error } = await supabase
-      .from('vehicles')
-      .select('id, plate, year, color, mileage, vin, warranty_active, vehicle_models(name, brand), clients(id, full_name, phone, email)')
-      .ilike('plate', cleanPlate)
-      .eq('is_active', true)
-      .limit(1);
+    const { data, error } = await supabase.rpc('lookup_vehicle_by_plate', { p_plate: cleanPlate });
 
     if (error) {
       console.error(error);
@@ -154,6 +152,7 @@ const PublicReserva = () => {
       setPlateError('No se encontró un vehículo con esta placa. Verifique e intente de nuevo.');
     } else {
       setVehicle(data[0] as VehicleResult);
+      setConfirmedPlate(cleanPlate);
       // Load dealerships and service types
       const [{ data: deals }, { data: stData }] = await Promise.all([
         supabase.from('dealerships').select('id, name, city, state, phone, address, google_maps_url, is_service_center, bays').eq('is_active', true).eq('is_service_center', true),
@@ -185,19 +184,15 @@ const PublicReserva = () => {
     if (!vehicle) return;
     setSaving(true);
 
-    const { data: publicInserted, error } = await supabase.from('reservations').insert({
-      dealership_id: selectedDealership,
-      client_id: vehicle.clients?.id || null,
-      vehicle_id: vehicle.id,
-      reservation_date: format(selectedDate!, 'yyyy-MM-dd'),
-      reservation_time: selectedTime,
-      service_type: selectedService,
-      current_mileage: parseInt(mileage) || 0,
-      status: 'pendiente',
-      notes: notes.trim() || null,
-      created_by_name: vehicle.clients?.full_name || 'Cliente',
-      created_by_role: 'Cliente',
-    }).select('id').single();
+    const { data, error } = await supabase.rpc('create_public_reservation', {
+      p_plate: confirmedPlate,
+      p_dealership_id: selectedDealership,
+      p_service_type: selectedService,
+      p_date: format(selectedDate!, 'yyyy-MM-dd'),
+      p_time: selectedTime,
+      p_mileage: parseInt(mileage) || 0,
+      p_notes: notes.trim() || null,
+    });
 
     if (error) {
       toast.error('Error al crear la reserva. Intente de nuevo.');
@@ -206,7 +201,7 @@ const PublicReserva = () => {
       // NOTE: kommo-api requires JWT by default (not listed in config.toml with verify_jwt=false).
       // PublicReserva has no authenticated session, so this call will 401 until kommo-api
       // is redeployed with --no-verify-jwt. The .catch() prevents the 401 from surfacing to the user.
-      if (publicInserted?.id) createKommoReservation(publicInserted.id).catch(console.error);
+      if (data) createKommoReservation(data).catch(console.error);
       setStep('success');
     }
     setSaving(false);
@@ -215,6 +210,7 @@ const PublicReserva = () => {
   const reset = () => {
     setStep('plate');
     setPlate('');
+    setConfirmedPlate('');
     setPlateError('');
     setVehicle(null);
     setSelectedDealership('');
@@ -300,9 +296,9 @@ const PublicReserva = () => {
                     <Car className="w-6 h-6 text-primary" />
                   </div>
                   <div className="flex-1">
-                    <p className="font-semibold text-sm">{vehicle.vehicle_models?.brand} {vehicle.vehicle_models?.name} {vehicle.year}</p>
+                    <p className="font-semibold text-sm">{vehicle.model_brand} {vehicle.model_name} {vehicle.year}</p>
                     <p className="text-xs text-muted-foreground">{vehicle.plate}{vehicle.color ? ` · ${vehicle.color}` : ''} · {vehicle.mileage.toLocaleString()} km</p>
-                    {vehicle.clients && <p className="text-xs text-muted-foreground">{vehicle.clients.full_name}</p>}
+                    {vehicle.client_masked_name && <p className="text-xs text-muted-foreground">{vehicle.client_masked_name}</p>}
                   </div>
                   {vehicle.warranty_active && (
                     <Badge className="text-[10px] bg-green-100 text-green-800 px-1.5 py-0 flex items-center gap-0.5">
@@ -477,7 +473,7 @@ const PublicReserva = () => {
                 <div className="flex items-center gap-3">
                   <Car className="w-5 h-5 text-primary shrink-0" />
                   <div>
-                    <p className="font-semibold text-sm">{vehicle.vehicle_models?.brand} {vehicle.vehicle_models?.name} {vehicle.year}</p>
+                    <p className="font-semibold text-sm">{vehicle.model_brand} {vehicle.model_name} {vehicle.year}</p>
                     <p className="text-xs text-muted-foreground">{vehicle.plate}</p>
                   </div>
                 </div>
@@ -517,7 +513,7 @@ const PublicReserva = () => {
 
             <Card className="gac-shadow text-left">
               <CardContent className="p-4 space-y-2 text-sm">
-                <div className="flex items-center gap-2"><Car className="w-4 h-4 text-muted-foreground" /><span>{vehicle?.vehicle_models?.brand} {vehicle?.vehicle_models?.name} — {vehicle?.plate}</span></div>
+                <div className="flex items-center gap-2"><Car className="w-4 h-4 text-muted-foreground" /><span>{vehicle?.model_brand} {vehicle?.model_name} — {vehicle?.plate}</span></div>
                 <div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-muted-foreground" /><span>{selectedDealershipData?.name}</span></div>
                 <div className="flex items-center gap-2"><Wrench className="w-4 h-4 text-muted-foreground" /><span>{selectedService}</span></div>
                 <div className="flex items-center gap-2"><CalendarDays className="w-4 h-4 text-muted-foreground" /><span>{selectedDate ? format(selectedDate, "d 'de' MMMM, yyyy", { locale: es }) : ''} a las {selectedTime}</span></div>

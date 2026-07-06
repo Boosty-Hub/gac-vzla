@@ -875,6 +875,74 @@ export type Database = {
     Functions: {
       get_user_role: { Args: never; Returns: string }
       is_admin_user: { Args: never; Returns: boolean }
+      lookup_vehicle_by_plate: {
+        Args: { p_plate: string }
+        Returns: {
+          vehicle_id: string
+          plate: string
+          year: number
+          color: string | null
+          mileage: number | null
+          warranty_active: boolean
+          model_name: string | null
+          model_brand: string | null
+          client_id: string | null
+          client_masked_name: string | null
+        }[]
+      }
+      get_taken_reservation_times: {
+        Args: { p_dealership_id: string; p_date: string }
+        Returns: { reservation_time: string }[]
+      }
+      create_public_reservation: {
+        Args: {
+          p_plate: string
+          p_dealership_id: string
+          p_service_type: string
+          p_date: string
+          p_time: string
+          p_mileage: number
+          p_notes: string | null
+        }
+        Returns: string
+      }
+      staff_lookup_vehicle_by_plate: {
+        Args: { p_plate: string }
+        Returns: {
+          vehicle_id: string
+          plate: string
+          year: number
+          color: string | null
+          vin: string | null
+          mileage: number
+          warranty_active: boolean
+          model_name: string
+          model_brand: string
+          client_id: string
+          client_full_name: string
+          client_phone: string | null
+          client_cedula: string | null
+        }[]
+      }
+      find_prospects_by_phone: {
+        Args: { p_phone: string }
+        Returns: {
+          id: string
+          name: string
+          phone: string | null
+          salesperson: string | null
+          dealership_id: string | null
+          status: string
+        }[]
+      }
+      prospect_phone_exists: {
+        Args: { p_phone: string }
+        Returns: boolean
+      }
+      notify_reservation_cancellation: {
+        Args: { p_reservation_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

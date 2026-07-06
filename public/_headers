@@ -1,0 +1,16 @@
+# Security headers (Netlify). Aplican a todas las rutas.
+# Estos son seguros y no rompen la app. La CSP (mas estricta) se deja como
+# plantilla comentada abajo: requiere probarse contra la app corriendo antes de
+# activarse, porque una CSP mal calibrada rompe el frontend por completo.
+/*
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+  X-XSS-Protection: 0
+
+# ── Plantilla de CSP (activar tras probar en staging) ──────────────────────────
+# Descomentar y ajustar; validar que la app cargue (Supabase API/realtime,
+# imagenes de storage, estilos inline de shadcn/recharts):
+#   Content-Security-Policy: default-src 'self'; connect-src 'self' https://wsbuqiznddvxcwvpnbxm.supabase.co wss://wsbuqiznddvxcwvpnbxm.supabase.co; img-src 'self' data: blob: https://wsbuqiznddvxcwvpnbxm.supabase.co; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'

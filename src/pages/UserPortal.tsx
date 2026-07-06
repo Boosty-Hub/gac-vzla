@@ -272,14 +272,15 @@ const UserPortal = () => {
     setSelectedTime('');
 
     const dateStr = format(date, 'yyyy-MM-dd');
-    const { data } = await supabase
-      .from('reservations')
-      .select('reservation_time, service_type')
-      .eq('dealership_id', dealershipId)
-      .eq('reservation_date', dateStr)
-      .neq('status', 'cancelada');
+    // Security: read taken slots through the security-definer RPC (no direct
+    // SELECT on reservations). The RPC returns time + service_type, which feeds the
+    // bay-capacity computation (re2) without exposing any client data.
+    const { data } = await supabase.rpc('get_taken_reservation_times', {
+      p_dealership_id: dealershipId,
+      p_date: dateStr,
+    });
 
-    if (data) setDayReservations(data as CapacityReservation[]);
+    if (data) setDayReservations(data as unknown as CapacityReservation[]);
     setLoadingTimes(false);
   };
 
@@ -665,13 +666,6 @@ const UserPortal = () => {
     if (!cancelTarget || !clientData) return;
     setCancelling(true);
 
-    // Fetch dealership_id antes del update para usarlo en notificaciones
-    const { data: resData } = await supabase
-      .from('reservations')
-      .select('dealership_id')
-      .eq('id', cancelTarget.id)
-      .single();
-
     const { error, count } = await supabase
       .from('reservations')
       .update({ status: 'cancelada' })
@@ -685,49 +679,8 @@ const UserPortal = () => {
       return;
     }
 
-    // Construir y enviar notificaciones
-    const vehicleInfo = cancelTarget.vehicles
-      ? `${cancelTarget.vehicles.vehicle_models?.brand} ${cancelTarget.vehicles.vehicle_models?.name} ${cancelTarget.vehicles.year} (${cancelTarget.vehicles.plate})`
-      : '';
-    const notifTitle = 'Cita Cancelada por Cliente';
-    const notifMessage = `${clientData.full_name} canceló su cita de ${cancelTarget.service_type} programada para el ${cancelTarget.reservation_date} a las ${cancelTarget.reservation_time?.slice(0, 5)}. Vehículo: ${vehicleInfo}. Concesionario: ${cancelTarget.dealerships?.name || 'N/A'}.`;
-
-    const notifications: any[] = [];
-
-    // Notificar admins
-    const { data: adminRoles } = await supabase.from('roles').select('id').in('name', ['superadmin', 'admin']);
-    if (adminRoles && adminRoles.length > 0) {
-      const { data: adminProfiles } = await supabase
-        .from('profiles')
-        .select('id')
-        .in('role_id', adminRoles.map((r: any) => r.id));
-      if (adminProfiles) {
-        adminProfiles.forEach((p: any) => {
-          notifications.push({
-            recipient_profile_id: p.id,
-            type: 'cancelacion',
-            title: notifTitle,
-            message: notifMessage,
-            metadata: { reservation_id: cancelTarget.id },
-          });
-        });
-      }
-    }
-
-    // Notificar concesionario
-    if (resData?.dealership_id) {
-      notifications.push({
-        recipient_dealership_id: resData.dealership_id,
-        type: 'cancelacion',
-        title: notifTitle,
-        message: notifMessage,
-        metadata: { reservation_id: cancelTarget.id },
-      });
-    }
-
-    if (notifications.length > 0) {
-      await supabase.from('notifications').insert(notifications);
-    }
+    // Fan-out de notificaciones (a admins + concesionario) server-side
+    await supabase.rpc('notify_reservation_cancellation', { p_reservation_id: cancelTarget.id });
 
     toast.success('Tu cita ha sido cancelada. El bloque de horario quedó liberado.', { duration: 5000 });
     setCancelOpen(false);

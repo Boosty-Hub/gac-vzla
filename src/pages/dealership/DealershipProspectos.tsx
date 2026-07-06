@@ -32,7 +32,6 @@ import { useProspectSources } from '@/hooks/useProspectSources';
 import { useProspectEvents } from '@/hooks/useProspectEvents';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
-import { phonesMatch } from '@/lib/phone';
 import { useLossReasons } from '@/hooks/useLossReasons';
 
 
@@ -340,9 +339,10 @@ const DealershipProspectos = () => {
   const [selectedLossReasonId, setSelectedLossReasonId] = useState('');
   const [lossReasonSaving, setLossReasonSaving] = useState(false);
 
-  // Duplicate-phone alert: holds the existing prospect that is already being
-  // managed so we can show its salesperson and offer navigation to it.
-  const [duplicateProspect, setDuplicateProspect] = useState<{ id: string; name: string; salesperson: string | null; dealership_id: string } | null>(null);
+  // Duplicate-phone alert: holds the fields returned by find_prospects_by_phone for
+  // the existing prospect already being managed. The match may live outside the
+  // caller's read scope, so we render these fields directly (no re-fetch).
+  const [duplicateProspect, setDuplicateProspect] = useState<{ id: string; name: string; phone: string | null; salesperson: string | null; dealership_id: string; status: string | null } | null>(null);
 
 
   useEffect(() => {
@@ -530,6 +530,16 @@ const DealershipProspectos = () => {
     : isVendedor && profile?.full_name
       ? profile.full_name
       : '';
+
+  // Resolve the salesperson to persist on create/update. RLS Fase 2 enforces a
+  // WITH CHECK requiring salesperson = the vendedor's own name, so a vendedor /
+  // salesperson-linked user must ALWAYS write their own name (never null, never
+  // another vendedor's) or the save is rejected. Admin/concesionario keep the
+  // form selection (with autoSalesperson as fallback, empty -> null).
+  const resolveSalespersonForSave = (): string | null => {
+    if (isVendedor || isSalesperson) return autoSalesperson || profile?.full_name || null;
+    return (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null);
+  };
 
   const BRANDS_LIST = ['GAC', 'DFSK', 'SHINERAY'];
 
@@ -863,26 +873,16 @@ const DealershipProspectos = () => {
     } catch { /* keep the model_interest fallback already set */ }
   };
 
-  type DuplicateProspect = { id: string; name: string; phone: string | null; salesperson: string | null; dealership_id: string };
+  type DuplicateProspect = { id: string; name: string; phone: string | null; salesperson: string | null; dealership_id: string; status: string | null };
 
   const checkDuplicatePhone = async (phone: string): Promise<DuplicateProspect | null> => {
     if (!phone.replace(/\D/g, '')) return null;
-    // Supabase returns max 1000 rows per request; paginate in batches so duplicates
-    // beyond the first 1000 prospects are not missed (the table can hold thousands).
-    const pageSize = 1000;
-    const all: DuplicateProspect[] = [];
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await supabase
-        .from('prospects')
-        .select('id, name, phone, salesperson, dealership_id')
-        .not('phone', 'is', null)
-        .range(from, from + pageSize - 1);
-      if (error || !data || data.length === 0) break;
-      all.push(...(data as DuplicateProspect[]));
-      if (data.length < pageSize) break;
-    }
-    const duplicate = all.find((p) => phonesMatch(p.phone, phone));
-    return duplicate ?? null;
+    // Duplicate detection runs server-side via find_prospects_by_phone: it normalizes
+    // the phone, matches across the caller's allowed scope (RLS-aware, SECURITY DEFINER)
+    // and returns only visible matches — no client-side pagination/scan needed.
+    const { data, error } = await supabase.rpc('find_prospects_by_phone', { p_phone: phone });
+    if (error || !data || data.length === 0) return null;
+    return (data[0] as DuplicateProspect) ?? null;
   };
 
   // Persist a "perdido" transition for a prospect: writes status + loss reason to
@@ -921,7 +921,7 @@ const DealershipProspectos = () => {
         source: pSource || 'concesionario',
         status: pStatus || 'nuevo',
         notes: pNotes.trim() || null,
-        salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
+        salesperson: resolveSalespersonForSave(),
         event_name: pEventName.trim() || null,
         'Estado de Vnzla': pEstadoVzla.trim() || null,
         test_drive: !!pTestDrive,
@@ -986,7 +986,7 @@ const DealershipProspectos = () => {
         source: pSource || 'concesionario',
         status: pStatus || 'nuevo',
         notes: pNotes.trim() || null,
-        salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
+        salesperson: resolveSalespersonForSave(),
         event_name: pEventName.trim() || null,
         'Estado de Vnzla': pEstadoVzla.trim() || null,
         test_drive: !!pTestDrive,
@@ -1066,7 +1066,7 @@ const DealershipProspectos = () => {
           model_interest: unitsToModelInterest(pUnits),
           source: pSource || 'concesionario',
           notes: pNotes.trim() || null,
-          salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
+          salesperson: resolveSalespersonForSave(),
           event_name: pEventName.trim() || null,
           'Estado de Vnzla': pEstadoVzla.trim() || null,
           test_drive: !!pTestDrive,
@@ -1098,7 +1098,7 @@ const DealershipProspectos = () => {
           source: pSource || 'concesionario',
           status: pStatus || 'nuevo',
           notes: pNotes.trim() || null,
-          salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null),
+          salesperson: resolveSalespersonForSave(),
           event_name: pEventName.trim() || null,
           'Estado de Vnzla': pEstadoVzla.trim() || null,
           test_drive: !!pTestDrive,
@@ -2030,12 +2030,19 @@ const DealershipProspectos = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Cliente ya gestionado</AlertDialogTitle>
             <AlertDialogDescription>
-              Este cliente está siendo gestionado por {duplicateProspect?.salesperson?.trim() || 'sin vendedor asignado'}.
+              Ya existe un prospecto registrado con este teléfono, gestionado por {duplicateProspect?.salesperson?.trim() || 'sin vendedor asignado'}.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="rounded-md border bg-muted/40 p-3 text-sm space-y-1">
+            <p><span className="text-muted-foreground">Nombre:</span> {duplicateProspect?.name || '-'}</p>
+            {duplicateProspect?.phone && <p><span className="text-muted-foreground">Teléfono:</span> {duplicateProspect.phone}</p>}
+            <p><span className="text-muted-foreground">Vendedor:</span> {duplicateProspect?.salesperson?.trim() || 'Sin vendedor asignado'}</p>
+            {duplicateProspect?.status && (
+              <p><span className="text-muted-foreground">Estado:</span> {PROSPECT_STATUSES.find(s => s.name === duplicateProspect.status)?.label || duplicateProspect.status}</p>
+            )}
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cerrar</AlertDialogCancel>
-            <AlertDialogAction onClick={viewDuplicateProspect} className="gac-gradient">Ver</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
