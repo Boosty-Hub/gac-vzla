@@ -892,7 +892,7 @@ export type Database = {
       }
       get_taken_reservation_times: {
         Args: { p_dealership_id: string; p_date: string }
-        Returns: { reservation_time: string }[]
+        Returns: { reservation_time: string; service_type: string }[]
       }
       create_public_reservation: {
         Args: {
