@@ -375,14 +375,16 @@ const DealershipProspectos = () => {
     if (!selectedDealership) return;
     setLoading(true);
 
-    // Determine the salesperson name to filter by:
+    // Determine the salesperson name to filter by. This restriction only applies to the
+    // `vendedor` role (RLS-enforced, single-salesperson view). A `concesionario`/gerente
+    // user who is ALSO linked to a `salespersons` record (so they can be assigned leads of
+    // their own) must NOT be narrowed down to only their own leads — they keep full
+    // dealership visibility (req #5: gerentes manage their own leads + their team's).
     // 1. Linked salespersons record takes priority
     // 2. Fallback: Vendedor role user uses their profile full_name
-    const salespersonName = isSalesperson && currentSalesperson
-      ? currentSalesperson.name
-      : isVendedor && profile?.full_name
-        ? profile.full_name
-        : null;
+    const salespersonName = isVendedor
+      ? (currentSalesperson?.name || profile?.full_name || null)
+      : null;
 
     // Supabase devuelve máx. 1000 filas por request; traemos TODOS en lotes para que
     // los filtros (evento, etc.) no pierdan registros cuando el concesionario supere 1000.
@@ -532,12 +534,14 @@ const DealershipProspectos = () => {
       : '';
 
   // Resolve the salesperson to persist on create/update. RLS Fase 2 enforces a
-  // WITH CHECK requiring salesperson = the vendedor's own name, so a vendedor /
-  // salesperson-linked user must ALWAYS write their own name (never null, never
-  // another vendedor's) or the save is rejected. Admin/concesionario keep the
-  // form selection (with autoSalesperson as fallback, empty -> null).
+  // WITH CHECK (role = 'vendedor') requiring salesperson = the vendedor's own name, so a
+  // vendedor user must ALWAYS write their own name (never null, never another vendedor's)
+  // or the save is rejected. Admin/concesionario (including a gerente who is ALSO linked
+  // to a `salespersons` record so they can carry their own leads — req #5) keep the form
+  // selection, defaulting to autoSalesperson (their own name) but freely reassignable to
+  // any salesperson on the team.
   const resolveSalespersonForSave = (): string | null => {
-    if (isVendedor || isSalesperson) return autoSalesperson || profile?.full_name || null;
+    if (isVendedor) return autoSalesperson || profile?.full_name || null;
     return (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null);
   };
 
@@ -1018,7 +1022,7 @@ const DealershipProspectos = () => {
     }
     const missing: string[] = [];
     if (!pUnits.some(u => u.brand.trim())) missing.push('Modelo de interés');
-    if (!isSalesperson && !isVendedor && (!pSalesperson || pSalesperson === '__none')) missing.push('Vendedor');
+    if (!isVendedor && (!pSalesperson || pSalesperson === '__none')) missing.push('Vendedor');
     if (missing.length > 0) {
       setMissingFields(missing);
       setConfirmOpen(true);
@@ -1187,7 +1191,7 @@ const DealershipProspectos = () => {
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold truncate">{p.name}</p>
-                {!isSalesperson && p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
+                {!isVendedor && p.salesperson && <p className="text-[11px] text-muted-foreground">Vendedor: {p.salesperson}</p>}
               </div>
             </div>
             {canEdit ? (
@@ -1506,7 +1510,7 @@ const DealershipProspectos = () => {
                   {visibleCols.has('estadovzla') && <TableHead>Estado Vzla</TableHead>}
                   {visibleCols.has('marca') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('model_interest')}>Marca<SortIcon field="model_interest" /></TableHead>}
                   {visibleCols.has('modelo') && <TableHead>Modelo</TableHead>}
-                  {!isSalesperson && !isVendedor && visibleCols.has('vendedor') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('salesperson')}>Vendedor<SortIcon field="salesperson" /></TableHead>}
+                  {!isVendedor && visibleCols.has('vendedor') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('salesperson')}>Vendedor<SortIcon field="salesperson" /></TableHead>}
                   {visibleCols.has('fuente') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('source')}>Fuente<SortIcon field="source" /></TableHead>}
                   {(visibleCols.has('evento') || eventNameFilter !== 'todos') && <TableHead>Evento</TableHead>}
                   {visibleCols.has('estado') && <TableHead className="cursor-pointer select-none hover:text-foreground" onClick={() => toggleSort('status')}>Estado<SortIcon field="status" /></TableHead>}
@@ -1541,7 +1545,7 @@ const DealershipProspectos = () => {
                       {visibleCols.has('estadovzla') && <TableCell className="text-muted-foreground">{p['Estado de Vnzla'] || '-'}</TableCell>}
                       {visibleCols.has('marca') && <TableCell>{(() => { const brand = getProspectUnits(p)[0]?.brand; return brand ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{brand}</Badge> : '-'; })()}</TableCell>}
                       {visibleCols.has('modelo') && <TableCell>{(() => { const units = getProspectUnits(p); const primary = units[0]; const extra = units.length - 1; return (<div className="flex items-center gap-1"><span>{primary ? (primary.model || '-') : '-'}</span>{extra > 0 && <Badge variant="secondary" className="text-[9px] px-1 py-0 font-medium leading-tight" title={units.map(u => `${u.brand} ${u.model}`.trim()).join(', ')}>+{extra}</Badge>}</div>); })()}</TableCell>}
-                      {!isSalesperson && !isVendedor && visibleCols.has('vendedor') && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
+                      {!isVendedor && visibleCols.has('vendedor') && <TableCell className="text-muted-foreground">{p.salesperson || '-'}</TableCell>}
                       {visibleCols.has('fuente') && (
                         <TableCell>
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0 w-fit capitalize">
@@ -1752,7 +1756,10 @@ const DealershipProspectos = () => {
                   </Select>
                 </div>
               )}
-              {autoSalesperson ? (
+              {isVendedor && autoSalesperson ? (
+                // Locked to own name only for the actual vendedor role. A concesionario/gerente
+                // who is also linked to a `salespersons` record (req #5) keeps the editable
+                // dropdown below, defaulting to their own name but reassignable to their team.
                 <div className="space-y-1">
                   <Label className="text-xs">Vendedor</Label>
                   <div className="h-9 flex items-center px-3 rounded-md border bg-muted text-xs font-medium text-muted-foreground">
@@ -1922,7 +1929,7 @@ const DealershipProspectos = () => {
                   );
                 })()}
                 <Field label="Estado Vzla" icon={MapPin} value={detailProspect['Estado de Vnzla']} />
-                {!isSalesperson && <Field label="Vendedor" icon={User} value={detailProspect.salesperson} />}
+                {!isVendedor && <Field label="Vendedor" icon={User} value={detailProspect.salesperson} />}
                 <Field label="Fuente" icon={Tag}>
                   <Badge variant="outline" className="text-xs capitalize">{src?.label || detailProspect.source}</Badge>
                 </Field>
@@ -2156,7 +2163,7 @@ const DealershipProspectos = () => {
               onClick={() => { setBulkAction('eventName'); setBulkValue(''); }}>
               <CalendarDays className="w-3 h-3" /> Evento
             </Button>
-            {!isSalesperson && !isVendedor && (
+            {!isVendedor && (
               <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
                 onClick={() => { setBulkAction('salesperson'); setBulkValue(''); }}>
                 <User className="w-3 h-3" /> Vendedor

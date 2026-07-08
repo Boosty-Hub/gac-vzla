@@ -141,8 +141,13 @@ const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
 
 const DealershipPanel = () => {
   const navigate = useNavigate();
-  const { signOut } = useAuth();
-  const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
+  const { signOut, role, profile } = useAuth();
+  const { salesperson: currentSalesperson } = useCurrentSalesperson();
+  // req #5: the own-leads-only restriction (and the hidden "Vendedores" tab) must only
+  // apply to the actual `vendedor` role. A concesionario/gerente who is ALSO linked to a
+  // `salespersons` record (so they can carry leads of their own) keeps full dealership
+  // visibility — mirrors the fix in DealershipProspectos.tsx.
+  const isVendedor = role?.name?.toLowerCase() === 'vendedor';
 
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [selectedDealership, setSelectedDealership] = useState<string>('');
@@ -325,7 +330,7 @@ const DealershipPanel = () => {
   useEffect(() => {
     if (selectedDealership) {
       fetchReservations();
-      fetchProspects(isSalesperson ? currentSalesperson?.name : null);
+      fetchProspects(isVendedor ? (currentSalesperson?.name || profile?.full_name || null) : null);
       fetchVendedores(selectedDealership);
     }
   }, [selectedDealership, currentSalesperson]);
@@ -735,7 +740,7 @@ const DealershipPanel = () => {
           <TabsList className="bg-muted">
             <TabsTrigger value="reservas">Reservas ({reservations.length})</TabsTrigger>
             <TabsTrigger value="prospectos">Prospectos ({prospects.length})</TabsTrigger>
-            {!isSalesperson && <TabsTrigger value="vendedores">Vendedores ({vendedores.length})</TabsTrigger>}
+            {!isVendedor && <TabsTrigger value="vendedores">Vendedores ({vendedores.length})</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="reservas" className="space-y-3">
@@ -956,7 +961,7 @@ const DealershipPanel = () => {
             </Card>
           </TabsContent>
 
-          {!isSalesperson && (
+          {!isVendedor && (
             <TabsContent value="vendedores" className="space-y-3">
               <div className="flex items-center gap-3">
                 <h2 className="text-lg font-display font-bold">Vendedores</h2>
