@@ -7,6 +7,7 @@ const CF = {
   salesperson:             3193866,
   notes:                   3192402,
   estado_vzla:             3204218,
+  payment_modality:        3455739,  // "Modalidad de Pago" (select)
   event_name:              3448828,
   fuente:                  2988728,
   marca:                   2988724,
@@ -18,8 +19,8 @@ const CF = {
 
 const CONTACT_CF = {
   tipo_persona: 2988986,
-  genero:       3451546,
-  rango_edad:   3451548,
+  genero:       3455737,  // "Género" (select)
+  rango_edad:   3455741,  // "Rango de edad" (select)
 }
 
 const KOMMO_TO_SOURCE: Record<string, string> = {
@@ -49,6 +50,22 @@ const KOMMO_TO_BRAND: Record<number, string> = {
 const KOMMO_TO_PERSON_TYPE: Record<number, string> = {
   7832512: 'natural',
   7832514: 'juridica',
+}
+// Payment modality (Kommo lead CF 3455739, select) → GAC value
+const KOMMO_TO_PAYMENT_MODALITY: Record<number, string> = {
+  8167755: 'Contado',        // "Pago de Contado" in Kommo
+  8167753: 'Financiamiento',
+}
+// Gender (Kommo contact CF 3455737, select) → GAC value (lowercase)
+const KOMMO_TO_GENDER: Record<number, string> = {
+  8167751: 'masculino',
+  8167749: 'femenino',
+}
+// Age range (Kommo contact CF 3455741, select) → GAC value
+const KOMMO_TO_AGE_RANGE: Record<number, string> = {
+  8167757: '20-30',
+  8167759: '30-40',
+  8167761: '40+',
 }
 
 const K_GAC = { EMPOW: 8148533, EMZOOM: 8148535, GS8: 8148537, SMILODON: 8148539 }
@@ -93,6 +110,49 @@ function normEventName(s: string): string {
 function eventNameToKommoEnumId(eventName: string): number | null {
   if (!eventName) return null
   return EVENT_NAME_TO_ENUM_ID[normEventName(eventName)] ?? null
+}
+
+// Dynamic outbound resolver: events are authored in Kommo. If the name isn't in the
+// static snapshot above, fetch the live enum options of CF "Nombre del Evento" and
+// match by normalized label, so events created ONLY in Kommo resolve outbound without
+// a code change/redeploy. The static map stays as a fast path / offline fallback.
+async function resolveEventEnumId(
+  eventName: string,
+  baseUrl: string,
+  authHeaders: Record<string, string>,
+): Promise<number | null> {
+  if (!eventName) return null
+  const norm = normEventName(eventName)
+  const cached = EVENT_NAME_TO_ENUM_ID[norm]
+  if (cached) return cached
+  try {
+    const res = await fetch(`${baseUrl}/leads/custom_fields/${CF.event_name}`, { headers: authHeaders })
+    if (!res.ok) return null
+    const field = await res.json() as { enums?: Array<{ id: number; value: string }> }
+    for (const e of field.enums || []) {
+      if (normEventName(String(e.value)) === norm) return e.id
+    }
+  } catch (_) { /* ignore — fall through to null */ }
+  return null
+}
+
+// Inbound auto-provision: when a Kommo lead brings an event GAC doesn't have yet,
+// create it in prospect_events (idempotent by normalized name) so it appears in the
+// GAC selector and future prospects match by the exact same label. Single source of
+// truth = Kommo; the event never needs to be created by hand in two places.
+async function ensureProspectEvent(
+  supabase: ReturnType<typeof createClient>,
+  eventName: string | null | undefined,
+): Promise<void> {
+  const name = String(eventName || '').trim()
+  if (!name) return
+  try {
+    const norm = normEventName(name)
+    const { data } = await supabase.from('prospect_events').select('name')
+    const rows = (data as Array<{ name: string }> | null) || []
+    if (rows.some(r => normEventName(String(r.name)) === norm)) return
+    await supabase.from('prospect_events').insert({ name, is_active: true })
+  } catch (_) { /* non-fatal: never break the sync over a selector row */ }
 }
 
 const PERSON_TYPE_TO_KOMMO: Record<string, number> = {
@@ -544,12 +604,18 @@ async function syncFieldsFromKommo(
   const estadoVzla = getCFText(cfValues, CF.estado_vzla)
   if (estadoVzla !== null && estadoVzla !== prospect['Estado de Vnzla']) updates['Estado de Vnzla'] = estadoVzla
 
-  // Event name: only fill if GAC doesn't have an event yet.
-  // GAC has more events than Kommo's enum list — never overwrite a GAC value with Kommo's
-  // (Kommo would revert it back because it can't represent GAC-only events as enums).
-  if (!prospect.event_name) {
-    const eventName = getCFText(cfValues, CF.event_name)
-    if (eventName) updates.event_name = eventName
+  const paymentEnumId = getCFEnum(cfValues, CF.payment_modality)
+  if (paymentEnumId !== null && KOMMO_TO_PAYMENT_MODALITY[paymentEnumId] && KOMMO_TO_PAYMENT_MODALITY[paymentEnumId] !== prospect.payment_modality) {
+    updates.payment_modality = KOMMO_TO_PAYMENT_MODALITY[paymentEnumId]
+  }
+
+  // Event name: Kommo is the source of truth for events. Auto-provision the event in
+  // GAC's prospect_events selector if it's new, then fill the prospect's event only if
+  // it doesn't have one yet (don't clobber a GAC value on every sync).
+  const kommoEvent = getCFText(cfValues, CF.event_name)
+  if (kommoEvent) {
+    await ensureProspectEvent(supabase, kommoEvent)
+    if (!prospect.event_name) updates.event_name = kommoEvent
   }
 
   // Source (select → text)
@@ -610,16 +676,17 @@ async function syncFieldsFromKommo(
         if (personType && personType !== prospect.person_type) updates.person_type = personType
       }
 
-      // Género (text, lowercase to match GAC values)
-      const genero = getCFText(contactCFs, CONTACT_CF.genero)
-      if (genero !== null) {
-        const generoLower = genero.toLowerCase()
-        if (generoLower !== prospect.gender) updates.gender = generoLower
+      // Género (enum → 'masculino'/'femenino' to match GAC values)
+      const generoEnumId = getCFEnum(contactCFs, CONTACT_CF.genero)
+      if (generoEnumId !== null && KOMMO_TO_GENDER[generoEnumId] && KOMMO_TO_GENDER[generoEnumId] !== prospect.gender) {
+        updates.gender = KOMMO_TO_GENDER[generoEnumId]
       }
 
-      // Rango de edad (text — must match constraint values)
-      const rangoEdad = sanitizeAgeRange(getCFText(contactCFs, CONTACT_CF.rango_edad))
-      if (rangoEdad !== null && rangoEdad !== prospect.age_range) updates.age_range = rangoEdad
+      // Rango de edad (enum → GAC value like '20-30'/'30-40'/'40+')
+      const ageEnumId = getCFEnum(contactCFs, CONTACT_CF.rango_edad)
+      if (ageEnumId !== null && KOMMO_TO_AGE_RANGE[ageEnumId] && KOMMO_TO_AGE_RANGE[ageEnumId] !== prospect.age_range) {
+        updates.age_range = KOMMO_TO_AGE_RANGE[ageEnumId]
+      }
 
       // Nombre de empresa (company_name on the contact)
       const cName = (contactData.company_name as string | null) ?? null
@@ -671,7 +738,7 @@ async function syncFieldsToKommo(
   addVal(CF.salesperson, prospect.salesperson)
   addVal(CF.notes, prospect.notes)
   addVal(CF.estado_vzla, prospect['Estado de Vnzla'])
-  addEnum(CF.event_name, eventNameToKommoEnumId(String(prospect.event_name || '')))
+  addEnum(CF.event_name, await resolveEventEnumId(String(prospect.event_name || ''), baseUrl, authHeaders))
   addEnum(CF.fuente, SOURCE_TO_KOMMO[prospect.source] ?? null)
 
   const parts = ((prospect.model_interest as string) || '').split(' ')
@@ -1032,10 +1099,11 @@ async function autoCreateProspectFromKommo(
         const ptEnumId = getCFEnum(cfs, CONTACT_CF.tipo_persona)
         if (ptEnumId) personType = KOMMO_TO_PERSON_TYPE[ptEnumId] ?? null
 
-        const generoVal = getCFText(cfs, CONTACT_CF.genero)
-        if (generoVal) gender = generoVal.toLowerCase()
+        const generoEnumId = getCFEnum(cfs, CONTACT_CF.genero)
+        if (generoEnumId && KOMMO_TO_GENDER[generoEnumId]) gender = KOMMO_TO_GENDER[generoEnumId]
 
-        ageRange = sanitizeAgeRange(getCFText(cfs, CONTACT_CF.rango_edad))
+        const ageEnumId = getCFEnum(cfs, CONTACT_CF.rango_edad)
+        ageRange = ageEnumId ? (KOMMO_TO_AGE_RANGE[ageEnumId] ?? null) : null
         // company_name text field on the contact (fallback)
         companyName = (contactData.company_name as string | null) ?? null
       } catch { /* ignore */ }
@@ -1062,8 +1130,11 @@ async function autoCreateProspectFromKommo(
   const salesperson = getCFText(cfValues, CF.salesperson) || getCFText(cfValues, 2988736)
   const notes = getCFText(cfValues, CF.notes)
   const estadoVzla = getCFText(cfValues, CF.estado_vzla)
+  const paymentEnumId = getCFEnum(cfValues, CF.payment_modality)
+  const paymentModality = paymentEnumId ? (KOMMO_TO_PAYMENT_MODALITY[paymentEnumId] ?? null) : null
 
   const eventName = getCFText(cfValues, CF.event_name)
+  if (eventName) await ensureProspectEvent(supabase, eventName)
 
   const sourceEnumId = getCFEnum(cfValues, CF.fuente)
   const source = sourceEnumId ? (KOMMO_TO_SOURCE[String(sourceEnumId)] || 'concesionario') : 'concesionario'
@@ -1093,6 +1164,7 @@ async function autoCreateProspectFromKommo(
     ...(salesperson && { salesperson }),
     ...(notes && { notes }),
     ...(estadoVzla && { 'Estado de Vnzla': estadoVzla }),
+    ...(paymentModality && { payment_modality: paymentModality }),
     ...(eventName && { event_name: eventName }),
     ...(modelInterest && { model_interest: modelInterest }),
     ...(dealershipId && { dealership_id: dealershipId }),

@@ -12,7 +12,7 @@ const CF = {
   salesperson:             3193866,
   notes:                   3192402,
   estado_vzla:             3204218,
-  payment_modality:        3455411,  // "Modalidad de Pago" (text)
+  payment_modality:        3455739,  // "Modalidad de Pago" (select)
   event_name:              3448828,  // "Nombre del Evento" (select)
   fuente:                  2988728,
   marca:                   2988724,
@@ -25,8 +25,8 @@ const CF = {
 // ─── Contact custom field IDs in Kommo ───────────────────────────────────────
 const CONTACT_CF = {
   tipo_persona:    2988986,
-  genero:          3451546,
-  rango_edad:      3451548,
+  genero:          3455737,  // "Género" (select)
+  rango_edad:      3455741,  // "Rango de edad" (select)
   ci_rif:          2988990,  // C.I - RIF
   estado:          3076676,  // Estado (Venezuela state)
   modelo_vehiculo: 3454795,  // Modelo de vehículo (Post Venta mirror)
@@ -102,6 +102,49 @@ function eventNameToKommoEnumId(eventName: string): number | null {
   return EVENT_NAME_TO_ENUM_ID[normEventName(eventName)] ?? null
 }
 
+// Dynamic outbound resolver: events are authored in Kommo. If the name isn't in the
+// static snapshot above, fetch the live enum options of CF "Nombre del Evento" and
+// match by normalized label, so events created ONLY in Kommo resolve outbound without
+// a code change/redeploy. The static map stays as a fast path / offline fallback.
+async function resolveEventEnumId(
+  eventName: string,
+  baseUrl: string,
+  authHeaders: Record<string, string>,
+): Promise<number | null> {
+  if (!eventName) return null
+  const norm = normEventName(eventName)
+  const cached = EVENT_NAME_TO_ENUM_ID[norm]
+  if (cached) return cached
+  try {
+    const res = await fetch(`${baseUrl}/leads/custom_fields/${CF.event_name}`, { headers: authHeaders })
+    if (!res.ok) return null
+    const field = await res.json() as { enums?: Array<{ id: number; value: string }> }
+    for (const e of field.enums || []) {
+      if (normEventName(String(e.value)) === norm) return e.id
+    }
+  } catch (_) { /* ignore — fall through to null */ }
+  return null
+}
+
+// Inbound auto-provision: when a Kommo lead brings an event GAC doesn't have yet,
+// create it in prospect_events (idempotent by normalized name) so it appears in the
+// GAC selector and future prospects match by the exact same label. Single source of
+// truth = Kommo; the event never needs to be created by hand in two places.
+async function ensureProspectEvent(
+  supabase: ReturnType<typeof createClient>,
+  eventName: string | null | undefined,
+): Promise<void> {
+  const name = String(eventName || '').trim()
+  if (!name) return
+  try {
+    const norm = normEventName(name)
+    const { data } = await supabase.from('prospect_events').select('name')
+    const rows = (data as Array<{ name: string }> | null) || []
+    if (rows.some(r => normEventName(String(r.name)) === norm)) return
+    await supabase.from('prospect_events').insert({ name, is_active: true })
+  } catch (_) { /* non-fatal: never break the sync over a selector row */ }
+}
+
 // ─── Person type mappings (on Kommo contact CF 2988986) ───────────────────────
 const PERSON_TYPE_TO_KOMMO: Record<string, number> = {
   natural:  7832512,
@@ -110,6 +153,40 @@ const PERSON_TYPE_TO_KOMMO: Record<string, number> = {
 const KOMMO_TO_PERSON_TYPE: Record<number, string> = {
   7832512: 'natural',
   7832514: 'juridica',
+}
+
+// ─── Payment modality mappings (Kommo lead CF 3455739, select) ───────────────
+const PAYMENT_MODALITY_TO_KOMMO: Record<string, number> = {
+  contado:        8167755,  // "Pago de Contado" in Kommo
+  financiamiento: 8167753,
+}
+const KOMMO_TO_PAYMENT_MODALITY: Record<number, string> = {
+  8167755: 'Contado',
+  8167753: 'Financiamiento',
+}
+const paymentModalityToKommo = (v: unknown): number | null =>
+  PAYMENT_MODALITY_TO_KOMMO[String(v ?? '').toLowerCase().trim()] ?? null
+
+// ─── Gender mappings (Kommo contact CF 3455737, select) ──────────────────────
+const GENDER_TO_KOMMO: Record<string, number> = {
+  masculino: 8167751,
+  femenino:  8167749,
+}
+const KOMMO_TO_GENDER: Record<number, string> = {
+  8167751: 'masculino',
+  8167749: 'femenino',
+}
+
+// ─── Age range mappings (Kommo contact CF 3455741, select) ───────────────────
+const AGE_RANGE_TO_KOMMO: Record<string, number> = {
+  '20-30': 8167757,
+  '30-40': 8167759,
+  '40+':   8167761,
+}
+const KOMMO_TO_AGE_RANGE: Record<number, string> = {
+  8167757: '20-30',
+  8167759: '30-40',
+  8167761: '40+',
 }
 
 // ─── Kommo enum IDs para campos de modelo por marca ──────────────────────────
@@ -386,7 +463,7 @@ function vendedorToKommoId(name: string | null): number | null {
 }
 
 // ─── Build lead custom_fields_values for Kommo ────────────────────────────────
-function buildCustomFields(prospect: Record<string, unknown>, dealershipName?: string) {
+function buildCustomFields(prospect: Record<string, unknown>, dealershipName?: string, eventEnumId?: number | null) {
   const fields: unknown[] = []
   const addText = (field_id: number, value: unknown) => {
     if (value !== null && value !== undefined && value !== '') {
@@ -404,10 +481,11 @@ function buildCustomFields(prospect: Record<string, unknown>, dealershipName?: s
   addText(CF.salesperson, prospect.salesperson)
   addText(CF.notes, prospect.notes)
   addText(CF.estado_vzla, prospect['Estado de Vnzla'])
-  addText(CF.payment_modality, prospect.payment_modality)
+  addEnum(CF.payment_modality, paymentModalityToKommo(prospect.payment_modality))
 
-  // event_name → select enum (CF 3448828)
-  addEnum(CF.event_name, eventNameToKommoEnumId(String(prospect.event_name || '')))
+  // event_name → select enum (CF 3448828). Prefer the dynamically-resolved enum passed
+  // by the caller (live Kommo options); fall back to the static snapshot if not provided.
+  addEnum(CF.event_name, eventEnumId !== undefined ? eventEnumId : eventNameToKommoEnumId(String(prospect.event_name || '')))
 
   // source → Fuente select
   addEnum(CF.fuente, SOURCE_TO_KOMMO[prospect.source as string] ?? null)
@@ -438,12 +516,13 @@ function buildContactCustomFields(prospect: Record<string, unknown>) {
   if (personTypeEnum !== null) {
     fields.push({ field_id: CONTACT_CF.tipo_persona, values: [{ enum_id: personTypeEnum }] })
   }
-  if (prospect.gender) {
-    const g = String(prospect.gender)
-    fields.push({ field_id: CONTACT_CF.genero, values: [{ value: g.charAt(0).toUpperCase() + g.slice(1) }] })
+  const genderEnum = GENDER_TO_KOMMO[String(prospect.gender ?? '').toLowerCase().trim()] ?? null
+  if (genderEnum !== null) {
+    fields.push({ field_id: CONTACT_CF.genero, values: [{ enum_id: genderEnum }] })
   }
-  if (prospect.age_range) {
-    fields.push({ field_id: CONTACT_CF.rango_edad, values: [{ value: prospect.age_range }] })
+  const ageEnum = AGE_RANGE_TO_KOMMO[String(prospect.age_range ?? '').trim()] ?? null
+  if (ageEnum !== null) {
+    fields.push({ field_id: CONTACT_CF.rango_edad, values: [{ enum_id: ageEnum }] })
   }
   if (prospect.cedula) {
     fields.push({ field_id: CONTACT_CF.ci_rif, values: [{ value: prospect.cedula }] })
@@ -562,8 +641,14 @@ async function syncFromKommo(
   if (!prospect['Estado de Vnzla']) {
     const v = extractCFText(cfValues, CF.estado_vzla); if (v) updates['Estado de Vnzla'] = v
   }
-  if (!prospect.event_name) {
-    const v = extractCFText(cfValues, CF.event_name); if (v) updates.event_name = v
+  if (!prospect.payment_modality) {
+    const enumId = extractCFEnumId(cfValues, CF.payment_modality)
+    if (enumId && KOMMO_TO_PAYMENT_MODALITY[enumId]) updates.payment_modality = KOMMO_TO_PAYMENT_MODALITY[enumId]
+  }
+  const kommoEvent = extractCFText(cfValues, CF.event_name)
+  if (kommoEvent) {
+    await ensureProspectEvent(supabase, kommoEvent)
+    if (!prospect.event_name) updates.event_name = kommoEvent
   }
   if (!prospect.source || prospect.source === 'concesionario') {
     const enumId = extractCFEnumId(cfValues, CF.fuente)
@@ -575,6 +660,33 @@ async function syncFromKommo(
       const brandName = KOMMO_TO_BRAND[brandEnumId]
       const modelName = extractModelFromKommoFields(cfValues, brandName)
       updates.model_interest = modelName ? `${brandName} ${modelName}` : brandName
+    }
+  }
+
+  // person_type / gender / age_range live on the CONTACT, not the lead — fetch it separately.
+  if (!prospect.person_type || !prospect.gender || !prospect.age_range) {
+    const contacts = ((lead._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>) || []
+    if (contacts[0]?.id) {
+      const contactRes = await fetch(`${baseUrl}/contacts/${contacts[0].id}?with=custom_fields`, { headers: authHeaders })
+      if (contactRes.ok) {
+        const contactData = await contactRes.json() as Record<string, unknown>
+        const contactCFs = (contactData.custom_fields_values as CFValue[]) || []
+
+        if (!prospect.person_type) {
+          const personTypeEnumId = extractCFEnumId(contactCFs, CONTACT_CF.tipo_persona)
+          if (personTypeEnumId && KOMMO_TO_PERSON_TYPE[personTypeEnumId]) {
+            updates.person_type = KOMMO_TO_PERSON_TYPE[personTypeEnumId]
+          }
+        }
+        if (!prospect.gender) {
+          const generoEnumId = extractCFEnumId(contactCFs, CONTACT_CF.genero)
+          if (generoEnumId && KOMMO_TO_GENDER[generoEnumId]) updates.gender = KOMMO_TO_GENDER[generoEnumId]
+        }
+        if (!prospect.age_range) {
+          const ageEnumId = extractCFEnumId(contactCFs, CONTACT_CF.rango_edad)
+          if (ageEnumId && KOMMO_TO_AGE_RANGE[ageEnumId]) updates.age_range = KOMMO_TO_AGE_RANGE[ageEnumId]
+        }
+      }
     }
   }
 
@@ -623,8 +735,8 @@ async function syncToKommo(
   addIfEmpty(CF.salesperson, prospect.salesperson)
   addIfEmpty(CF.notes, prospect.notes)
   addIfEmpty(CF.estado_vzla, prospect['Estado de Vnzla'])
-  addIfEmpty(CF.payment_modality, prospect.payment_modality)
-  addEnumIfEmpty(CF.event_name, eventNameToKommoEnumId(String(prospect.event_name || '')))
+  addEnumIfEmpty(CF.payment_modality, paymentModalityToKommo(prospect.payment_modality))
+  addEnumIfEmpty(CF.event_name, await resolveEventEnumId(String(prospect.event_name || ''), baseUrl, authHeaders))
   addEnumIfEmpty(CF.fuente, SOURCE_TO_KOMMO[prospect.source] ?? null)
 
   const parts = ((prospect.model_interest as string) || '').split(' ')
@@ -750,7 +862,8 @@ Deno.serve(async (req) => {
 
       const stageId = (config.stage_mappings as Record<string, number>)['por_contactar']
       const dealershipName = (prospect.dealerships as { name: string })?.name || ''
-      const customFields = buildCustomFields(prospect, dealershipName)
+      const eventEnumId = await resolveEventEnumId(String(prospect.event_name || ''), baseUrl, authHeaders)
+      const customFields = buildCustomFields(prospect, dealershipName, eventEnumId)
 
       const contactFields: unknown[] = []
       if (prospect.phone) contactFields.push({ field_code: 'PHONE', values: [{ value: prospect.phone, enum_code: 'WORK' }] })
@@ -946,7 +1059,8 @@ Deno.serve(async (req) => {
       if (!prospect) throw new Error('Prospecto no encontrado')
 
       const dealershipName = (prospect.dealerships as { name: string })?.name || ''
-      const leadCFs = buildCustomFields(prospect, dealershipName)
+      const eventEnumId = await resolveEventEnumId(String(prospect.event_name || ''), baseUrl, authHeaders)
+      const leadCFs = buildCustomFields(prospect, dealershipName, eventEnumId)
       const contactCFs = buildContactCustomFields(prospect)
 
       // Log immediately so we know the action was invoked even if Kommo API fails
@@ -1868,14 +1982,17 @@ Deno.serve(async (req) => {
       })
     }
 
-    // ── Push the dealership phone to its Kommo contact (call after editing it) ──
+    // ── Mirror the dealership (name + phone) onto its Kommo notification contact ──
+    //    GAC is the source of truth: call this after creating/editing a dealership so
+    //    Kommo reflects GAC. Auto-provisions the contact + notification lead if missing,
+    //    and keeps the lead title aligned with the dealership name.
     if (action === 'sync_dealership_contact') {
       const dealershipId = body.dealership_id
       if (!dealershipId) throw new Error('Falta dealership_id')
 
       const { data: d } = await supabase
         .from('dealerships')
-        .select('id, name, phone, kommo_contact_id')
+        .select('id, name, phone, kommo_contact_id, kommo_notification_lead_id')
         .eq('id', dealershipId)
         .single()
 
@@ -1885,33 +2002,77 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
-      // No Kommo contact yet → it will be created with the current phone on the first
-      // reservation / precreate, so there is nothing to sync here.
-      if (!d.kommo_contact_id) {
-        return new Response(JSON.stringify({ skipped: true, reason: 'sin contacto en Kommo aún' }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+
+      const normalizedPhone = normalizeVzPhone(d.phone)
+      const dealName = String(d.name || '')
+      let contactId = (d.kommo_contact_id as number | null) ?? null
+      let leadId = (d.kommo_notification_lead_id as number | null) ?? null
+      let createdContact = false, createdLead = false
+
+      if (!contactId) {
+        // Provision the notification contact with GAC's name + phone
+        const createContactRes = await fetch(`${baseUrl}/contacts`, {
+          method: 'POST', headers: authHeaders,
+          body: JSON.stringify([{
+            name: dealName,
+            custom_fields_values: [{ field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] }],
+          }]),
+        })
+        const cData = await createContactRes.json() as Record<string, unknown>
+        contactId = ((cData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>)?.[0]?.id ?? null
+        createdContact = true
+      } else {
+        // Enforce GAC's name + phone onto the existing contact
+        await fetch(`${baseUrl}/contacts/${contactId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({
+            name: dealName,
+            custom_fields_values: [{ field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] }],
+          }),
         })
       }
 
-      const normalizedPhone = normalizeVzPhone(d.phone)
-      const patchRes = await fetch(`${baseUrl}/contacts/${d.kommo_contact_id}`, {
-        method: 'PATCH', headers: authHeaders,
-        body: JSON.stringify({
-          custom_fields_values: [
-            { field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] },
-          ],
-        }),
-      })
+      if (contactId && !leadId) {
+        // Provision the persistent notification lead in the Post Venta pipeline
+        const createRes = await fetch(`${baseUrl}/leads/complex`, {
+          method: 'POST', headers: authHeaders,
+          body: JSON.stringify([{
+            name: dealName, pipeline_id: POSTVENTA_PIPELINE_ID, status_id: 107696308,
+            _embedded: { contacts: [{ id: contactId }], tags: [{ name: 'Notificación Concesionario' }] },
+          }]),
+        })
+        const cd = await createRes.json() as Array<{ id: number }>
+        leadId = cd?.[0]?.id ?? null
+        createdLead = true
+      } else if (leadId) {
+        // Keep the notification lead title aligned with the dealership name
+        await fetch(`${baseUrl}/leads/${leadId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({ name: dealName }),
+        }).catch(() => {})
+      }
+
+      if (createdContact || createdLead) {
+        await supabase.from('dealerships').update({
+          kommo_contact_id: contactId, kommo_notification_lead_id: leadId,
+        }).eq('id', d.id)
+      }
 
       await supabase.from('integration_logs').insert({
         integration_name: 'kommo',
         event_type: 'sync_dealership_contact',
-        status: patchRes.ok ? 'success' : 'error',
-        details: { dealership_id: d.id, contact_id: d.kommo_contact_id, phone: normalizedPhone },
+        status: contactId ? 'success' : 'error',
+        details: {
+          dealership_id: d.id, contact_id: contactId, lead_id: leadId,
+          name: dealName, phone: normalizedPhone,
+          created_contact: createdContact, created_lead: createdLead,
+        },
       })
 
       return new Response(JSON.stringify({
-        success: patchRes.ok, contact_id: d.kommo_contact_id, phone: normalizedPhone,
+        success: !!contactId, contact_id: contactId, lead_id: leadId,
+        name: dealName, phone: normalizedPhone,
+        created_contact: createdContact, created_lead: createdLead,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
