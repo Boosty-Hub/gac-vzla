@@ -16,6 +16,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { extractEdgeError } from '@/lib/edgeError';
 
 interface ProfileWithRole {
   id: string;
@@ -234,7 +235,7 @@ const AdminUsuarios = () => {
       });
 
       if (error) {
-        toast.error(error.message || 'Error al crear usuario');
+        toast.error(await extractEdgeError(error, 'Error al crear usuario'));
       } else if (data?.error) {
         toast.error(data.error);
       } else {

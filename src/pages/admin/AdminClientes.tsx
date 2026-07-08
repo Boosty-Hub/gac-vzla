@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator';
 import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { extractEdgeError } from '@/lib/edgeError';
 import { isRecurrentClient } from '@/lib/recompra';
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
@@ -430,7 +431,7 @@ const AdminClientes = () => {
       });
 
       if (error) {
-        toast.error(error.message || 'Error al crear usuario');
+        toast.error(await extractEdgeError(error, 'Error al crear usuario'));
       } else if (data?.error) {
         toast.error(data.error);
       } else {
