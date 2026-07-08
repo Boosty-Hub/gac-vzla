@@ -182,11 +182,13 @@ const AdminConcesionarios = () => {
         toast.success('Concesionario actualizado');
         setDialogOpen(false);
         fetchDealerships();
-        // Keep the Kommo contact phone in sync so WhatsApp notifications hit the new number
+        // GAC is the source of truth: push name + phone to the Kommo notification contact
+        // (and provision it if missing) so WhatsApp notifications stay aligned with GAC.
         syncKommoDealershipContact(editing.id).catch(console.error);
       }
     } else {
-      const { error } = await supabase.from('dealerships').insert(payload);
+      const { data: createdDealer, error } = await supabase
+        .from('dealerships').insert(payload).select('id').single();
       if (error) {
         const msg = error.message || error.details || 'Error desconocido';
         if (error.code === '42501' || msg.toLowerCase().includes('policy') || msg.toLowerCase().includes('permission')) {
@@ -199,6 +201,9 @@ const AdminConcesionarios = () => {
         toast.success('Concesionario creado');
         setDialogOpen(false);
         fetchDealerships();
+        // GAC is the source of truth: provision the Kommo notification contact + lead
+        // and push name + phone right away so a new dealership can be notified.
+        if (createdDealer?.id) syncKommoDealershipContact(createdDealer.id).catch(console.error);
       }
     }
     setSaving(false);
