@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle, Mail, Phone, Trash2 } from 'lucide-react';
@@ -104,6 +105,10 @@ const AdminUsuarios = () => {
   const [createDealershipIds, setCreateDealershipIds] = useState<string[]>([]);
   // Linked dealership profile IDs
   const [linkedProfileIds, setLinkedProfileIds] = useState<Set<string>>(new Set());
+
+  // Delete confirmation dialog
+  const [deletingUser, setDeletingUser] = useState<ProfileWithRole | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Per-user permissions dialog
   const [userPermDialogOpen, setUserPermDialogOpen] = useState(false);
@@ -343,6 +348,30 @@ const AdminUsuarios = () => {
       fetchLinkedProfiles();
     }
     setSaving(false);
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+    setDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-user', {
+        body: { user_id: deletingUser.id },
+      });
+      if (error) {
+        toast.error(await extractEdgeError(error, 'Error al eliminar usuario'));
+      } else if (data?.error) {
+        toast.error(data.error);
+      } else {
+        toast.success('Usuario eliminado correctamente');
+        setDeletingUser(null);
+        fetchUsers();
+        fetchLinkedProfiles();
+      }
+    } catch (err) {
+      toast.error('Error de conexión');
+      console.error(err);
+    }
+    setDeleting(false);
   };
 
   // ── Per-user permissions handlers ──────────────────────────────────────────
@@ -591,6 +620,12 @@ const AdminUsuarios = () => {
                         <Pencil className="w-3 h-3" />
                       </Button>
                     )}
+                    {hasPermission('usuarios.delete') && u.id !== currentProfile?.id && u.roles?.name !== 'superadmin' && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive"
+                        title="Eliminar usuario" onClick={() => setDeletingUser(u)}>
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -673,6 +708,17 @@ const AdminUsuarios = () => {
                           disabled={u.id === currentProfile?.id}
                         >
                           <Pencil className="w-3 h-3" />
+                        </Button>
+                      )}
+                      {hasPermission('usuarios.delete') && u.id !== currentProfile?.id && u.roles?.name !== 'superadmin' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-destructive hover:text-destructive"
+                          title="Eliminar usuario"
+                          onClick={() => setDeletingUser(u)}
+                        >
+                          <Trash2 className="w-3 h-3" />
                         </Button>
                       )}
                     </div>
@@ -1060,6 +1106,31 @@ const AdminUsuarios = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete user confirmation */}
+      <AlertDialog open={!!deletingUser} onOpenChange={(open) => { if (!open) setDeletingUser(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar a {deletingUser?.full_name || deletingUser?.email}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción es permanente y no se puede deshacer. Se elimina la cuenta de acceso
+              del usuario. Para revocar el acceso sin borrar el historial, usá "Desactivar" en editar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDeleteUser(); }}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting
+                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
