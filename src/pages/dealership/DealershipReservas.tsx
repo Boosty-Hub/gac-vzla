@@ -237,6 +237,9 @@ const DealershipReservas = () => {
   const [vehicleModels, setVehicleModels] = useState<VehicleModelOption[]>([]);
   // True while prefilling an edit, to suppress implicit single-vehicle auto-select.
   const prefillingEditRef = useRef(false);
+  // Caches the full client-vehicle rows returned by staff_lookup_client_vehicles
+  // so selecting one builds plateResult without a direct (RLS-blocked) SELECT.
+  const clientVehiclesRawRef = useRef<any[]>([]);
 
   // Incidencia form fields (client/vehicle now come from the shared unified search)
   const [fIncMediaUrls, setFIncMediaUrls] = useState<string | null>(null);
@@ -337,11 +340,10 @@ const DealershipReservas = () => {
         // RLS: el staff ya no puede hacer SELECT directo de vehículos por placa;
         // se usa la RPC staff_lookup_vehicle_by_plate (gateada a rol staff). Devuelve array → [0].
         supabase.rpc('staff_lookup_vehicle_by_plate', { p_plate: q }),
-        supabase
-          .from('clients')
-          .select('id, full_name')
-          .ilike('full_name', `%${q}%`)
-          .limit(5),
+        // RLS: el SELECT directo de clients solo devuelve clientes con reserva en
+        // el concesionario (oculta ~83% de la base, sobre todo flotas). La RPC
+        // staff_search_clients_by_name (gateada a rol staff) busca en toda la base.
+        supabase.rpc('staff_search_clients_by_name', { p_query: q }),
       ]);
       const results: Array<{kind: 'vehicle'; data: PlateResult} | {kind: 'client'; id: string; full_name: string}> = [];
       const vehicleRow = ((vehicleRes.data || []) as any[])[0];
@@ -364,7 +366,7 @@ const DealershipReservas = () => {
         };
         results.push({ kind: 'vehicle', data: pr });
       }
-      (clientRes.data || []).forEach(c => results.push({ kind: 'client', id: c.id, full_name: c.full_name }));
+      (clientRes.data || []).forEach((c: { client_id: string; full_name: string }) => results.push({ kind: 'client', id: c.client_id, full_name: c.full_name }));
       setUnifiedResults(results);
       setUnifiedDropdown(results.length > 0);
       setUnifiedSearched(true);
@@ -377,13 +379,21 @@ const DealershipReservas = () => {
 
   // Normal reservation — fetch vehicles after client selected by name
   useEffect(() => {
-    if (!unifiedClientId) { setUnifiedClientVehicles([]); setUnifiedClientVehicleId(''); return; }
+    if (!unifiedClientId) { setUnifiedClientVehicles([]); setUnifiedClientVehicleId(''); clientVehiclesRawRef.current = []; return; }
     (async () => {
-      const { data } = await supabase
-        .from('vehicles')
-        .select('id, plate, year, vehicle_models(name, brand)')
-        .eq('client_id', unifiedClientId);
-      const fetched = (data || []) as unknown as VehicleResult[];
+      // RLS: el SELECT directo de vehicles solo devuelve los que ya tienen reserva
+      // en el concesionario, así que una flota se veía recortada y el sistema
+      // autoseleccionaba el único visible. La RPC staff_lookup_client_vehicles trae
+      // TODA la flota del cliente (gateada a rol staff).
+      const { data } = await supabase.rpc('staff_lookup_client_vehicles', { p_client_id: unifiedClientId });
+      const rows = (data || []) as Array<{ vehicle_id: string; plate: string | null; year: number; model_name: string | null; model_brand: string | null }>;
+      clientVehiclesRawRef.current = rows;
+      const fetched: VehicleResult[] = rows.map(r => ({
+        id: r.vehicle_id,
+        plate: r.plate,
+        year: r.year,
+        vehicle_models: r.model_name ? { name: r.model_name, brand: r.model_brand as string } : null,
+      }));
       setUnifiedClientVehicles(fetched);
       // When prefilling an edit of a reservation that had no vehicle, never attach one implicitly.
       if (prefillingEditRef.current) { prefillingEditRef.current = false; return; }
@@ -474,15 +484,30 @@ const DealershipReservas = () => {
   });
 
   // When vehicle is chosen in client-name path, populate plateResult for save logic
-  const handleUnifiedClientVehicleSelect = async (vehicleId: string) => {
+  const handleUnifiedClientVehicleSelect = (vehicleId: string) => {
     setLoadingUnifiedVehicle(true);
     setUnifiedClientVehicleId(vehicleId);
-    const { data } = await supabase
-      .from('vehicles')
-      .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
-      .eq('id', vehicleId)
-      .single();
-    if (data) { setPlateResult(data as any); setPlateSearched(true); }
+    // The full client-vehicle rows were already fetched via staff_lookup_client_vehicles
+    // and cached, so build plateResult from the cached row instead of a direct SELECT
+    // (which RLS would block for vehicles without a reservation at this dealership).
+    const row = clientVehiclesRawRef.current.find(r => r.vehicle_id === vehicleId);
+    if (row) {
+      setPlateResult({
+        id: row.vehicle_id,
+        plate: row.plate,
+        year: row.year,
+        color: row.color ?? null,
+        client_id: row.client_id,
+        vehicle_models: row.model_name ? { name: row.model_name, brand: row.model_brand } : null,
+        clients: {
+          id: row.client_id,
+          full_name: row.client_full_name,
+          phone: row.client_phone ?? null,
+          cedula: row.client_cedula ?? null,
+        },
+      });
+      setPlateSearched(true);
+    }
     setLoadingUnifiedVehicle(false);
   };
 
