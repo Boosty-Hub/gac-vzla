@@ -213,11 +213,27 @@ const DealershipProspectos = () => {
   const [prosFechaDesde, setProsFechaDesde] = useState('');
   const [prosFechaHasta, setProsFechaHasta] = useState('');
   const [eventNameFilter, setEventNameFilter] = useState(() => searchParams.get('event_name') || 'todos');
+  const [prosSalespersonFilter, setProsSalespersonFilter] = useState('todos');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  // Roster of vendedor names for the current dealership, resolved via a SECURITY
+  // DEFINER RPC (RLS blocks reading other users' dealership_users/profiles directly).
+  const [rosterNames, setRosterNames] = useState<string[]>([]);
 
   useEffect(() => {
     if (searchParams.toString()) setSearchParams({}, { replace: true });
   }, []);
+
+  // Concesionario: load the dealership's vendedor roster so it can be shown in the
+  // salesperson filter and the create/edit form. Vendedor uses its own locked name.
+  useEffect(() => {
+    if (isVendedor || !selectedDealership) { setRosterNames([]); return; }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase.rpc('dealership_salesperson_names', { p_dealership_id: selectedDealership });
+      if (!cancelled) setRosterNames(((data || []) as Array<{ name: string }>).map(r => r.name).filter(Boolean));
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDealership, isVendedor]);
 
   // Column visibility
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(new Set(ALL_COLS));
@@ -419,6 +435,7 @@ const DealershipProspectos = () => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
     if (prosSourceFilter !== 'todos' && p.source !== prosSourceFilter) return false;
     if (eventNameFilter !== 'todos' && (p.event_name || '') !== eventNameFilter) return false;
+    if (prosSalespersonFilter !== 'todos' && (p.salesperson || '') !== prosSalespersonFilter) return false;
     if (prosEstadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== prosEstadoVzlaFilter) return false;
     if (prosTestDriveFilter !== 'todos' && (prosTestDriveFilter === 'si' ? !p.test_drive : !!p.test_drive)) return false;
     if (prosPersonTypeFilter !== 'todos' && (p.person_type || '') !== prosPersonTypeFilter) return false;
@@ -544,6 +561,26 @@ const DealershipProspectos = () => {
     if (isVendedor) return autoSalesperson || profile?.full_name || null;
     return (pSalesperson && pSalesperson !== '__none') ? pSalesperson.trim() : (autoSalesperson || null);
   };
+
+  // Names a concesionario can attribute a prospect to: the dealership's vendedor
+  // roster plus the concesionario himself (never other concesionarios/dealerships).
+  const dealershipSalespersonNames = [...new Set([
+    ...rosterNames,
+    ...(profile?.full_name && !isVendedor ? [profile.full_name] : []),
+  ])].sort();
+  // Form dropdown: also keep the currently selected value (e.g. a stale name on an
+  // edited prospect) so editing never silently drops it.
+  const salespersonFormOptions = [...new Set([
+    ...dealershipSalespersonNames,
+    ...(pSalesperson && pSalesperson !== '__none' ? [pSalesperson] : []),
+  ])].sort();
+  // Filter dropdown: also include any salesperson already present on loaded
+  // prospects (e.g. a departed vendedor still on old leads) so nothing becomes
+  // unfilterable.
+  const salespersonFilterOptions = [...new Set([
+    ...dealershipSalespersonNames,
+    ...prospects.map(p => p.salesperson).filter((n): n is string => !!n),
+  ])].sort();
 
   const BRANDS_LIST = ['GAC', 'DFSK', 'SHINERAY'];
 
@@ -913,7 +950,7 @@ const DealershipProspectos = () => {
     return true;
   };
 
-  const doSave = async () => {
+  const doSave = async (skipDuplicate = false) => {
     setSaving(true);
     const phone = pPhone.trim();
     if (editingProspect) {
@@ -959,7 +996,7 @@ const DealershipProspectos = () => {
         }
       }
     } else {
-      if (phone) {
+      if (phone && !skipDuplicate) {
         const duplicate = await checkDuplicatePhone(phone);
         if (duplicate) {
           // Close the create modal BEFORE showing the duplicate alert. Stacking the
@@ -1335,6 +1372,18 @@ const DealershipProspectos = () => {
                     {[...new Set(prospects.filter(p => p.event_name).map(p => p.event_name!))].map(en => (
                       <SelectItem key={en} value={en}>{en}</SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {!isVendedor && (
+              <div className="flex flex-col gap-0.5 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Vendedor</span>
+                <Select value={prosSalespersonFilter} onValueChange={v => { setProsSalespersonFilter(v); setCurrentPage(1); }}>
+                  <SelectTrigger className="h-8 text-xs w-[150px]"><SelectValue placeholder="Todos" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="todos">Todos los vendedores</SelectItem>
+                    {salespersonFilterOptions.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -1772,8 +1821,8 @@ const DealershipProspectos = () => {
                   <Select value={pSalesperson} onValueChange={setPSalesperson}>
                     <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar vendedor" /></SelectTrigger>
                     <SelectContent>
-                      {salespersons.map(sp => (
-                        <SelectItem key={sp.id} value={sp.name}>{sp.name}</SelectItem>
+                      {salespersonFormOptions.map(n => (
+                        <SelectItem key={n} value={n}>{n}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -1986,7 +2035,7 @@ const DealershipProspectos = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Volver y completar</AlertDialogCancel>
-            <AlertDialogAction onClick={doSave} className="gac-gradient" disabled={saving}>
+            <AlertDialogAction onClick={() => doSave()} className="gac-gradient" disabled={saving}>
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingProspect ? 'Sí, guardar de todas formas' : 'Sí, crear de todas formas'}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -2048,8 +2097,11 @@ const DealershipProspectos = () => {
               <p><span className="text-muted-foreground">Estado:</span> {PROSPECT_STATUSES.find(s => s.name === duplicateProspect.status)?.label || duplicateProspect.status}</p>
             )}
           </div>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <AlertDialogCancel>Cerrar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setDuplicateProspect(null); doSave(true); }} className="gac-gradient">
+              Es otra compra — registrar igual
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

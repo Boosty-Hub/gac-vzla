@@ -550,11 +550,11 @@ const AdminProspectos = () => {
     openDetail(data as unknown as Prospect);
   };
 
-  const doSave = async () => {
+  const doSave = async (skipDuplicate = false) => {
     setSaving(true);
     const payload = buildPayload();
     if (editing) {
-      if (payload.phone) {
+      if (payload.phone && !skipDuplicate) {
         const duplicate = await checkDuplicatePhone(payload.phone, editing.id);
         // Close the create/edit modal BEFORE showing the alert so the stacked
         // AlertDialog buttons stay interactive (Radix sets pointer-events:none on the
@@ -577,7 +577,7 @@ const AdminProspectos = () => {
         }
       }
     } else {
-      if (payload.phone) {
+      if (payload.phone && !skipDuplicate) {
         const duplicate = await checkDuplicatePhone(payload.phone);
         if (duplicate) { setDialogOpen(false); setDuplicateMatch(duplicate); setSaving(false); return; }
       }
@@ -1407,7 +1407,12 @@ const AdminProspectos = () => {
                 <SelectTrigger className="h-8 text-xs w-[130px]"><SelectValue placeholder="Todos" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los vendedores</SelectItem>
-                  {salespersons.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+                  {/* Any name that can appear as a salesperson: the roster plus names
+                      already present on prospects (e.g. a concesionario who attributed
+                      leads to himself) — admin can filter by any of them. */}
+                  {[...new Set([...salespersons.map(s => s.name), ...prospects.map(p => p.salesperson).filter((n): n is string => !!n)])].sort().map(n => (
+                    <SelectItem key={n} value={n}>{n}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -1831,9 +1836,12 @@ const AdminProspectos = () => {
               Este cliente está siendo gestionado por {duplicateMatch?.salesperson?.trim() || 'sin vendedor asignado'}.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="flex-col-reverse sm:flex-row gap-2">
             <AlertDialogCancel>Cerrar</AlertDialogCancel>
             <AlertDialogAction onClick={viewDuplicateMatch} className="gac-gradient">Ver</AlertDialogAction>
+            <AlertDialogAction onClick={() => { setDuplicateMatch(null); doSave(true); }} className="gac-gradient">
+              Es otra compra — registrar igual
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -2199,7 +2207,7 @@ const AdminProspectos = () => {
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col sm:flex-row gap-2">
             <AlertDialogCancel className="w-full sm:w-auto">Volver y completar</AlertDialogCancel>
-            <AlertDialogAction onClick={doSave} className="gac-gradient w-full sm:w-auto" disabled={saving}>
+            <AlertDialogAction onClick={() => doSave()} className="gac-gradient w-full sm:w-auto" disabled={saving}>
               {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Sí, crear de todas formas'}
             </AlertDialogAction>
           </AlertDialogFooter>
