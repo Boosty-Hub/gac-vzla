@@ -924,6 +924,34 @@ export type Database = {
           client_cedula: string | null
         }[]
       }
+      staff_search_clients_by_name: {
+        Args: { p_query: string }
+        Returns: {
+          client_id: string
+          full_name: string
+        }[]
+      }
+      staff_lookup_client_vehicles: {
+        Args: { p_client_id: string }
+        Returns: {
+          vehicle_id: string
+          plate: string | null
+          year: number
+          color: string | null
+          model_name: string | null
+          model_brand: string | null
+          client_id: string
+          client_full_name: string | null
+          client_phone: string | null
+          client_cedula: string | null
+        }[]
+      }
+      dealership_salesperson_names: {
+        Args: { p_dealership_id: string }
+        Returns: {
+          name: string
+        }[]
+      }
       find_prospects_by_phone: {
         Args: { p_phone: string }
         Returns: {
