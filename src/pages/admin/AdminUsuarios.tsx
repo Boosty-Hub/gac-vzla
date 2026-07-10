@@ -171,8 +171,9 @@ const AdminUsuarios = () => {
   };
 
   const getSelectedRoleName = (roleId: string) => roles.find(r => r.id === roleId)?.name || '';
-  const needsDealership = (roleId: string) => ['concesionario', 'vendedor'].includes(getSelectedRoleName(roleId).toLowerCase());
+  const needsDealership = (roleId: string) => ['concesionario', 'vendedor', 'asesor de servicio'].includes(getSelectedRoleName(roleId).toLowerCase());
   const isVendedorRole = (roleId: string) => getSelectedRoleName(roleId).toLowerCase() === 'vendedor';
+  const isAdvisorRole = (roleId: string) => getSelectedRoleName(roleId).toLowerCase() === 'asesor de servicio';
 
   const handleGenerateMagicLink = async (userId: string) => {
     setGeneratingLink(userId);
@@ -206,7 +207,7 @@ const AdminUsuarios = () => {
       return;
     }
     const createRoleName = getSelectedRoleName(createRoleId).toLowerCase();
-    if (createRoleName === 'concesionario' && !createDealershipId) {
+    if ((createRoleName === 'concesionario' || createRoleName === 'asesor de servicio') && !createDealershipId) {
       toast.error('Debe seleccionar un concesionario para este rol');
       return;
     }
@@ -300,7 +301,7 @@ const AdminUsuarios = () => {
   const handleSaveUser = async () => {
     if (!editingUser) return;
     const roleName = getSelectedRoleName(editRoleId).toLowerCase();
-    if (roleName === 'concesionario' && !editDealershipId) {
+    if ((roleName === 'concesionario' || roleName === 'asesor de servicio') && !editDealershipId) {
       toast.error('Debe seleccionar un concesionario para este rol');
       return;
     }
@@ -817,7 +818,9 @@ const AdminUsuarios = () => {
                   <p className="text-xs text-muted-foreground">
                     {isVendedorRole(editRoleId)
                       ? `${editDealershipIds.length} concesionario(s) seleccionado(s) — el vendedor verá sus prospectos en cada uno`
-                      : 'El usuario solo verá reservas y prospectos de este concesionario'}
+                      : isAdvisorRole(editRoleId)
+                        ? 'El asesor solo verá las reservas de este concesionario (sin prospectos)'
+                        : 'El usuario solo verá reservas y prospectos de este concesionario'}
                   </p>
                 </div>
               )}
@@ -969,7 +972,9 @@ const AdminUsuarios = () => {
                 <p className="text-xs text-muted-foreground">
                   {isVendedorRole(createRoleId)
                     ? `${createDealershipIds.length} concesionario(s) seleccionado(s) — el vendedor verá sus prospectos en cada uno`
-                    : 'El usuario solo verá reservas y prospectos de este concesionario'}
+                    : isAdvisorRole(createRoleId)
+                      ? 'El asesor solo verá las reservas de este concesionario (sin prospectos)'
+                      : 'El usuario solo verá reservas y prospectos de este concesionario'}
                 </p>
               </div>
             )}
