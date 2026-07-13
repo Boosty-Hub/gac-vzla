@@ -781,26 +781,44 @@ Deno.serve(async (req) => {
     // usuario autenticado (incluido un cliente) podia invocar TODAS las acciones,
     // incluidas migraciones masivas y sincronizaciones batch.
     const authHeader = req.headers.get('Authorization') ?? ''
-    const callerClient = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      (Deno.env.get('SB_PUBLISHABLE_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY'))!,
-      { global: { headers: { Authorization: authHeader } } }
-    )
-    const { data: { user: caller } } = await callerClient.auth.getUser()
-    if (!caller) {
-      return new Response(JSON.stringify({ error: 'No autorizado' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+
+    // Internal service-to-service calls (e.g. notify_dealership_reservation fired from
+    // create_reservation) authenticate with the service/secret key, NOT a user JWT.
+    // Recognize that key as a trusted internal caller so this guard does not block
+    // self-invocations. The secret key is server-only (never exposed to browsers).
+    const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim()
+    const serviceKey = (Deno.env.get('SB_SECRET_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '').trim()
+    const isServiceCall = bearerToken.length > 0 && bearerToken === serviceKey
+
+    let callerId: string | null = null
+    let callerRole: string | null = null
+
+    if (isServiceCall) {
+      // Trusted internal call → superadmin-equivalent access.
+      callerRole = 'superadmin'
+    } else {
+      const callerClient = createClient(
+        Deno.env.get('SUPABASE_URL')!,
+        (Deno.env.get('SB_PUBLISHABLE_KEY') ?? Deno.env.get('SUPABASE_ANON_KEY'))!,
+        { global: { headers: { Authorization: authHeader } } }
+      )
+      const { data: { user: caller } } = await callerClient.auth.getUser()
+      if (!caller) {
+        return new Response(JSON.stringify({ error: 'No autorizado' }), {
+          status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      callerId = caller.id
+      const { data: callerProfile } = await supabase
+        .from('profiles')
+        .select('roles(name)')
+        .eq('id', caller.id)
+        .single()
+      callerRole = (callerProfile as { roles?: { name?: string } } | null)?.roles?.name ?? null
     }
 
-    const { data: callerProfile } = await supabase
-      .from('profiles')
-      .select('roles(name)')
-      .eq('id', caller.id)
-      .single()
-    const callerRole = (callerProfile as { roles?: { name?: string } } | null)?.roles?.name ?? null
     const isAdmin = callerRole === 'superadmin' || callerRole === 'admin'
-    const isStaff = isAdmin || ['concesionario', 'vendedor', 'Asesor de Servicio'].includes(callerRole ?? '')
+    const isStaff = isServiceCall || isAdmin || ['concesionario', 'vendedor', 'Asesor de Servicio'].includes(callerRole ?? '')
 
     // Acciones masivas/administrativas: solo superadmin.
     const SUPERADMIN_ACTIONS = ['batch_sync_reservations', 'batch_update_reservations', 'migrate_clients', 'precreate_dealership_leads']
@@ -816,7 +834,7 @@ Deno.serve(async (req) => {
     } else if (CLIENT_ALLOWED_ACTIONS.includes(action) && !isStaff) {
       // Cliente: solo puede sincronizar una reserva de la que es dueno.
       const { data: resv } = await supabase.from('reservations').select('client_id').eq('id', reservation_id).single()
-      const { data: links } = await supabase.from('client_users').select('client_id').eq('profile_id', caller.id)
+      const { data: links } = await supabase.from('client_users').select('client_id').eq('profile_id', callerId ?? '')
       const ownClientIds = (links ?? []).map((l: { client_id: string }) => l.client_id)
       if (!resv || !ownClientIds.includes(resv.client_id)) {
         return new Response(JSON.stringify({ error: 'No autorizado sobre esta reserva' }), {
