@@ -24,6 +24,7 @@ import { createKommoReservation, updateKommoReservationStage, updateKommoReserva
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 import { computeSlotOccupancy, formatMinuteLabel, type CapacityReservation } from '@/lib/reservationCapacity';
+import { isPartsRequest, PLANT_DEALERSHIP_ID } from '@/lib/serviceTypes';
 
 interface Dealership {
   id: string;
@@ -212,6 +213,7 @@ const AdminReservas = () => {
   const [fStatus, setFStatus] = useState<string>(() => getArLS().fStatus || 'pendiente');
   const [fNotes, setFNotes] = useState<string>(() => getArLS().fNotes || '');
   const [fObs, setFObs] = useState<string>('');
+  const isRepuestos = isPartsRequest(fService);
 
   // Manual entry (creates real client + vehicle): toggle + extra fields.
   const [manualMode, setManualMode] = useState<boolean>(() => getArLS().manualMode === true);
@@ -637,7 +639,9 @@ const AdminReservas = () => {
   const handleSave = async () => {
     // Manual entry replaces the client+vehicle pickers, so the FK guard is relaxed
     // to allow it; the normal path still requires an existing client + vehicle.
-    if (!fDealership || !fDate || !fService) {
+    // Solicitud de Repuestos is auto-assigned to the plant, so the dealership picker
+    // is not required from the user.
+    if (!fDate || !fService || (!isRepuestos && !fDealership)) {
       toast.error('Completa los campos requeridos'); return;
     }
     if (manualMode) {
@@ -652,8 +656,8 @@ const AdminReservas = () => {
     }
     setSaving(true);
 
-    // Validate capacity
-    const hasCapacity = await checkCapacity(fDealership, fDate, fTime, fService, editingRes?.id);
+    // Validate capacity — parts requests don't occupy a bay/time slot, so skip.
+    const hasCapacity = isRepuestos ? true : await checkCapacity(fDealership, fDate, fTime, fService, editingRes?.id);
     if (!hasCapacity) {
       setSaving(false);
       return;
@@ -701,14 +705,14 @@ const AdminReservas = () => {
     }
 
     const payload: any = {
-      dealership_id: fDealership,
+      dealership_id: isRepuestos ? PLANT_DEALERSHIP_ID : fDealership,
       client_id: assignClientId,
       vehicle_id: assignVehicleId,
       walkin_client_name: walkinName,
       walkin_client_phone: walkinPhone,
       walkin_plate: walkinPlate,
       reservation_date: fDate,
-      reservation_time: fTime + ':00',
+      reservation_time: isRepuestos ? '00:00:00' : fTime + ':00',
       service_type: fService,
       current_mileage: parseInt(fMileage) || 0,
       status: fStatus,
@@ -732,7 +736,7 @@ const AdminReservas = () => {
       if (error) { toast.error('Error al crear reserva'); console.error(error); }
       else {
         toast.success('Reserva creada'); setDialogOpen(false); fetchReservations();
-        if (adminInserted?.id) createKommoReservation(adminInserted.id).catch(console.error);
+        if (adminInserted?.id && !isRepuestos) createKommoReservation(adminInserted.id).catch(console.error);
       }
     }
     setSaving(false);
@@ -1355,17 +1359,23 @@ const AdminReservas = () => {
             <DialogTitle className="font-display">{editingRes ? (INCIDENCIA_TYPES.has(editingRes.service_type) ? 'Editar Incidencia' : 'Editar Reserva') : (INCIDENCIA_TYPES.has(fService) ? 'Nueva Incidencia' : 'Nueva Reserva')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            {/* Concesionario */}
+            {/* Concesionario — no aplica a Solicitud de Repuestos (auto-asignada a planta) */}
             <div className="space-y-2">
-              <Label>Concesionario *</Label>
-              <Select value={fDealership} onValueChange={setFDealership}>
-                <SelectTrigger><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
-                <SelectContent>
-                  {dealerships.map(d => (
-                    <SelectItem key={d.id} value={d.id}>{d.name} — {d.city}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Concesionario{!isRepuestos && ' *'}</Label>
+              {isRepuestos ? (
+                <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                  Concesionario encargado: <span className="font-semibold">DFSK &amp; GAC Centro de Servicio</span> (planta)
+                </div>
+              ) : (
+                <Select value={fDealership} onValueChange={setFDealership}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
+                  <SelectContent>
+                    {dealerships.map(d => (
+                      <SelectItem key={d.id} value={d.id}>{d.name} — {d.city}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             {/* Cliente: búsqueda existente o ingreso manual (crea cliente + vehículo) */}
@@ -1493,13 +1503,13 @@ const AdminReservas = () => {
               </div>
             )}
 
-            {/* Fecha y Hora */}
-            <div className={INCIDENCIA_TYPES.has(fService) ? 'space-y-2' : 'grid grid-cols-2 gap-4'}>
+            {/* Fecha y Hora — Solicitud de Repuestos no ocupa horario */}
+            <div className={(INCIDENCIA_TYPES.has(fService) || isRepuestos) ? 'space-y-2' : 'grid grid-cols-2 gap-4'}>
               <div className="space-y-2">
                 <Label>Fecha *</Label>
                 <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} />
               </div>
-              {!INCIDENCIA_TYPES.has(fService) && (
+              {!INCIDENCIA_TYPES.has(fService) && !isRepuestos && (
                 <div className="space-y-2">
                   <Label>Hora *</Label>
                   <Select value={fTime} onValueChange={setFTime}>
@@ -1528,6 +1538,13 @@ const AdminReservas = () => {
                 </SelectContent>
               </Select>
             </div>
+
+            {isRepuestos && (
+              <div className="rounded-md bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                <p className="text-amber-700">La Solicitud de Repuestos no ocupa un lugar en la bahía ni un horario.</p>
+              </div>
+            )}
 
             {/* Capacity warning */}
             {capacityWarning && (
@@ -1582,7 +1599,7 @@ const AdminReservas = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
             <Button onClick={handleSave} disabled={saving} className="gac-gradient">
-              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingRes ? 'Guardar' : 'Crear'}
+              {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : editingRes ? 'Guardar' : isRepuestos ? 'Crear Solicitud' : 'Crear'}
             </Button>
           </DialogFooter>
         </DialogContent>

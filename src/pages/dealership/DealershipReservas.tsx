@@ -26,6 +26,7 @@ import { createKommoReservation, updateKommoReservationStage, updateKommoReserva
 import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
+import { isPartsRequest, PLANT_DEALERSHIP_ID } from '@/lib/serviceTypes';
 import { List, LayoutGrid } from 'lucide-react';
 
 // Service types that trigger the incidencia form
@@ -246,6 +247,7 @@ const DealershipReservas = () => {
 
   const hoy = new Date().toISOString().split('T')[0];
   const isIncidencia = INCIDENCIA_TYPES.has(fService);
+  const isRepuestos = isPartsRequest(fService);
 
   const isVendedor = role?.name?.toLowerCase() === 'vendedor';
 
@@ -591,7 +593,7 @@ const DealershipReservas = () => {
   const handleSave = async () => {
     // Defense-in-depth: even though full slots are disabled in the picker, a stale
     // selection (localStorage restore or a service change) could still be full.
-    if (fDate && fTime && selectedDealership && selectedDealership !== '__all') {
+    if (fDate && fTime && selectedDealership && selectedDealership !== '__all' && !isRepuestos) {
       const occ = getSlotOccupancy(fTime);
       if (occ.full) {
         toast.error(`Sin disponibilidad: las ${occ.capacity} bahía(s) están ocupadas en ese horario. Elegí otra hora.`);
@@ -656,7 +658,7 @@ const DealershipReservas = () => {
       return;
     }
 
-    if (!fDate || !fTime || !fService) { toast.error('Fecha, hora y servicio son requeridos'); return; }
+    if (!fDate || !fService || (!isRepuestos && !fTime)) { toast.error('Fecha, hora y servicio son requeridos'); return; }
 
     if (!plateResult && !unifiedClientId && !manualActiveForCreate && !editingLegacyWalkin && !fWalkinName.trim()) { toast.error('Busque y seleccione un cliente'); return; }
 
@@ -692,8 +694,8 @@ const DealershipReservas = () => {
 
     if (editingRes) {
       const updatePayload = {
-        dealership_id: selectedDealership,
-        reservation_date: fDate, reservation_time: fTime, service_type: fService,
+        dealership_id: isRepuestos ? PLANT_DEALERSHIP_ID : selectedDealership,
+        reservation_date: fDate, reservation_time: isRepuestos ? '00:00:00' : fTime, service_type: fService,
         current_mileage: parseInt(fMileage) || 0,
         notes: fNotes.trim() || null,
         internal_notes: fObs.trim() || null,
@@ -713,8 +715,8 @@ const DealershipReservas = () => {
     const creatorName = currentSalesperson?.name || profile?.full_name || null;
     const creatorRole = role?.name || null;
     const payload: any = {
-      dealership_id: selectedDealership,
-      reservation_date: fDate, reservation_time: fTime, service_type: fService,
+      dealership_id: isRepuestos ? PLANT_DEALERSHIP_ID : selectedDealership,
+      reservation_date: fDate, reservation_time: isRepuestos ? '00:00:00' : fTime, service_type: fService,
       current_mileage: parseInt(fMileage) || 0,
       notes: fNotes.trim() || null,
       internal_notes: fObs.trim() || null,
@@ -730,7 +732,7 @@ const DealershipReservas = () => {
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
     else {
       toast.success('Reserva creada exitosamente'); setCreateOpen(false); fetchReservations();
-      if (resInserted?.id) createKommoReservation(resInserted.id).catch(console.error);
+      if (resInserted?.id && !isRepuestos) createKommoReservation(resInserted.id).catch(console.error);
     }
     setSaving(false);
   };
@@ -1396,7 +1398,7 @@ const DealershipReservas = () => {
 
       {/* CREATE DIALOG */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               {isIncidencia
@@ -1405,22 +1407,28 @@ const DealershipReservas = () => {
             </DialogTitle>
           </DialogHeader>
 
-          {/* Concesionario — siempre visible como dropdown */}
+          {/* Concesionario — siempre visible como dropdown, salvo Solicitud de Repuestos */}
           <div className="space-y-1">
-            <Label className="text-xs font-semibold">Concesionario</Label>
-            <Select value={selectedDealership} onValueChange={setSelectedDealership}>
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <Label className="text-[13px] sm:text-xs font-semibold">Concesionario</Label>
+            {isRepuestos ? (
+              <div className="rounded-md border bg-muted/40 px-3 py-2 text-xs">
+                Concesionario encargado: <span className="font-semibold">DFSK &amp; GAC Centro de Servicio</span> (planta)
+              </div>
+            ) : (
+              <Select value={selectedDealership} onValueChange={setSelectedDealership}>
+                <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {/* Tipo de servicio — siempre visible primero */}
           <div className="space-y-1">
-            <Label className="text-xs font-semibold">Tipo de servicio *</Label>
+            <Label className="text-[13px] sm:text-xs font-semibold">Tipo de servicio *</Label>
             <Select
               value={fService}
               onValueChange={v => {
@@ -1432,7 +1440,7 @@ const DealershipReservas = () => {
                 if (!nowInc && wasInc) { resetIncidenciaFields(); setFDate(hoy); setFTime('09:00'); }
               }}
             >
-              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar tipo..." /></SelectTrigger>
+              <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar tipo..." /></SelectTrigger>
               <SelectContent>
                 {serviceTypes.map(s => (
                   <SelectItem key={s.id} value={s.name}>
@@ -1446,6 +1454,13 @@ const DealershipReservas = () => {
             </Select>
           </div>
 
+          {isRepuestos && (
+            <div className="rounded-md bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-start gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-amber-700">La Solicitud de Repuestos no ocupa un lugar en la bahía ni un horario.</p>
+            </div>
+          )}
+
           <Separator />
 
           {/* Buscar cliente/vehículo — unificado por nombre o placa (reserva e incidencia) */}
@@ -1454,7 +1469,7 @@ const DealershipReservas = () => {
               {/* Buscar cliente — unificado por nombre o placa */}
               <div className="space-y-2" ref={unifiedRef}>
                 <div className="flex items-center justify-between gap-2">
-                  <Label className="text-xs font-semibold">{editingLegacyWalkin ? 'Cliente walk-in' : manualMode ? 'Ingreso manual' : 'Buscar cliente'}</Label>
+                  <Label className="text-[13px] sm:text-xs font-semibold">{editingLegacyWalkin ? 'Cliente walk-in' : manualMode ? 'Ingreso manual' : 'Buscar cliente'}</Label>
                   {/* The toggle is hidden while editing a legacy walk-in: that row stays
                       free-text and must not be converted to real entities here. */}
                   {!editingLegacyWalkin && (
@@ -1477,7 +1492,7 @@ const DealershipReservas = () => {
                       value={unifiedSearch}
                       onChange={e => { setUnifiedSearch(e.target.value); if (plateResult || unifiedClientId) clearUnifiedSearch(); }}
                       placeholder="Buscar por nombre o placa..."
-                      className="h-8 text-xs"
+                      className="h-9 text-sm sm:h-8 sm:text-xs"
                       disabled={!!(plateResult || unifiedClientId)}
                     />
                     {(plateResult || unifiedClientId) && (
@@ -1547,9 +1562,9 @@ const DealershipReservas = () => {
                     <p className="text-[10px] text-green-700 flex items-center gap-1"><User className="w-3 h-3" /> {unifiedClientName} seleccionado</p>
                     {unifiedClientVehicles.length > 0 && (
                       <div className="space-y-1">
-                        <Label className="text-xs">Vehículo del cliente</Label>
+                        <Label className="text-[13px] sm:text-xs">Vehículo del cliente</Label>
                         <Select value={unifiedClientVehicleId} onValueChange={handleUnifiedClientVehicleSelect} disabled={loadingUnifiedVehicle}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar vehículo (opcional)" /></SelectTrigger>
+                          <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar vehículo (opcional)" /></SelectTrigger>
                           <SelectContent>
                             {unifiedClientVehicles.map(v => (
                               <SelectItem key={v.id} value={v.id} className="text-xs">
@@ -1590,17 +1605,17 @@ const DealershipReservas = () => {
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1"><Label className="text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-8 text-xs" /></div>
-                      <div className="space-y-1"><Label className="text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412..." className="h-8 text-xs" /></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Nombre *</Label><Input value={fWalkinName} onChange={e => setFWalkinName(e.target.value)} placeholder="Nombre del cliente" className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
+                      <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Teléfono</Label><Input value={fWalkinPhone} onChange={e => setFWalkinPhone(e.target.value)} placeholder="+58 412..." className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
                       {/* Cédula / Modelo / Año only apply when creating real entities. */}
                       {!editingLegacyWalkin && (
                         <>
-                          <div className="space-y-1"><Label className="text-xs">Cédula</Label><Input value={fWalkinCedula} onChange={e => setFWalkinCedula(e.target.value)} placeholder="V-12345678" className="h-8 text-xs" /></div>
+                          <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Cédula</Label><Input value={fWalkinCedula} onChange={e => setFWalkinCedula(e.target.value)} placeholder="V-12345678" className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
                           <div className="space-y-1">
-                            <Label className="text-xs">Marca / Modelo *</Label>
+                            <Label className="text-[13px] sm:text-xs">Marca / Modelo *</Label>
                             <Select value={fWalkinModelId} onValueChange={setFWalkinModelId}>
-                              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
+                              <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                               <SelectContent>
                                 {vehicleModels.map(m => (
                                   <SelectItem key={m.id} value={m.id} className="text-xs">{m.brand} {m.name}</SelectItem>
@@ -1610,9 +1625,9 @@ const DealershipReservas = () => {
                           </div>
                         </>
                       )}
-                      <div className="space-y-1"><Label className="text-xs">Placa</Label><Input value={fWalkinPlate} onChange={e => setFWalkinPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="h-8 text-xs uppercase" /></div>
+                      <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Placa</Label><Input value={fWalkinPlate} onChange={e => setFWalkinPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="h-9 text-sm sm:h-8 sm:text-xs uppercase" /></div>
                       {!editingLegacyWalkin && (
-                        <div className="space-y-1"><Label className="text-xs">Año</Label><Input type="number" value={fWalkinYear} onChange={e => setFWalkinYear(e.target.value)} placeholder={String(new Date().getFullYear())} className="h-8 text-xs" /></div>
+                        <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Año</Label><Input type="number" value={fWalkinYear} onChange={e => setFWalkinYear(e.target.value)} placeholder={String(new Date().getFullYear())} className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
                       )}
                     </div>
                   </div>
@@ -1622,26 +1637,26 @@ const DealershipReservas = () => {
               {/* Incidencia: campos propios */}
               {isIncidencia && (
                 <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-1">
-                      <Label className="text-xs">Fecha del reporte *</Label>
-                      <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" />
+                      <Label className="text-[13px] sm:text-xs">Fecha del reporte *</Label>
+                      <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-9 text-sm sm:h-8 sm:text-xs" />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Hora</Label>
-                      <Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}</SelectContent></Select>
+                      <Label className="text-[13px] sm:text-xs">Hora</Label>
+                      <Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}</SelectContent></Select>
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Descripción de la falla *</Label>
-                    <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={4} placeholder="Describa la falla, desperfecto o problema observado..." className="text-xs resize-none" />
+                    <Label className="text-[13px] sm:text-xs">Descripción de la falla *</Label>
+                    <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={4} placeholder="Describa la falla, desperfecto o problema observado..." className="text-sm sm:text-xs resize-none" />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Kilometraje actual</Label>
-                    <Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} placeholder="Ej: 25000" className="h-8 text-xs" />
+                    <Label className="text-[13px] sm:text-xs">Kilometraje actual</Label>
+                    <Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} placeholder="Ej: 25000" className="h-9 text-sm sm:h-8 sm:text-xs" />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Fotos / Videos</Label>
+                    <Label className="text-[13px] sm:text-xs">Fotos / Videos</Label>
                     <TechnicalReportUploader maxSizeMB={40} value={fIncMediaUrls} onChange={setFIncMediaUrls} />
                   </div>
                 </div>
@@ -1653,22 +1668,24 @@ const DealershipReservas = () => {
                   <Separator />
 
                   <div className="space-y-3">
-                    <Label className="text-xs font-semibold">Detalles de la cita</Label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1"><Label className="text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-8 text-xs" /></div>
-                      <div className="space-y-1"><Label className="text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}</SelectContent></Select></div>
-                      <div className="space-y-1 col-span-2"><Label className="text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-8 text-xs" /></div>
+                    <Label className="text-[13px] sm:text-xs font-semibold">Detalles de la cita</Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Fecha *</Label><Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
+                      {!isRepuestos && (
+                        <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}</SelectContent></Select></div>
+                      )}
+                      <div className="space-y-1 sm:col-span-2"><Label className="text-[13px] sm:text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Descripción / Motivo</Label>
-                      <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-xs" placeholder="Describa el tipo de servicio solicitado..." />
+                      <Label className="text-[13px] sm:text-xs">Descripción / Motivo</Label>
+                      <Textarea value={fNotes} onChange={e => setFNotes(e.target.value)} rows={3} className="text-sm sm:text-xs" placeholder="Describa el tipo de servicio solicitado..." />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Notas Internas</Label>
-                      <Textarea value={fObs} onChange={e => setFObs(e.target.value)} rows={2} className="text-xs" placeholder="Notas internas del equipo GAC (no visibles para el cliente)..." />
+                      <Label className="text-[13px] sm:text-xs">Notas Internas</Label>
+                      <Textarea value={fObs} onChange={e => setFObs(e.target.value)} rows={2} className="text-sm sm:text-xs" placeholder="Notas internas del equipo GAC (no visibles para el cliente)..." />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs">Archivo adjunto</Label>
+                      <Label className="text-[13px] sm:text-xs">Archivo adjunto</Label>
                       <TechnicalReportUploader maxSizeMB={40} value={createTechReportUrl} onChange={setCreateTechReportUrl} />
                     </div>
                   </div>
@@ -1682,7 +1699,7 @@ const DealershipReservas = () => {
             <Button onClick={handleSave} disabled={saving} className="gac-gradient">
               {saving
                 ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                : isIncidencia ? (editingRes ? 'Actualizar Incidencia' : 'Crear Incidencia') : (editingRes ? 'Actualizar Reserva' : 'Crear Reserva')
+                : isIncidencia ? (editingRes ? 'Actualizar Incidencia' : 'Crear Incidencia') : (editingRes ? 'Actualizar Reserva' : isRepuestos ? 'Crear Solicitud' : 'Crear Reserva')
               }
             </Button>
           </DialogFooter>

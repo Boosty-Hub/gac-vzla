@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { createKommoReservation } from '@/lib/kommo';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
+import { isInternalServiceType } from '@/lib/serviceTypes';
 
 interface VehicleResult {
   vehicle_id: string;
@@ -159,7 +160,7 @@ const PublicReserva = () => {
         supabase.from('service_types').select('id, name, duration_minutes').eq('is_active', true).order('name'),
       ]);
       setDealerships(sortDealerships((deals || []) as Dealership[]));
-      setServiceTypes((stData || []) as ServiceType[]);
+      setServiceTypes(((stData || []) as ServiceType[]).filter(s => !isInternalServiceType(s.name)));
       setMileage(String(data[0].mileage || ''));
       setStep('form');
     }

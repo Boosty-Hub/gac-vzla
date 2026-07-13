@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { createKommoReservation } from '@/lib/kommo';
 import { resolveWarrantyCondition, evaluateWarranty, type WarrantyConditionRef } from '@/lib/warranty';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
+import { isInternalServiceType } from '@/lib/serviceTypes';
 
 interface ClientData {
   id: string;
@@ -366,7 +367,7 @@ const UserPortal = () => {
         .select('id, name, duration_minutes, requires_description')
         .eq('is_active', true)
         .order('name');
-      setServiceTypes((stData || []) as unknown as ServiceType[]);
+      setServiceTypes(((stData || []) as unknown as ServiceType[]).filter(s => !isInternalServiceType(s.name)));
 
       // Fetch warranty conditions (full active set for the shared warranty lib)
       const { data: wcData } = await supabase
