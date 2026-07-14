@@ -27,6 +27,7 @@ import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isPartsRequest, PLANT_DEALERSHIP_ID } from '@/lib/serviceTypes';
+import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
 import { List, LayoutGrid } from 'lucide-react';
 
 // Service types that trigger the incidencia form
@@ -55,6 +56,7 @@ interface Reservation {
   created_by_role: string | null;
   created_by_profile_id: string | null;
   kommo_lead_id: number | null;
+  state: string | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
   dealerships: { name: string; state: string | null } | null;
@@ -157,19 +159,19 @@ const DealershipReservas = () => {
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<'table' | 'matrix'>('matrix');
+  const [reservationTab, setReservationTab] = useState<'citas' | 'repuestos'>('citas');
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
-  const [reservationTab, setReservationTab] = useState<'citas' | 'repuestos'>('citas');
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
 
-  // Search/filter
-  const [resSearch, setResSearch] = useState('');
   // Parts requests have no meaningful time slot, so only the table view applies to them
   useEffect(() => {
     if (reservationTab === 'repuestos') setView('table');
   }, [reservationTab]);
 
+  // Search/filter
+  const [resSearch, setResSearch] = useState('');
   const [resStatusFilter, setResStatusFilter] = useState('todos');
   const [resServiceFilter, setResServiceFilter] = useState('todos');
   const [resFechaDesde, setResFechaDesde] = useState('');
@@ -229,6 +231,8 @@ const DealershipReservas = () => {
   const [fMileage, setFMileage] = useState<string>(() => getDrLS().fMileage || '0');
   const [fNotes, setFNotes] = useState<string>(() => getDrLS().fNotes || '');
   const [fObs, setFObs] = useState<string>('');
+  // Estado de Venezuela: '' means "inherit from the dealership" (persists as null).
+  const [fState, setFState] = useState<string>(() => getDrLS().fState || '');
   const [fWalkinName, setFWalkinName] = useState<string>(() => getDrLS().fWalkinName || '');
   const [fWalkinPhone, setFWalkinPhone] = useState<string>(() => getDrLS().fWalkinPhone || '');
   const [fWalkinPlate, setFWalkinPlate] = useState<string>(() => getDrLS().fWalkinPlate || '');
@@ -470,20 +474,20 @@ const DealershipReservas = () => {
       return;
     }
     try {
-      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinYear }));
+      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinYear }));
     } catch {}
-  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinYear]);
+  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinYear]);
 
   const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
-    // Hide archived (completada/cancelada/culminado) unless explicitly filtered
-    if (resStatusFilter === 'todos' && ARCHIVED_STATUSES.has(r.status)) return false;
-    if (resStatusFilter !== 'todos' && r.status !== resStatusFilter) return false;
-    if (resServiceFilter !== 'todos' && r.service_type !== resServiceFilter) return false;
     // Split into "Citas" vs "Solicitudes de Repuestos" tabs
     if (reservationTab === 'repuestos') {
       if (!isPartsRequest(r.service_type)) return false;
     } else if (isPartsRequest(r.service_type)) return false;
+    // Hide archived (completada/cancelada/culminado) unless explicitly filtered
+    if (resStatusFilter === 'todos' && ARCHIVED_STATUSES.has(r.status)) return false;
+    if (resStatusFilter !== 'todos' && r.status !== resStatusFilter) return false;
+    if (resServiceFilter !== 'todos' && r.service_type !== resServiceFilter) return false;
     if (resFechaDesde && r.reservation_date < resFechaDesde) return false;
     if (resFechaHasta && r.reservation_date > resFechaHasta) return false;
     if (resSearch.trim()) {
@@ -573,6 +577,9 @@ const DealershipReservas = () => {
     resetNormalFields();
     resetIncidenciaFields();
     setFDate(hoy); setFTime('09:00'); setFService(''); setFMileage('0'); setFNotes(''); setFObs('');
+    // Fresh create: service type resets to '' above, so the effective dealership is
+    // always the page-level selection (never the plant) at this point.
+    setFState(dealerships.find(d => d.id === selectedDealership)?.state || '');
     setCreateTechReportUrl(null);
     setCreateOpen(true);
   };
@@ -641,6 +648,7 @@ const DealershipReservas = () => {
         service_type: fService,
         notes: fNotes.trim(),
         current_mileage: parseInt(fMileage) || 0,
+        state: fState || null,
         technical_report_url: fIncMediaUrls || null,
       };
       if (editingRes) {
@@ -709,6 +717,7 @@ const DealershipReservas = () => {
         current_mileage: parseInt(fMileage) || 0,
         notes: fNotes.trim() || null,
         internal_notes: fObs.trim() || null,
+        state: fState || null,
         technical_report_url: createTechReportUrl || null,
         ...assign,
       };
@@ -730,6 +739,7 @@ const DealershipReservas = () => {
       current_mileage: parseInt(fMileage) || 0,
       notes: fNotes.trim() || null,
       internal_notes: fObs.trim() || null,
+      state: fState || null,
       status: 'pendiente',
       technical_report_url: createTechReportUrl || null,
       created_by_name: creatorName,
@@ -813,6 +823,7 @@ const DealershipReservas = () => {
     setFMileage(String(r.current_mileage || 0));
     setFNotes(r.notes || '');
     setFObs(r.internal_notes || '');
+    setFState(r.state || '');
     setFIncMediaUrls(r.technical_report_url || null);
     setDetailOpen(false);
     setCreateOpen(true);
@@ -851,6 +862,7 @@ const DealershipReservas = () => {
     setFMileage(String(r.current_mileage || 0));
     setFNotes(r.notes || '');
     setFObs(r.internal_notes || '');
+    setFState(r.state || '');
     setCreateTechReportUrl(r.technical_report_url || null);
     // Open the dialog up front so it reacts instantly, even if the vehicle fetch is slow.
     setDetailOpen(false);
@@ -971,18 +983,6 @@ const DealershipReservas = () => {
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="relative flex-1 min-w-[160px] max-w-sm">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input placeholder="Buscar cliente, placa..." className="pl-8 h-8 text-xs" value={resSearch} onChange={e => setResSearch(e.target.value)} />
-          </div>
-          <Select value={resStatusFilter} onValueChange={setResStatusFilter}>
-            <SelectTrigger className="w-[130px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="todos">Todos los estados</SelectItem>
-              {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
-              <SelectSeparator />
       <div className="flex items-center border rounded-md overflow-hidden w-fit">
         <Button
           variant={reservationTab === 'citas' ? 'secondary' : 'ghost'}
@@ -1006,6 +1006,18 @@ const DealershipReservas = () => {
         </Button>
       </div>
 
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[160px] max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input placeholder="Buscar cliente, placa..." className="pl-8 h-8 text-xs" value={resSearch} onChange={e => setResSearch(e.target.value)} />
+          </div>
+          <Select value={resStatusFilter} onValueChange={setResStatusFilter}>
+            <SelectTrigger className="w-[130px] h-8 text-xs shrink-0"><SelectValue placeholder="Estado" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los estados</SelectItem>
+              {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+              <SelectSeparator />
               <SelectItem value="agendada">Agendada</SelectItem>
               <SelectItem value="culminado">Culminado</SelectItem>
             </SelectContent>
@@ -1452,7 +1464,15 @@ const DealershipReservas = () => {
                 Concesionario encargado: <span className="font-semibold">DFSK &amp; GAC Centro de Servicio</span> (planta)
               </div>
             ) : (
-              <Select value={selectedDealership} onValueChange={setSelectedDealership}>
+              <Select
+                value={selectedDealership}
+                onValueChange={v => {
+                  setSelectedDealership(v);
+                  // Auto-fill Estado de Venezuela from the picked dealership. Only fires
+                  // on this explicit user action, so it never fights a manual override.
+                  setFState(dealerships.find(d => d.id === v)?.state || '');
+                }}
+              >
                 <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs">
                   <SelectValue />
                 </SelectTrigger>
@@ -1471,10 +1491,17 @@ const DealershipReservas = () => {
               onValueChange={v => {
                 const wasInc = INCIDENCIA_TYPES.has(fService);
                 const nowInc = INCIDENCIA_TYPES.has(v);
+                const wasRepuestos = isPartsRequest(fService);
+                const nowRepuestos = isPartsRequest(v);
                 setFService(v);
                 setFNotes('');
                 if (nowInc && !wasInc) { resetNormalFields(); setFDate(hoy); }
                 if (!nowInc && wasInc) { resetIncidenciaFields(); setFDate(hoy); setFTime('09:00'); }
+                if (wasRepuestos !== nowRepuestos) {
+                  // The effective dealership changes (forced to the plant, or back to the
+                  // page-level selection), so Estado de Venezuela must follow it.
+                  setFState(nowRepuestos ? '' : (dealerships.find(d => d.id === selectedDealership)?.state || ''));
+                }
               }}
             >
               <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar tipo..." /></SelectTrigger>
@@ -1683,6 +1710,16 @@ const DealershipReservas = () => {
                       <Label className="text-[13px] sm:text-xs">Hora</Label>
                       <Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}</SelectContent></Select>
                     </div>
+                    <div className="space-y-1">
+                      <Label className="text-[13px] sm:text-xs">Estado de Venezuela</Label>
+                      <Select value={fState || '__none'} onValueChange={v => setFState(v === '__none' ? '' : v)}>
+                        <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none">Usar estado del concesionario</SelectItem>
+                          {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                   <div className="space-y-1">
                     <Label className="text-[13px] sm:text-xs">Descripción de la falla *</Label>
@@ -1711,7 +1748,17 @@ const DealershipReservas = () => {
                       {!isRepuestos && (
                         <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Hora *</Label><Select value={fTime} onValueChange={setFTime}><SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue /></SelectTrigger><SelectContent>{TIME_SLOTS.map(t => { const occ = getSlotOccupancy(t); return <SelectItem key={t} value={t} disabled={occ.full}>{t} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}</SelectItem>; })}</SelectContent></Select></div>
                       )}
-                      <div className="space-y-1 sm:col-span-2"><Label className="text-[13px] sm:text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
+                      <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Kilometraje</Label><Input type="number" value={fMileage} onChange={e => setFMileage(e.target.value)} className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
+                      <div className="space-y-1">
+                        <Label className="text-[13px] sm:text-xs">Estado de Venezuela</Label>
+                        <Select value={fState || '__none'} onValueChange={v => setFState(v === '__none' ? '' : v)}>
+                          <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none">Usar estado del concesionario</SelectItem>
+                            {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                     <div className="space-y-1">
                       <Label className="text-[13px] sm:text-xs">Descripción / Motivo</Label>

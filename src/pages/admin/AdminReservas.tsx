@@ -25,11 +25,13 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 import { computeSlotOccupancy, formatMinuteLabel, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isPartsRequest, PLANT_DEALERSHIP_ID } from '@/lib/serviceTypes';
+import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
 
 interface Dealership {
   id: string;
   name: string;
   city: string | null;
+  state: string | null;
   bays: number;
 }
 
@@ -83,6 +85,7 @@ interface Reservation {
   created_by_name: string | null;
   created_by_role: string | null;
   kommo_lead_id: number | null;
+  state: string | null;
   dealerships: { id: string; name: string; city: string | null; state: string | null } | null;
   clients: { full_name: string; cedula: string | null; phone: string | null; state: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
@@ -159,10 +162,10 @@ const AdminReservas = () => {
   // Detail dialog
   const [detailRes, setDetailRes] = useState<Reservation | null>(null);
   const [view, setView] = useState<'table' | 'matrix'>('table');
+  const [reservationTab, setReservationTab] = useState<'citas' | 'repuestos'>('citas');
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
-  const [reservationTab, setReservationTab] = useState<'citas' | 'repuestos'>('citas');
   const [capacityWarning, setCapacityWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
@@ -214,6 +217,8 @@ const AdminReservas = () => {
   const [fStatus, setFStatus] = useState<string>(() => getArLS().fStatus || 'pendiente');
   const [fNotes, setFNotes] = useState<string>(() => getArLS().fNotes || '');
   const [fObs, setFObs] = useState<string>('');
+  // Estado de Venezuela: '' means "inherit from the dealership" (persists as null).
+  const [fState, setFState] = useState<string>(() => getArLS().fState || '');
   const isRepuestos = isPartsRequest(fService);
 
   // Manual entry (creates real client + vehicle): toggle + extra fields.
@@ -242,7 +247,7 @@ const AdminReservas = () => {
   const fetchDealerships = async () => {
     const { data } = await supabase
       .from('dealerships')
-      .select('id, name, city, bays')
+      .select('id, name, city, state, bays')
       .eq('is_active', true)
       .order('name');
     if (data) setDealerships(data);
@@ -305,21 +310,21 @@ const AdminReservas = () => {
     fetchReservations();
   }, [view, selectedDate, calendarMonth, filtroConc]);
 
-  // Persist create-form to localStorage so a page refresh restores the dialog
-  useEffect(() => {
-    if (!dialogOpen || editingRes) {
-      if (!dialogOpen) { try { localStorage.removeItem(AR_LS_KEY); } catch {} }
-      return;
   // Parts requests have no meaningful time slot, so only the table view applies to them
   useEffect(() => {
     if (reservationTab === 'repuestos') setView('table');
   }, [reservationTab]);
 
+  // Persist create-form to localStorage so a page refresh restores the dialog
+  useEffect(() => {
+    if (!dialogOpen || editingRes) {
+      if (!dialogOpen) { try { localStorage.removeItem(AR_LS_KEY); } catch {} }
+      return;
     }
     try {
-      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear }));
+      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear }));
     } catch {}
-  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear]);
+  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear]);
 
   // Client search with debounce (by name, cedula, or vehicle plate)
   useEffect(() => {
@@ -441,6 +446,7 @@ const AdminReservas = () => {
     setFDealership(''); setFClientSearch(''); setFClientId(''); setFVehicleId('');
     setFDate(new Date().toISOString().split('T')[0]); setFTime('08:00');
     setFService(''); setFMileage('0'); setFStatus('pendiente'); setFNotes(''); setFObs('');
+    setFState('');
     setClientResults([]); setClientVehicles([]);
     resetManualFields();
     setCapacityWarning('');
@@ -599,6 +605,7 @@ const AdminReservas = () => {
     setFMileage(String(r.current_mileage));
     setFStatus(r.status);
     setFNotes(r.notes || ''); setFObs(r.internal_notes || '');
+    setFState(r.state || '');
     setTechnicalReportUrl(r.technical_report_url || null);
     setClientResults([]);
     // Legacy walk-in row (no FK client/vehicle): edit the free-text walk-in fields
@@ -724,6 +731,7 @@ const AdminReservas = () => {
       status: fStatus,
       notes: fNotes.trim() || null,
       internal_notes: fObs.trim() || null,
+      state: fState || null,
       technical_report_url: technicalReportUrl || null,
     };
 
@@ -804,22 +812,22 @@ const AdminReservas = () => {
 
   const vendedores = [...new Set(reservations.filter(r => r.created_by_name).map(r => r.created_by_name!))].sort();
 
+  const partsRequestsCount = reservations.filter(r => isPartsRequest(r.service_type)).length;
+
   const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
+    // Split into "Citas" vs "Solicitudes de Repuestos" tabs
+    if (reservationTab === 'repuestos') {
+      if (!isPartsRequest(r.service_type)) return false;
+    } else if (isPartsRequest(r.service_type)) return false;
     // Hide archived (completada/cancelada/culminado) unless explicitly filtered
     if (filtroEstado === 'todos' && ARCHIVED_STATUSES.has(r.status)) return false;
     if (filtroEstado !== 'todos' && r.status !== filtroEstado) return false;
     if (filtroServicio !== 'todos' && r.service_type !== filtroServicio) return false;
     if (filtroVendedor !== 'todos' && r.created_by_name !== filtroVendedor) return false;
     if (fechaDesde && r.reservation_date < fechaDesde) return false;
-  const partsRequestsCount = reservations.filter(r => isPartsRequest(r.service_type)).length;
-
     if (fechaHasta && r.reservation_date > fechaHasta) return false;
     if (busqueda.trim()) {
-    // Split into "Citas" vs "Solicitudes de Repuestos" tabs
-    if (reservationTab === 'repuestos') {
-      if (!isPartsRequest(r.service_type)) return false;
-    } else if (isPartsRequest(r.service_type)) return false;
       const q = busqueda.toLowerCase();
       if (
         !(r.clients?.full_name || '').toLowerCase().includes(q) &&
@@ -891,14 +899,6 @@ const AdminReservas = () => {
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        {/* Row 1: search / date picker */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {view === 'table' && (
-            <div className="relative flex-1 min-w-0">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-              <Input placeholder="Buscar cliente, placa..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
-            </div>
       <Tabs value={reservationTab} onValueChange={v => { setReservationTab(v as 'citas' | 'repuestos'); setSelectedIds(new Set()); }}>
         <TabsList className="h-8">
           <TabsTrigger value="citas" className="text-xs h-7 px-3">Citas</TabsTrigger>
@@ -909,6 +909,14 @@ const AdminReservas = () => {
         </TabsList>
       </Tabs>
 
+      <div className="flex flex-col gap-2">
+        {/* Row 1: search / date picker */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {view === 'table' && (
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <Input placeholder="Buscar cliente, placa..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+            </div>
           )}
           {view === 'matrix' && (
             <div className="text-xs text-muted-foreground">Vista mensual — usa los controles del calendario para navegar.</div>
@@ -1391,7 +1399,15 @@ const AdminReservas = () => {
                   Concesionario encargado: <span className="font-semibold">DFSK &amp; GAC Centro de Servicio</span> (planta)
                 </div>
               ) : (
-                <Select value={fDealership} onValueChange={setFDealership}>
+                <Select
+                  value={fDealership}
+                  onValueChange={v => {
+                    setFDealership(v);
+                    // Auto-fill Estado de Venezuela from the picked dealership. Only fires
+                    // on this explicit user action, so it never fights a manual override.
+                    setFState(dealerships.find(d => d.id === v)?.state || '');
+                  }}
+                >
                   <SelectTrigger><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
                   <SelectContent>
                     {dealerships.map(d => (
@@ -1400,6 +1416,19 @@ const AdminReservas = () => {
                   </SelectContent>
                 </Select>
               )}
+            </div>
+
+            {/* Estado de Venezuela — auto-filled from the dealership above; the user
+                can override it, or explicitly choose to keep inheriting. */}
+            <div className="space-y-2">
+              <Label>Estado de Venezuela</Label>
+              <Select value={fState || '__none'} onValueChange={v => setFState(v === '__none' ? '' : v)}>
+                <SelectTrigger><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">Usar estado del concesionario</SelectItem>
+                  {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Cliente: búsqueda existente o ingreso manual (crea cliente + vehículo) */}
@@ -1551,7 +1580,16 @@ const AdminReservas = () => {
             {/* Servicio */}
             <div className="space-y-2">
               <Label>Tipo de Servicio *</Label>
-              <Select value={fService} onValueChange={v => { setFService(v); setCapacityWarning(''); setFNotes(''); }}>
+              <Select value={fService} onValueChange={v => {
+                const wasRepuestos = isPartsRequest(fService);
+                const nowRepuestos = isPartsRequest(v);
+                setFService(v); setCapacityWarning(''); setFNotes('');
+                if (wasRepuestos !== nowRepuestos) {
+                  // The effective dealership changes (forced to the plant, or back to the
+                  // picked one), so Estado de Venezuela must follow it, not the stale value.
+                  setFState(nowRepuestos ? '' : (dealerships.find(d => d.id === fDealership)?.state || ''));
+                }
+              }}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar servicio" /></SelectTrigger>
                 <SelectContent>
                   {serviceTypes.filter(s => s.is_active).map(s => (

@@ -400,26 +400,16 @@ function dealershipNameToKommoId(name: string): number | null {
   return null
 }
 
-// ─── Dealership → Estado de Venezuela ────────────────────────────────────────
-const DEALERSHIP_TO_STATE: Array<{ state: string; keywords: string[] }> = [
-  { state: 'Barinas',     keywords: ['hobby', 'barinas'] },
-  { state: 'Zulia',       keywords: ['meta car', 'zulia'] },
-  { state: 'Falcón',      keywords: ['palma', 'falcón', 'falcon'] },
-  { state: 'Carabobo',    keywords: ['valencia'] },
-  { state: 'Lara',        keywords: ['barquisimeto'] },
-  { state: 'Mérida',      keywords: ['mérida', 'merida'] },
-  { state: 'Bolívar',     keywords: ['puerto ordaz', 'ordaz', 'castillito'] },
-  { state: 'Anzoátegui',  keywords: ['garzas', 'anzoátegui', 'anzoategui', 'lechería', 'lecheria'] },
-  { state: 'Miranda',     keywords: ['guarenas', 'guayabal'] },
-  { state: 'Caracas',     keywords: ['harbin', 'trinidad', 'rosal', 'street boutique', 'florida', 'castellana', 'cerro verde'] },
-]
-
-function dealershipToState(name: string): string | null {
-  const lower = name.toLowerCase()
-  for (const d of DEALERSHIP_TO_STATE) {
-    if (d.keywords.some(k => lower.includes(k))) return d.state
-  }
-  return null
+// ─── Reservation → Estado de Venezuela ───────────────────────────────────────
+// Mirrors resolveReservationState() in src/lib/venezuelaStates.ts (duplicated
+// here because edge functions are deployed standalone and cannot import from
+// src/). An explicit reservations.state override wins; otherwise falls back
+// to the dealership's own state column; otherwise null. This replaced a
+// hardcoded dealership-name → state keyword map that was wrong for several
+// dealerships (now that dealerships.state is fully populated in the DB, the
+// real column is the source of truth).
+function resolveReservationState(reservationState: string | null | undefined, dealershipState: string | null | undefined): string | null {
+  return reservationState || dealershipState || null
 }
 
 // ─── Vendedor Asignado (select CF 2988736) ───────────────────────────────────
@@ -1165,10 +1155,10 @@ Deno.serve(async (req) => {
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
           status, notes, internal_notes, walkin_client_name, walkin_client_phone, walkin_plate,
-          client_id, vehicle_id, kommo_lead_id, created_by_name,
+          client_id, vehicle_id, kommo_lead_id, created_by_name, state,
           clients(full_name, phone, cedula, email),
           vehicles(plate, year, vehicle_models(name, brand)),
-          dealerships(name)
+          dealerships(name, state)
         `)
         .eq('id', reservation_id)
         .single()
@@ -1221,6 +1211,7 @@ Deno.serve(async (req) => {
         || null
       const vehicleStr = vehicleModel ? `${vehicleModel.brand} ${vehicleModel.name}` : ''
       const dealershipName = (res.dealerships as { name: string } | null)?.name || ''
+      const dealershipState = (res.dealerships as { state: string | null } | null)?.state ?? null
 
       const stageId = POSTVENTA_STATUS_TO_STAGE[res.status] ?? POSTVENTA_STATUS_TO_STAGE.pendiente
       const leadName = `${clientName} - ${res.service_type} ${res.reservation_date}`
@@ -1251,7 +1242,7 @@ Deno.serve(async (req) => {
       addResEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
       addResEnum(CF.concesionario, dealershipNameToKommoId(dealershipName))  // Concesionario select
       addResEnum(CF.marca, BRAND_TO_KOMMO[brandName ?? ''] ?? null)           // Marca select
-      addResField(CF.estado_vzla, dealershipToState(dealershipName))          // Estado de Venezuela
+      addResField(CF.estado_vzla, resolveReservationState(res.state as string | null, dealershipState))  // Estado de Venezuela
       addResEnum(2988736, vendedorToKommoId(createdByName))                   // Vendedor Asignado select
 
       // ── Find existing Kommo contact to avoid duplicates ──────────────────
@@ -1401,10 +1392,10 @@ Deno.serve(async (req) => {
         .select(`
           id, reservation_date, reservation_time, service_type, current_mileage,
           status, notes, internal_notes, walkin_client_name, walkin_client_phone, walkin_plate,
-          created_by_name,
+          created_by_name, state,
           clients(full_name, phone, cedula),
           vehicles(plate, vehicle_models(name, brand)),
-          dealerships(name)
+          dealerships(name, state)
         `)
         .eq('id', reservation_id)
         .single()
@@ -1424,6 +1415,7 @@ Deno.serve(async (req) => {
         (res.vehicles as { vehicle_models: { name: string; brand: string } | null } | null)?.vehicle_models
       const vehicleStr = vehicleModel ? `${vehicleModel.brand} ${vehicleModel.name}` : ''
       const dealershipName = (res.dealerships as { name: string } | null)?.name || ''
+      const dealershipState2 = (res.dealerships as { state: string | null } | null)?.state ?? null
       const brandName2 = vehicleModel?.brand ?? null
       const createdByName2 = (res as unknown as { created_by_name: string | null }).created_by_name ?? null
 
@@ -1450,7 +1442,7 @@ Deno.serve(async (req) => {
       addEnum(CF_RES.centro_servicio, dealershipToCentroServicioId(dealershipName))
       addEnum(CF.concesionario, dealershipNameToKommoId(dealershipName))
       addEnum(CF.marca, BRAND_TO_KOMMO[brandName2 ?? ''] ?? null)
-      addField(CF.estado_vzla, dealershipToState(dealershipName))
+      addField(CF.estado_vzla, resolveReservationState(res.state as string | null, dealershipState2))
       addEnum(2988736, vendedorToKommoId(createdByName2))
 
       const leadName = `${clientName} - ${res.service_type} ${res.reservation_date}`

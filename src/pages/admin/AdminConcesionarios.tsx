@@ -16,8 +16,7 @@ import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench
 import { cn } from '@/lib/utils';
 import { syncKommoDealershipContact } from '@/lib/kommo';
 import { toast } from 'sonner';
-
-const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
+import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
 
 interface Dealership {
   id: string;

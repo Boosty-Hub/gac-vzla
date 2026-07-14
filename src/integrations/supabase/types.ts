@@ -514,6 +514,7 @@ export type Database = {
           satisfaction_rating: number | null
           service_notes: string | null
           service_type: string
+          state: string | null
           status: string
           technical_report_url: string | null
           updated_at: string | null
@@ -535,6 +536,7 @@ export type Database = {
           satisfaction_rating?: number | null
           service_notes?: string | null
           service_type: string
+          state?: string | null
           status?: string
           technical_report_url?: string | null
           updated_at?: string | null
@@ -556,6 +558,7 @@ export type Database = {
           satisfaction_rating?: number | null
           service_notes?: string | null
           service_type?: string
+          state?: string | null
           status?: string
           technical_report_url?: string | null
           updated_at?: string | null
