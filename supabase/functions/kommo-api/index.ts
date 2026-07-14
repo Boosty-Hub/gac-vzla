@@ -1705,6 +1705,15 @@ Deno.serve(async (req) => {
       addNotif(CF_RES.km_vehiculo, res.current_mileage ? String(res.current_mileage) : '')
       addNotif(CF.salesperson, createdBy || '')
 
+      // Name the notification lead after the CLIENT who booked, not the dealership.
+      // The dealership is already identifiable from the linked contact and from
+      // "Concesionario de la Cita" (CF_RES.concesionario_cita), so naming the lead
+      // after the dealership only buried the one name the notification is about.
+      // Accents are stripped for the same reason as the CFs above: the WhatsApp
+      // template renders the value and garbles non-ASCII.
+      // This mirrors the reservation lead, which is already named after the client.
+      const notifLeadName = stripAccents(clientName)
+
       // ── Ensure ONE persistent notification lead per dealership ─────────────────
       let notifLeadId: number | null = dealership.kommo_notification_lead_id ?? null
       let wasCreated = false
@@ -1715,10 +1724,13 @@ Deno.serve(async (req) => {
       }
 
       if (notifLeadId) {
-        // Update CFs first, then toggle stage to re-trigger the Sales Bot
+        // Update the name AND the CFs first, then toggle stage to re-trigger the Sales Bot.
+        // The name must be patched on every notification: these leads are permanent and
+        // reused per dealership, so a name set only at creation would stay frozen on the
+        // first client forever.
         await fetch(`${baseUrl}/leads/${notifLeadId}`, {
           method: 'PATCH', headers: authHeaders,
-          body: JSON.stringify({ custom_fields_values: notifCFs }),
+          body: JSON.stringify({ name: notifLeadName, custom_fields_values: notifCFs }),
         })
         // Buffer stage (Pendiente) → back to Notificaciones: fires "entered stage" event
         await fetch(`${baseUrl}/leads/${notifLeadId}`, {
@@ -1732,7 +1744,7 @@ Deno.serve(async (req) => {
       } else {
         // First reservation for this dealership → create the permanent notification lead
         const createLeadPayload = [{
-          name: dealership.name,
+          name: notifLeadName,
           pipeline_id: POSTVENTA_PIPELINE_ID,
           status_id: 107696308,
           custom_fields_values: notifCFs,
