@@ -159,11 +159,17 @@ const DealershipReservas = () => {
   const [view, setView] = useState<'table' | 'matrix'>('matrix');
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const d = new Date();
+  const [reservationTab, setReservationTab] = useState<'citas' | 'repuestos'>('citas');
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
 
   // Search/filter
   const [resSearch, setResSearch] = useState('');
+  // Parts requests have no meaningful time slot, so only the table view applies to them
+  useEffect(() => {
+    if (reservationTab === 'repuestos') setView('table');
+  }, [reservationTab]);
+
   const [resStatusFilter, setResStatusFilter] = useState('todos');
   const [resServiceFilter, setResServiceFilter] = useState('todos');
   const [resFechaDesde, setResFechaDesde] = useState('');
@@ -474,6 +480,10 @@ const DealershipReservas = () => {
     if (resStatusFilter === 'todos' && ARCHIVED_STATUSES.has(r.status)) return false;
     if (resStatusFilter !== 'todos' && r.status !== resStatusFilter) return false;
     if (resServiceFilter !== 'todos' && r.service_type !== resServiceFilter) return false;
+    // Split into "Citas" vs "Solicitudes de Repuestos" tabs
+    if (reservationTab === 'repuestos') {
+      if (!isPartsRequest(r.service_type)) return false;
+    } else if (isPartsRequest(r.service_type)) return false;
     if (resFechaDesde && r.reservation_date < resFechaDesde) return false;
     if (resFechaHasta && r.reservation_date > resFechaHasta) return false;
     if (resSearch.trim()) {
@@ -938,16 +948,20 @@ const DealershipReservas = () => {
             >
               <List className="w-3.5 h-3.5" />
             </Button>
-            <div className="w-px h-5 bg-border" />
-            <Button
-              variant={view === 'matrix' ? 'secondary' : 'ghost'}
-              size="sm"
-              className="h-8 rounded-none px-2.5 border-0"
-              onClick={() => setView('matrix')}
-              title="Vista calendario mensual"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-            </Button>
+            {reservationTab === 'citas' && (
+              <>
+                <div className="w-px h-5 bg-border" />
+                <Button
+                  variant={view === 'matrix' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-8 rounded-none px-2.5 border-0"
+                  onClick={() => setView('matrix')}
+                  title="Vista calendario mensual"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                </Button>
+              </>
+            )}
           </div>
           {canCreate && (
             <Button size="sm" onClick={openCreate} className="gac-gradient">
@@ -969,6 +983,29 @@ const DealershipReservas = () => {
               <SelectItem value="todos">Todos los estados</SelectItem>
               {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
               <SelectSeparator />
+      <div className="flex items-center border rounded-md overflow-hidden w-fit">
+        <Button
+          variant={reservationTab === 'citas' ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-8 rounded-none px-3 border-0 text-xs"
+          onClick={() => setReservationTab('citas')}
+        >
+          Citas
+        </Button>
+        <div className="w-px h-5 bg-border" />
+        <Button
+          variant={reservationTab === 'repuestos' ? 'secondary' : 'ghost'}
+          size="sm"
+          className="h-8 rounded-none px-3 border-0 text-xs gap-1.5"
+          onClick={() => setReservationTab('repuestos')}
+        >
+          Solicitudes de Repuestos
+          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
+            {reservations.filter(r => isPartsRequest(r.service_type)).length}
+          </Badge>
+        </Button>
+      </div>
+
               <SelectItem value="agendada">Agendada</SelectItem>
               <SelectItem value="culminado">Culminado</SelectItem>
             </SelectContent>

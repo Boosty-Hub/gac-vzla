@@ -162,6 +162,7 @@ const AdminReservas = () => {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+  const [reservationTab, setReservationTab] = useState<'citas' | 'repuestos'>('citas');
   const [capacityWarning, setCapacityWarning] = useState('');
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
@@ -309,6 +310,11 @@ const AdminReservas = () => {
     if (!dialogOpen || editingRes) {
       if (!dialogOpen) { try { localStorage.removeItem(AR_LS_KEY); } catch {} }
       return;
+  // Parts requests have no meaningful time slot, so only the table view applies to them
+  useEffect(() => {
+    if (reservationTab === 'repuestos') setView('table');
+  }, [reservationTab]);
+
     }
     try {
       localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear }));
@@ -806,8 +812,14 @@ const AdminReservas = () => {
     if (filtroServicio !== 'todos' && r.service_type !== filtroServicio) return false;
     if (filtroVendedor !== 'todos' && r.created_by_name !== filtroVendedor) return false;
     if (fechaDesde && r.reservation_date < fechaDesde) return false;
+  const partsRequestsCount = reservations.filter(r => isPartsRequest(r.service_type)).length;
+
     if (fechaHasta && r.reservation_date > fechaHasta) return false;
     if (busqueda.trim()) {
+    // Split into "Citas" vs "Solicitudes de Repuestos" tabs
+    if (reservationTab === 'repuestos') {
+      if (!isPartsRequest(r.service_type)) return false;
+    } else if (isPartsRequest(r.service_type)) return false;
       const q = busqueda.toLowerCase();
       if (
         !(r.clients?.full_name || '').toLowerCase().includes(q) &&
@@ -863,7 +875,9 @@ const AdminReservas = () => {
           <Tabs value={view} onValueChange={v => { setView(v as 'table' | 'matrix'); setSelectedIds(new Set()); }}>
             <TabsList className="h-8">
               <TabsTrigger value="table" className="gap-1 text-xs h-7 px-2"><List className="w-3.5 h-3.5" /><span className="hidden sm:inline"> Tabla</span></TabsTrigger>
-              <TabsTrigger value="matrix" className="gap-1 text-xs h-7 px-2"><LayoutGrid className="w-3.5 h-3.5" /><span className="hidden sm:inline"> Matriz</span></TabsTrigger>
+              {reservationTab === 'citas' && (
+                <TabsTrigger value="matrix" className="gap-1 text-xs h-7 px-2"><LayoutGrid className="w-3.5 h-3.5" /><span className="hidden sm:inline"> Matriz</span></TabsTrigger>
+              )}
             </TabsList>
           </Tabs>
           <Button size="sm" variant="outline" onClick={() => { fetchServiceTypes(); setSvcOpen(true); setSvcEditing(null); setSvcName(''); setSvcDuration('60'); setSvcRequiresDesc(false); }} className="gap-1 text-xs">
@@ -885,6 +899,16 @@ const AdminReservas = () => {
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
               <Input placeholder="Buscar cliente, placa..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
             </div>
+      <Tabs value={reservationTab} onValueChange={v => { setReservationTab(v as 'citas' | 'repuestos'); setSelectedIds(new Set()); }}>
+        <TabsList className="h-8">
+          <TabsTrigger value="citas" className="text-xs h-7 px-3">Citas</TabsTrigger>
+          <TabsTrigger value="repuestos" className="gap-1.5 text-xs h-7 px-3">
+            Solicitudes de Repuestos
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{partsRequestsCount}</Badge>
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
           )}
           {view === 'matrix' && (
             <div className="text-xs text-muted-foreground">Vista mensual — usa los controles del calendario para navegar.</div>
