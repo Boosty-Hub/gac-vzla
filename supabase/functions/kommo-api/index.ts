@@ -326,6 +326,7 @@ const CF_RES = {
   placa_vehiculo:    3417661,  // Placa del Vehiculo (text)
   concesionario_cita:3417663,  // Concesionario de la Cita (text)
   km_vehiculo:       3417665,  // Kilometraje del Vehiculo (text)
+  cliente_cita:      3456611,  // Cliente de la Cita (text)
   supabase_id:       3192400,  // ID Supabase (reused)
 }
 
@@ -1695,6 +1696,11 @@ Deno.serve(async (req) => {
       addNotif(CF_RES.vehiculo_cita,      vehicleStr)
       addNotif(CF_RES.placa_vehiculo,     plate)
       addNotif(CF_RES.concesionario_cita, dealership.name)
+      // The client who booked, in a field of its own. The WhatsApp template reads this
+      // for its "Cliente" line. It must NOT come from the lead name: the notification
+      // lead is permanent and shared by every reservation of this dealership, so naming
+      // it after each client would rewrite it on every booking and wreck the CRM.
+      addNotif(CF_RES.cliente_cita, clientName)
       // NOTE: do NOT stamp supabase_id on the notification lead — it is a permanent
       // per-dealership lead, not a reservation lead. Stamping it would make it collide
       // with the real reservation lead in the supabase_id-based duplicate detection.
@@ -1705,14 +1711,13 @@ Deno.serve(async (req) => {
       addNotif(CF_RES.km_vehiculo, res.current_mileage ? String(res.current_mileage) : '')
       addNotif(CF.salesperson, createdBy || '')
 
-      // Name the notification lead after the CLIENT who booked, not the dealership.
-      // The dealership is already identifiable from the linked contact and from
-      // "Concesionario de la Cita" (CF_RES.concesionario_cita), so naming the lead
-      // after the dealership only buried the one name the notification is about.
-      // Accents are stripped for the same reason as the CFs above: the WhatsApp
-      // template renders the value and garbles non-ASCII.
-      // This mirrors the reservation lead, which is already named after the client.
-      const notifLeadName = stripAccents(clientName)
+      // The notification lead is PERMANENT and one-per-dealership: every reservation for
+      // this dealership reuses it. So its name is the DEALERSHIP, always — never the
+      // client. Naming it after whoever booked last would rewrite the same lead on every
+      // reservation and make the Kommo pipeline unreadable. The client's name travels in
+      // CF_RES.cliente_cita instead, which is what the WhatsApp template reads.
+      // Patched on every notification so a lead that drifted gets restored.
+      const notifLeadName = dealership.name
 
       // ── Ensure ONE persistent notification lead per dealership ─────────────────
       let notifLeadId: number | null = dealership.kommo_notification_lead_id ?? null
@@ -1725,9 +1730,8 @@ Deno.serve(async (req) => {
 
       if (notifLeadId) {
         // Update the name AND the CFs first, then toggle stage to re-trigger the Sales Bot.
-        // The name must be patched on every notification: these leads are permanent and
-        // reused per dealership, so a name set only at creation would stay frozen on the
-        // first client forever.
+        // Patching the name keeps it pinned to the dealership, so any lead that was
+        // renamed by hand (or by an earlier build) is restored on its next notification.
         await fetch(`${baseUrl}/leads/${notifLeadId}`, {
           method: 'PATCH', headers: authHeaders,
           body: JSON.stringify({ name: notifLeadName, custom_fields_values: notifCFs }),
