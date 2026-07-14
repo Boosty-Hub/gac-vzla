@@ -3,7 +3,7 @@
 # plantilla comentada abajo: requiere probarse contra la app corriendo antes de
 # activarse, porque una CSP mal calibrada rompe el frontend por completo.
 /*
-  X-Frame-Options: SAMEORIGIN
+  Content-Security-Policy: frame-ancestors 'self' https://boosty-projects-hub.netlify.app
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Strict-Transport-Security: max-age=31536000; includeSubDomains

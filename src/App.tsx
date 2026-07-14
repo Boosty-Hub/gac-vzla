@@ -8,6 +8,7 @@ import { ProtectedRoute, RedirectByRole } from "@/components/ProtectedRoute";
 import AdminLayout from "@/components/layouts/AdminLayout";
 import Login from "./pages/Login";
 import MagicLogin from "./pages/MagicLogin";
+import AuthCallback from "./pages/AuthCallback";
 import UserPortal from "./pages/UserPortal";
 import DealershipLayout from "./components/layouts/DealershipLayout";
 import DealershipDashboard from "./pages/dealership/DealershipDashboard";
@@ -59,6 +60,7 @@ const App = () => (
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/magic-login" element={<MagicLogin />} />
+            <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/" element={<RedirectByRole />} />
             <Route path="/reservar" element={<PublicReserva />} />
             <Route path="/prospectos" element={<PublicProspectos />} />
