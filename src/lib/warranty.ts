@@ -152,3 +152,12 @@ export function evaluateWarranty(
     conditionName: resolved.name,
   };
 }
+
+/**
+ * Formats a completed-service count as a human-readable, correctly pluralized label.
+ * Used to show the running count of services on its own (e.g. "3 servicios"),
+ * without pairing it against the expected-by-km figure as a limiting ratio.
+ */
+export function formatServiceCount(count: number): string {
+  return `${count} ${count === 1 ? 'servicio' : 'servicios'}`;
+}

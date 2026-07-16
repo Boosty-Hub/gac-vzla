@@ -11,7 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Car, ShieldCheck, ShieldX, AlertTriangle, Search, CalendarDays, Hash, MapPin, Clock, ClipboardCheck, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { evaluateWarranty, resolveWarrantyCondition, type WarrantyEvaluation } from '@/lib/warranty';
+import { evaluateWarranty, resolveWarrantyCondition, formatServiceCount, type WarrantyEvaluation } from '@/lib/warranty';
 
 interface WarrantyCondition {
   id: number;
@@ -284,7 +284,8 @@ const AdminGarantias = () => {
                 </div>
                 {/* Row 3: stats chips */}
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[10px] bg-muted rounded px-1.5 py-0.5">Servicios {w.servicesCompleted}/{w.servicesExpected}</span>
+                  <span className="text-[10px] bg-muted rounded px-1.5 py-0.5">{formatServiceCount(w.servicesCompleted)}</span>
+                  <span className="text-[10px] bg-muted/50 rounded px-1.5 py-0.5 text-muted-foreground">Sugeridos por km: {w.servicesExpected}</span>
                   <span className="text-[10px] bg-muted rounded px-1.5 py-0.5">{w.monthsRemaining > 0 ? w.monthsRemaining : '0'} meses rest.</span>
                   <span className="text-[10px] bg-muted rounded px-1.5 py-0.5">{w.kmRemaining > 0 ? w.kmRemaining.toLocaleString() : '0'} km rest.</span>
                   {v.purchase_date && <span className="text-[10px] bg-muted rounded px-1.5 py-0.5 flex items-center gap-1"><CalendarDays className="w-2.5 h-2.5" />{v.purchase_date}</span>}
@@ -352,7 +353,10 @@ const AdminGarantias = () => {
                       <TableCell className="text-xs">{v.plate || '-'}</TableCell>
                       <TableCell className="text-xs max-w-[160px] truncate">{v.clients?.full_name || '-'}</TableCell>
                       <TableCell className="text-xs text-right">{v.mileage.toLocaleString()}</TableCell>
-                      <TableCell className="text-xs text-center">{w.servicesCompleted}/{w.servicesExpected}</TableCell>
+                      <TableCell className="text-xs text-center">
+                        <div className="font-semibold">{w.servicesCompleted}</div>
+                        <div className="text-[10px] text-muted-foreground">Sugeridos por km: {w.servicesExpected}</div>
+                      </TableCell>
                       <TableCell className="text-xs text-center">{w.monthsRemaining > 0 ? w.monthsRemaining : '0'}</TableCell>
                       <TableCell className="text-xs text-center">{w.kmRemaining > 0 ? w.kmRemaining.toLocaleString() : '0'}</TableCell>
                       <TableCell className="text-center">
@@ -423,13 +427,11 @@ const AdminGarantias = () => {
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                  <div className="bg-muted rounded-lg p-2">
-                    <p className="text-sm font-bold">{w.servicesCompleted}</p>
-                    <p className="text-[10px] text-muted-foreground">Realizados</p>
+                  <div className="bg-muted rounded-lg p-2 flex items-center justify-center">
+                    <Badge variant="secondary" className="text-xs font-bold px-2 py-0.5">{formatServiceCount(w.servicesCompleted)}</Badge>
                   </div>
-                  <div className="bg-muted rounded-lg p-2">
-                    <p className="text-sm font-bold">{w.servicesExpected}</p>
-                    <p className="text-[10px] text-muted-foreground">Esperados</p>
+                  <div className="bg-muted/50 rounded-lg p-2 flex items-center justify-center">
+                    <p className="text-[10px] text-muted-foreground">Sugeridos por km: {w.servicesExpected}</p>
                   </div>
                   <div className="bg-muted rounded-lg p-2">
                     <p className="text-sm font-bold">{w.kmRemaining > 0 ? `${(w.kmRemaining / 1000).toFixed(0)}k` : '0'}</p>

@@ -22,7 +22,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { createKommoReservation } from '@/lib/kommo';
-import { resolveWarrantyCondition, evaluateWarranty, type WarrantyConditionRef } from '@/lib/warranty';
+import { resolveWarrantyCondition, evaluateWarranty, formatServiceCount, type WarrantyConditionRef } from '@/lib/warranty';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isInternalServiceType } from '@/lib/serviceTypes';
 
@@ -513,8 +513,9 @@ const UserPortal = () => {
           )}
           <div className="mt-3 grid grid-cols-3 gap-2 text-center">
             <div className="bg-muted rounded-lg p-1.5">
-              <p className="text-sm font-bold">{w.servicesCompleted}/{w.servicesExpected}</p>
+              <p className="text-sm font-bold">{w.servicesCompleted}</p>
               <p className="text-[10px] text-muted-foreground">Servicios</p>
+              <p className="text-[10px] text-muted-foreground/80">Sugeridos por km: {w.servicesExpected}</p>
             </div>
             <div className="bg-muted rounded-lg p-1.5">
               <p className="text-sm font-bold">{w.kmRemaining > 0 ? `${(w.kmRemaining / 1000).toFixed(0)}k` : '0'}</p>
@@ -1502,13 +1503,11 @@ const UserPortal = () => {
                   </div>
 
                   <div className="grid grid-cols-4 gap-2 text-center">
-                    <div className="bg-muted rounded-lg p-1.5">
-                      <p className="text-sm font-bold">{w.servicesCompleted}</p>
-                      <p className="text-[10px] text-muted-foreground">Realizados</p>
+                    <div className="bg-muted rounded-lg p-1.5 flex items-center justify-center">
+                      <Badge variant="secondary" className="text-xs font-bold px-2 py-0.5">{formatServiceCount(w.servicesCompleted)}</Badge>
                     </div>
-                    <div className="bg-muted rounded-lg p-1.5">
-                      <p className="text-sm font-bold">{w.servicesExpected}</p>
-                      <p className="text-[10px] text-muted-foreground">Esperados</p>
+                    <div className="bg-muted/50 rounded-lg p-1.5 flex items-center justify-center">
+                      <p className="text-[10px] text-muted-foreground">Sugeridos por km: {w.servicesExpected}</p>
                     </div>
                     <div className="bg-muted rounded-lg p-1.5">
                       <p className="text-sm font-bold">{w.nextServiceKm > 0 ? `${(w.nextServiceKm / 1000).toFixed(0)}k` : '-'}</p>
