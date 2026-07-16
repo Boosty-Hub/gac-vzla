@@ -779,7 +779,13 @@ Deno.serve(async (req) => {
     // self-invocations. The secret key is server-only (never exposed to browsers).
     const bearerToken = authHeader.replace(/^Bearer\s+/i, '').trim()
     const serviceKey = (Deno.env.get('SB_SECRET_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '').trim()
-    const isServiceCall = bearerToken.length > 0 && bearerToken === serviceKey
+    // supabase-js sends new-format secret keys (sb_secret_*) only in the `apikey`
+    // header — they are not JWTs, so the client never puts them in Authorization.
+    // Self-invocations (functions.invoke) therefore arrive with apikey=secret and
+    // no usable bearer. Accept either header as proof of a trusted internal call.
+    const apikeyHeader = (req.headers.get('apikey') ?? '').trim()
+    const isServiceCall = serviceKey.length > 0 &&
+      (bearerToken === serviceKey || apikeyHeader === serviceKey)
 
     let callerId: string | null = null
     let callerRole: string | null = null
@@ -1375,6 +1381,10 @@ Deno.serve(async (req) => {
             reservation_id,
             kommo_lead_id: newLead.id,
           },
+          // Explicit bearer: supabase-js does not put sb_secret_* keys in
+          // Authorization on its own, and the auth guard must see this call
+          // as a trusted internal one.
+          headers: { Authorization: `Bearer ${serviceKey}` },
         }).catch(() => { /* notification failure is non-blocking */ })
       }
 
@@ -1534,6 +1544,7 @@ Deno.serve(async (req) => {
         try {
           const { error } = await supabase.functions.invoke('kommo-api', {
             body: { action: 'create_reservation', reservation_id: r.id },
+            headers: { Authorization: `Bearer ${serviceKey}` },
           })
           if (error) { failed++; console.error(`batch_sync: ${r.id} →`, error) }
           else created++
@@ -1839,6 +1850,7 @@ Deno.serve(async (req) => {
         try {
           const { error } = await supabase.functions.invoke('kommo-api', {
             body: { action: 'update_reservation_fields', reservation_id: r.id, kommo_lead_id: r.kommo_lead_id },
+            headers: { Authorization: `Bearer ${serviceKey}` },
           })
           if (error) { failed++; console.error(`batch_update: ${r.id} →`, error) }
           else updated++
