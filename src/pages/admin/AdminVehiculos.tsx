@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -16,6 +16,7 @@ import { Separator } from '@/components/ui/separator';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Search, Car, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, User, Pencil, X, Trash2, Palette, Power, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { buildVehicleSearchFilter, sanitizeSearchTerm } from '@/lib/vehicleSearch';
 import { toast } from 'sonner';
 
 interface VehicleModel {
@@ -64,7 +65,6 @@ const AdminVehiculos = () => {
   const [busqueda, setBusqueda] = useState('');
   const [brandFilter, setBrandFilter] = useState('all');
   const [warrantyFilter, setWarrantyFilter] = useState('todos');
-  const [modelSearch, setModelSearch] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [datePreset, setDatePreset] = useState('');
@@ -74,6 +74,9 @@ const AdminVehiculos = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(100);
+  // Monotonic sequence to discard stale fetchVehicles responses (overlapping
+  // calls can resolve out of order because of the model-id lookup await).
+  const fetchSeq = useRef(0);
 
   // Detail dialog
   const [detailOpen, setDetailOpen] = useState(false);
@@ -105,22 +108,21 @@ const AdminVehiculos = () => {
   };
 
   const fetchVehicles = async () => {
+    const seq = ++fetchSeq.current;
     setLoading(true);
 
-    // Model name search: resolve matching model IDs first
-    let modelIds: string[] | null = null;
-    if (modelSearch.trim()) {
+    const searchTerm = sanitizeSearchTerm(busqueda);
+
+    // Model name search: resolve matching model IDs so the main search box
+    // also finds vehicles by model (e.g. "GS3").
+    let modelIds: string[] = [];
+    if (searchTerm) {
       const { data: matchingModels } = await supabase
         .from('vehicle_models')
         .select('id')
-        .ilike('name', `%${modelSearch.trim()}%`);
-      modelIds = (matchingModels || []).map(m => m.id);
-      if (modelIds.length === 0) {
-        setVehicles([]);
-        setTotalCount(0);
-        setLoading(false);
-        return;
-      }
+        .ilike('name', `%${searchTerm}%`);
+      if (seq !== fetchSeq.current) return;
+      modelIds = (matchingModels || []).map((m: { id: string }) => m.id);
     }
 
     let query = supabase
@@ -131,12 +133,11 @@ const AdminVehiculos = () => {
       query = query.eq('warranty_active', warrantyFilter === 'activa');
     }
 
-    if (busqueda.trim()) {
-      query = query.or(`plate.ilike.%${busqueda}%,vin.ilike.%${busqueda}%,color.ilike.%${busqueda}%`);
-    }
-
-    if (modelIds !== null) {
-      query = query.in('model_id', modelIds);
+    if (searchTerm) {
+      const searchFilter = buildVehicleSearchFilter(searchTerm, modelIds);
+      if (searchFilter) {
+        query = query.or(searchFilter);
+      }
     }
 
     // Purchase date range filter
@@ -146,6 +147,9 @@ const AdminVehiculos = () => {
     const { data, error, count } = await query
       .order('created_at', { ascending: false })
       .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    // Stale response guard: a newer fetch has started, drop this result.
+    if (seq !== fetchSeq.current) return;
 
     if (error) {
       console.error('Error fetching vehicles:', error);
@@ -166,11 +170,11 @@ const AdminVehiculos = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [busqueda, modelSearch, brandFilter, warrantyFilter, pageSize, dateFrom, dateTo]);
+  }, [busqueda, brandFilter, warrantyFilter, pageSize, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchVehicles();
-  }, [page, busqueda, modelSearch, brandFilter, warrantyFilter, pageSize, dateFrom, dateTo]);
+  }, [page, busqueda, brandFilter, warrantyFilter, pageSize, dateFrom, dateTo]);
 
   const openDetail = async (v: Vehicle) => {
     setDetailVehicle(v);
@@ -393,11 +397,7 @@ const AdminVehiculos = () => {
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 items-end">
         <div className="relative col-span-2 lg:col-span-2">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input placeholder="Placa, VIN, color..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
-        </div>
-        <div className="relative col-span-2 md:col-span-1 lg:col-span-1">
-          <Car className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input placeholder="Modelo (ej: GS3)..." className="pl-8 h-8 text-xs" value={modelSearch} onChange={e => setModelSearch(e.target.value)} />
+          <Input placeholder="Placa, VIN, color, modelo..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
         </div>
         <Select value={brandFilter} onValueChange={setBrandFilter}>
           <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Marca" /></SelectTrigger>
