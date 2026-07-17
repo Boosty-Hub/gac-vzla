@@ -205,6 +205,7 @@ const DealershipProspectos = () => {
   const [prosSearch, setProsSearch] = useState(() => searchParams.get('q') || '');
   const [prosStatusFilter, setProsStatusFilter] = useState('todos');
   const [prosSourceFilter, setProsSourceFilter] = useState(() => searchParams.get('source') || 'todos');
+  const [prosBrandFilter, setProsBrandFilter] = useState(() => searchParams.get('brand') || 'todos');
   const [prosEstadoVzlaFilter, setProsEstadoVzlaFilter] = useState('todos');
   const [prosTestDriveFilter, setProsTestDriveFilter] = useState('todos');
   const [prosPersonTypeFilter, setProsPersonTypeFilter] = useState('todos');
@@ -434,6 +435,7 @@ const DealershipProspectos = () => {
   const filteredProspects = prospects.filter(p => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
     if (prosSourceFilter !== 'todos' && p.source !== prosSourceFilter) return false;
+    if (prosBrandFilter !== 'todos' && !getProspectUnits(p).some(u => u.brand === prosBrandFilter)) return false;
     if (eventNameFilter !== 'todos' && (p.event_name || '') !== eventNameFilter) return false;
     if (prosSalespersonFilter !== 'todos' && (p.salesperson || '') !== prosSalespersonFilter) return false;
     if (prosEstadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== prosEstadoVzlaFilter) return false;
@@ -1376,6 +1378,16 @@ const DealershipProspectos = () => {
                 </Select>
               </div>
             )}
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Marca</span>
+              <Select value={prosBrandFilter} onValueChange={v => { setProsBrandFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[110px]"><SelectValue placeholder="Todas" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todas las marcas</SelectItem>
+                  {prospectBrands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
             {!isVendedor && (
               <div className="flex flex-col gap-0.5 shrink-0">
                 <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Vendedor</span>
@@ -1456,8 +1468,8 @@ const DealershipProspectos = () => {
                 </div>
               </PopoverContent>
             </Popover>
-            {(prosSearch || prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos' || eventNameFilter !== 'todos' || prosEstadoVzlaFilter !== 'todos' || prosTestDriveFilter !== 'todos' || prosPersonTypeFilter !== 'todos' || prosGenderFilter !== 'todos' || prosAgeRangeFilter !== 'todos') && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setEventNameFilter('todos'); setProsEstadoVzlaFilter('todos'); setProsTestDriveFilter('todos'); setProsPersonTypeFilter('todos'); setProsGenderFilter('todos'); setProsAgeRangeFilter('todos'); setProsSearch(''); setCurrentPage(1); }}>
+            {(prosSearch || prosFechaDesde || prosFechaHasta || prosStatusFilter !== 'todos' || prosSourceFilter !== 'todos' || prosBrandFilter !== 'todos' || eventNameFilter !== 'todos' || prosEstadoVzlaFilter !== 'todos' || prosTestDriveFilter !== 'todos' || prosPersonTypeFilter !== 'todos' || prosGenderFilter !== 'todos' || prosAgeRangeFilter !== 'todos') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setProsFechaDesde(''); setProsFechaHasta(''); setProsStatusFilter('todos'); setProsSourceFilter('todos'); setProsBrandFilter('todos'); setEventNameFilter('todos'); setProsEstadoVzlaFilter('todos'); setProsTestDriveFilter('todos'); setProsPersonTypeFilter('todos'); setProsGenderFilter('todos'); setProsAgeRangeFilter('todos'); setProsSearch(''); setCurrentPage(1); }}>
                 <X className="w-3 h-3" />Limpiar
               </Button>
             )}

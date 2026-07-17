@@ -228,6 +228,7 @@ const AdminProspectos = () => {
   const [dealershipFilter, setDealershipFilter] = useState(() => searchParams.get('dealership') || 'todos');
   const [statusFilter, setStatusFilter] = useState('todos');
   const [sourceFilter, setSourceFilter] = useState(() => searchParams.get('source') || 'todos');
+  const [brandFilter, setBrandFilter] = useState(() => searchParams.get('brand') || 'todos');
   const [salespersonFilter, setSalespersonFilter] = useState(() => searchParams.get('salesperson') || 'todos');
   const [estadoVzlaFilter, setEstadoVzlaFilter] = useState('todos');
   const [testDriveFilter, setTestDriveFilter] = useState('todos');
@@ -401,6 +402,7 @@ const AdminProspectos = () => {
     if (dealershipFilter !== 'todos' && p.dealership_id !== dealershipFilter) return false;
     if (statusFilter !== 'todos' && p.status !== statusFilter) return false;
     if (sourceFilter !== 'todos' && p.source !== sourceFilter) return false;
+    if (brandFilter !== 'todos' && !getProspectUnits(p).some(u => u.brand === brandFilter)) return false;
     if (eventNameFilter !== 'todos' && (p.event_name || '') !== eventNameFilter) return false;
     if (salespersonFilter !== 'todos' && (p.salesperson || '') !== salespersonFilter) return false;
     if (estadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== estadoVzlaFilter) return false;
@@ -1402,6 +1404,16 @@ const AdminProspectos = () => {
               </div>
             )}
             <div className="flex flex-col gap-0.5 shrink-0">
+              <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Marca</span>
+              <Select value={brandFilter} onValueChange={v => { setBrandFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="h-8 text-xs w-[110px]"><SelectValue placeholder="Todas" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todas las marcas</SelectItem>
+                  {prospectBrands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-0.5 shrink-0">
               <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Vendedor</span>
               <Select value={salespersonFilter} onValueChange={v => { setSalespersonFilter(v); setCurrentPage(1); }}>
                 <SelectTrigger className="h-8 text-xs w-[130px]"><SelectValue placeholder="Todos" /></SelectTrigger>
@@ -1469,8 +1481,8 @@ const AdminProspectos = () => {
                 </div>
               </PopoverContent>
             </Popover>
-            {(search || fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || eventNameFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos' || testDriveFilter !== 'todos' || personTypeFilter !== 'todos' || genderFilter !== 'todos' || ageRangeFilter !== 'todos') && (
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setEventNameFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setTestDriveFilter('todos'); setPersonTypeFilter('todos'); setGenderFilter('todos'); setAgeRangeFilter('todos'); setSearch(''); setCurrentPage(1); }}>
+            {(search || fechaDesde || fechaHasta || statusFilter !== 'todos' || sourceFilter !== 'todos' || brandFilter !== 'todos' || eventNameFilter !== 'todos' || salespersonFilter !== 'todos' || dealershipFilter !== 'todos' || estadoVzlaFilter !== 'todos' || testDriveFilter !== 'todos' || personTypeFilter !== 'todos' || genderFilter !== 'todos' || ageRangeFilter !== 'todos') && (
+              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground shrink-0 gap-1" onClick={() => { setFechaDesde(''); setFechaHasta(''); setStatusFilter('todos'); setSourceFilter('todos'); setBrandFilter('todos'); setEventNameFilter('todos'); setSalespersonFilter('todos'); setDealershipFilter('todos'); setEstadoVzlaFilter('todos'); setTestDriveFilter('todos'); setPersonTypeFilter('todos'); setGenderFilter('todos'); setAgeRangeFilter('todos'); setSearch(''); setCurrentPage(1); }}>
                 <X className="w-3 h-3" />Limpiar
               </Button>
             )}
