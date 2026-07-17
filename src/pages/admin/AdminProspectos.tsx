@@ -402,7 +402,10 @@ const AdminProspectos = () => {
     if (dealershipFilter !== 'todos' && p.dealership_id !== dealershipFilter) return false;
     if (statusFilter !== 'todos' && p.status !== statusFilter) return false;
     if (sourceFilter !== 'todos' && p.source !== sourceFilter) return false;
-    if (brandFilter !== 'todos' && !getProspectUnits(p).some(u => u.brand === brandFilter)) return false;
+    // Match the PRIMARY brand only — the one shown in the "Marca" column. A prospect can
+    // hold several units; matching any unit would leak a DFSK-primary prospect into the GAC
+    // filter (and vice versa) just because a secondary unit was that brand.
+    if (brandFilter !== 'todos' && (getProspectUnits(p)[0]?.brand ?? '') !== brandFilter) return false;
     if (eventNameFilter !== 'todos' && (p.event_name || '') !== eventNameFilter) return false;
     if (salespersonFilter !== 'todos' && (p.salesperson || '') !== salespersonFilter) return false;
     if (estadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== estadoVzlaFilter) return false;

@@ -435,7 +435,10 @@ const DealershipProspectos = () => {
   const filteredProspects = prospects.filter(p => {
     if (prosStatusFilter !== 'todos' && p.status !== prosStatusFilter) return false;
     if (prosSourceFilter !== 'todos' && p.source !== prosSourceFilter) return false;
-    if (prosBrandFilter !== 'todos' && !getProspectUnits(p).some(u => u.brand === prosBrandFilter)) return false;
+    // Match the PRIMARY brand only — the one shown in the "Marca" column. A prospect can
+    // hold several units; matching any unit would leak a DFSK-primary prospect into the GAC
+    // filter (and vice versa) just because a secondary unit was that brand.
+    if (prosBrandFilter !== 'todos' && (getProspectUnits(p)[0]?.brand ?? '') !== prosBrandFilter) return false;
     if (eventNameFilter !== 'todos' && (p.event_name || '') !== eventNameFilter) return false;
     if (prosSalespersonFilter !== 'todos' && (p.salesperson || '') !== prosSalespersonFilter) return false;
     if (prosEstadoVzlaFilter !== 'todos' && (p['Estado de Vnzla'] || '') !== prosEstadoVzlaFilter) return false;
