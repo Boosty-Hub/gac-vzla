@@ -31,7 +31,9 @@ import AdminGeneral from './pages/admin/config/AdminGeneral';
 import AdminPlantillas from './pages/admin/config/AdminPlantillas';
 import AdminAutomatizaciones from './pages/admin/config/AdminAutomatizaciones';
 import AdminEventos from './pages/admin/config/AdminEventos';
+import AdminSoporte from './pages/admin/config/AdminSoporte';
 import ConfigLayout from "./components/layouts/ConfigLayout";
+import BoostySupport from "./components/BoostySupport";
 import PublicReserva from "./pages/PublicReserva";
 import PublicProspectos from "./pages/PublicProspectos";
 import NotFound from "./pages/NotFound";
@@ -57,6 +59,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <BoostySupport />
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/magic-login" element={<MagicLogin />} />
@@ -105,6 +108,7 @@ const App = () => (
             <Route path="/admin/configuracion/garantias" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminCondicionesGarantia /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/plantillas" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminPlantillas /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/automatizaciones" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminAutomatizaciones /></ConfigLayout></ProtectedRoute>} />
+            <Route path="/admin/configuracion/soporte" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminSoporte /></ConfigLayout></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
