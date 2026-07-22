@@ -70,9 +70,10 @@ function processTemplate(template: string, vars: Record<string, string | undefin
 }
 
 /**
- * Fetch the template from the database, falling back to the default.
+ * Fetch the template from the database, falling back to the given default
+ * (or DEFAULT_TEMPLATE when no fallback is provided).
  */
-async function fetchTemplate(templateKey: string): Promise<string> {
+async function fetchTemplate(templateKey: string, fallback: string = DEFAULT_TEMPLATE): Promise<string> {
   try {
     const { data } = await supabase
       .from('message_templates')
@@ -80,9 +81,9 @@ async function fetchTemplate(templateKey: string): Promise<string> {
       .eq('template_key', templateKey)
       .eq('is_active', true)
       .single();
-    return data?.content || DEFAULT_TEMPLATE;
+    return data?.content || fallback;
   } catch {
-    return DEFAULT_TEMPLATE;
+    return fallback;
   }
 }
 
