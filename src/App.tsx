@@ -36,6 +36,7 @@ import ConfigLayout from "./components/layouts/ConfigLayout";
 import BoostySupport from "./components/BoostySupport";
 import PublicReserva from "./pages/PublicReserva";
 import PublicProspectos from "./pages/PublicProspectos";
+import PublicEncuesta from "./pages/PublicEncuesta";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -67,6 +68,7 @@ const App = () => (
             <Route path="/" element={<RedirectByRole />} />
             <Route path="/reservar" element={<PublicReserva />} />
             <Route path="/prospectos" element={<PublicProspectos />} />
+            <Route path="/encuesta/:token" element={<PublicEncuesta />} />
 
             {/* Cliente routes */}
             <Route path="/usuario" element={

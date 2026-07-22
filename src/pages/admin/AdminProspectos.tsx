@@ -19,7 +19,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Separator } from '@/components/ui/separator';
-import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag, ChevronUp, ChevronDown, ChevronsUpDown, SlidersHorizontal, Filter } from 'lucide-react';
+import { Users, Plus, Search, Phone, Mail, MapPin, CalendarDays, User, FileText, Upload, Download, AlertTriangle, CheckCircle2, X, Trash2, Settings2, UserCog, MessageCircle, Car, ExternalLink, Activity, Tag, ChevronUp, ChevronDown, ChevronsUpDown, SlidersHorizontal, Filter, Send } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -38,6 +38,7 @@ import { useProspectEvents } from '@/hooks/useProspectEvents';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 import { phonesMatch } from '@/lib/phone';
+import { normalizeSoldPlate, isValidSoldPlate } from '@/lib/plate';
 
 
 interface Dealership {
@@ -60,6 +61,7 @@ interface Prospect {
   event_name: string | null;
   'Estado de Vnzla': string | null;
   kommo_lead_id: number | null;
+  sold_plate?: string | null;
   test_drive: boolean | null;
   visited_showroom: boolean | null;
   person_type: string | null;
@@ -310,6 +312,14 @@ const AdminProspectos = () => {
   // Duplicate-phone alert (same UX as the dealership portal)
   const [duplicateMatch, setDuplicateMatch] = useState<{ id: string; name: string; phone: string | null; salesperson: string | null } | null>(null);
 
+  // Sold-plate capture: moving a prospect to "ganado" via the inline status
+  // Select must capture the sold vehicle plate before persisting. The DB
+  // trigger (create_satisfaction_survey_on_won) reads sold_plate from the
+  // same update, so status and plate are written together on confirm.
+  const [soldPlateTarget, setSoldPlateTarget] = useState<string | null>(null);
+  const [soldPlateInput, setSoldPlateInput] = useState('');
+  const [soldPlateSaving, setSoldPlateSaving] = useState(false);
+
   // Import XLSX
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -322,6 +332,9 @@ const AdminProspectos = () => {
   const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [sendingWa, setSendingWa] = useState<string | null>(null);
+  // Manual "Enviar encuesta" on ganado prospects — id of the prospect currently
+  // being processed, guards against double-clicks (see handleSendSurvey).
+  const [sendingSurvey, setSendingSurvey] = useState<string | null>(null);
 
   // Updates sidebar
   const [updatesSidebarProspect, setUpdatesSidebarProspect] = useState<Prospect | null>(null);
@@ -620,6 +633,13 @@ const AdminProspectos = () => {
   };
 
   const updateStatus = async (id: string, newStatus: string) => {
+    // Moving to "ganado" must capture the sold vehicle plate first; defer the
+    // write until the user confirms in the sold-plate dialog.
+    if (newStatus === 'ganado') {
+      setSoldPlateInput('');
+      setSoldPlateTarget(id);
+      return;
+    }
     const { error } = await supabase.from('prospects').update({ status: newStatus }).eq('id', id);
     if (error) { toast.error('Error al actualizar estado'); console.error(error); }
     else {
@@ -629,6 +649,30 @@ const AdminProspectos = () => {
         updateKommoLeadStage(id, p.kommo_lead_id, newStatus).catch(console.error);
       }
     }
+  };
+
+  // Confirm handler for the mandatory sold-plate dialog: writes status +
+  // sold_plate in the same update, then runs the same Kommo sync the normal
+  // inline status change runs.
+  const confirmSoldPlate = async () => {
+    if (!soldPlateTarget || !isValidSoldPlate(soldPlateInput)) return;
+    const id = soldPlateTarget;
+    setSoldPlateSaving(true);
+    const { error } = await supabase
+      .from('prospects')
+      .update({ status: 'ganado', sold_plate: normalizeSoldPlate(soldPlateInput) } as any)
+      .eq('id', id);
+    if (error) { toast.error('Error al actualizar estado'); console.error(error); }
+    else {
+      fetchProspects();
+      const p = prospects.find(x => x.id === id);
+      if (p?.kommo_lead_id) {
+        updateKommoLeadStage(id, p.kommo_lead_id, 'ganado').catch(console.error);
+      }
+    }
+    setSoldPlateSaving(false);
+    setSoldPlateTarget(null);
+    setSoldPlateInput('');
   };
 
   const openDetail = (p: Prospect) => {
@@ -721,6 +765,77 @@ const AdminProspectos = () => {
     const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
     window.open(waUrl, '_blank');
     setSendingWa(null);
+  };
+
+  // Manual "Enviar encuesta" (ganado prospects only). Looks up the prospect's
+  // satisfaction survey — creating one if the "ganado" DB trigger hasn't
+  // produced it yet (legacy/edge case) — marks it "sent" via the `mark_survey_sent`
+  // RPC when it was still "pending", copies the public link to the clipboard,
+  // and opens WhatsApp with the link when the prospect has a phone on file.
+  // `satisfaction_surveys` is not in the generated types.ts (new table, no
+  // regen), so all calls below use `(supabase as any)` — same convention as
+  // SatisfactionOverview.tsx / ClientDetailDialog.tsx.
+  const handleSendSurvey = async (p: Prospect) => {
+    if (sendingSurvey) return;
+    setSendingSurvey(p.id);
+    try {
+      const { data: existing, error: fetchError } = await (supabase as any)
+        .from('satisfaction_surveys')
+        .select('id, token, status')
+        .eq('prospect_id', p.id)
+        .limit(1);
+      if (fetchError) throw fetchError;
+
+      let survey = existing?.[0] as { id: string; token: string; status: string } | undefined;
+
+      if (!survey) {
+        // Mirrors create_satisfaction_survey_on_won's row shape (see the
+        // satisfaction migration) — created directly here for prospects that
+        // reached "ganado" before that trigger existed, or any other edge
+        // case where the trigger-created row is missing.
+        const { data: inserted, error: insertError } = await (supabase as any)
+          .from('satisfaction_surveys')
+          .insert({
+            prospect_id: p.id,
+            kommo_lead_id: p.kommo_lead_id,
+            dealership_id: p.dealership_id,
+            salesperson: p.salesperson,
+            client_name: p.name,
+            client_phone: p.phone,
+            sold_plate: p.sold_plate ?? null,
+            eligible_at: new Date().toISOString(),
+            status: 'sent',
+            sent_at: new Date().toISOString(),
+          })
+          .select('id, token, status')
+          .single();
+        if (insertError) throw insertError;
+        survey = inserted;
+      } else if (survey.status === 'pending') {
+        // Reuse the existing staff-facing RPC (guards against downgrading an
+        // already sent/responded survey, and applies the same dealership/
+        // vendedor authorization the survey's RLS policies use).
+        const { error: rpcError } = await (supabase as any).rpc('mark_survey_sent', { p_survey_id: survey.id });
+        if (rpcError) throw rpcError;
+      }
+      // status === 'sent' / 'responded' → reuse the existing token as-is.
+
+      const link = `${window.location.origin}/encuesta/${survey.token}`;
+      await navigator.clipboard.writeText(link);
+      toast.success('Link de encuesta copiado');
+
+      if (p.phone) {
+        const digits = p.phone.replace(/\D/g, '');
+        const waPhone = digits.startsWith('58') ? digits : digits.startsWith('0') ? `58${digits.slice(1)}` : `58${digits}`;
+        const message = `Hola ${p.name}, gracias por tu compra. Nos encantaría conocer tu experiencia: ${link}`;
+        window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank');
+      }
+    } catch (err) {
+      console.error('Error al enviar encuesta:', err);
+      toast.error('Error al enviar la encuesta');
+    } finally {
+      setSendingSurvey(null);
+    }
   };
 
   // XLSX Export — styled
@@ -1214,6 +1329,14 @@ const AdminProspectos = () => {
                   {sendingWa === p.id
                     ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                     : <MessageCircle className="w-4 h-4 text-green-600" />}
+                </Button>
+              )}
+              {p.status === 'ganado' && (
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Enviar encuesta de satisfacción" disabled={sendingSurvey === p.id}
+                  onClick={(e) => { e.stopPropagation(); handleSendSurvey(p); }}>
+                  {sendingSurvey === p.id
+                    ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    : <Send className="w-3.5 h-3.5 text-primary" />}
                 </Button>
               )}
               {canEdit && (
@@ -1713,6 +1836,14 @@ const AdminProspectos = () => {
                                 : <MessageCircle className="w-3.5 h-3.5 text-green-600" />}
                             </Button>
                           )}
+                          {p.status === 'ganado' && (
+                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Enviar encuesta de satisfacción" disabled={sendingSurvey === p.id}
+                              onClick={(e) => { e.stopPropagation(); handleSendSurvey(p); }}>
+                              {sendingSurvey === p.id
+                                ? <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                : <Send className="w-3.5 h-3.5 text-primary" />}
+                            </Button>
+                          )}
                           {canEdit && (
                             <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
                               Editar
@@ -1860,6 +1991,36 @@ const AdminProspectos = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* MANDATORY SOLD-PLATE DIALOG — required before marking a prospect "ganado" */}
+      <Dialog open={soldPlateTarget !== null} onOpenChange={open => { if (!open && !soldPlateSaving) { setSoldPlateTarget(null); setSoldPlateInput(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-display">Vehículo vendido</DialogTitle>
+          </DialogHeader>
+          <div className="py-1 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Ingresa la placa del vehículo vendido para marcar este prospecto como ganado.
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs">Placa del vehículo vendido *</Label>
+              <Input
+                autoFocus
+                value={soldPlateInput}
+                onChange={e => setSoldPlateInput(e.target.value.toUpperCase())}
+                placeholder="Ej: AB123CD"
+                className="h-9 text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" disabled={soldPlateSaving} onClick={() => { setSoldPlateTarget(null); setSoldPlateInput(''); }}>Cancelar</Button>
+            <Button size="sm" className="gac-gradient" disabled={soldPlateSaving || !isValidSoldPlate(soldPlateInput)} onClick={confirmSoldPlate}>
+              {soldPlateSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* IMPORT PREVIEW DIALOG */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>

@@ -33,6 +33,7 @@ import { useProspectEvents } from '@/hooks/useProspectEvents';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 import { useLossReasons } from '@/hooks/useLossReasons';
+import { normalizeSoldPlate, isValidSoldPlate } from '@/lib/plate';
 
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
@@ -360,6 +361,14 @@ const DealershipProspectos = () => {
   // the existing prospect already being managed. The match may live outside the
   // caller's read scope, so we render these fields directly (no re-fetch).
   const [duplicateProspect, setDuplicateProspect] = useState<{ id: string; name: string; phone: string | null; salesperson: string | null; dealership_id: string; status: string | null } | null>(null);
+
+  // Sold-plate capture: moving a prospect to "ganado" via the inline status
+  // Select must capture the sold vehicle plate before persisting. The DB
+  // trigger (create_satisfaction_survey_on_won) reads sold_plate from the
+  // same update, so status and plate are written together on confirm.
+  const [soldPlateTarget, setSoldPlateTarget] = useState<string | null>(null);
+  const [soldPlateInput, setSoldPlateInput] = useState('');
+  const [soldPlateSaving, setSoldPlateSaving] = useState(false);
 
 
   useEffect(() => {
@@ -1082,6 +1091,13 @@ const DealershipProspectos = () => {
       setLossReasonTarget({ kind: 'inline', id });
       return;
     }
+    // Moving to "ganado" must capture the sold vehicle plate first; defer the
+    // write until the user confirms in the sold-plate dialog.
+    if (newStatus === 'ganado') {
+      setSoldPlateInput('');
+      setSoldPlateTarget(id);
+      return;
+    }
     // C6: leaving "perdido" must clear the stale loss reason so it doesn't linger.
     const { error } = await supabase.from('prospects').update({ status: newStatus, loss_reason_id: null, loss_reason: null } as any).eq('id', id);
     if (error) { toast.error('Error al actualizar estado'); console.error(error); }
@@ -1090,6 +1106,30 @@ const DealershipProspectos = () => {
       const p = prospects.find(x => x.id === id);
       if (p?.kommo_lead_id) updateKommoLeadStage(id, p.kommo_lead_id, newStatus).catch(console.error);
     }
+  };
+
+  // Confirm handler for the mandatory sold-plate dialog: writes status +
+  // sold_plate in the same update, then runs the same Kommo sync the normal
+  // inline status change runs.
+  const confirmSoldPlate = async () => {
+    if (!soldPlateTarget || !isValidSoldPlate(soldPlateInput)) return;
+    const id = soldPlateTarget;
+    setSoldPlateSaving(true);
+    const { error } = await supabase
+      .from('prospects')
+      // Clear any stale loss reason (mirrors the else branch) so a recovered
+      // perdido -> ganado prospect doesn't keep a "why we lost it" note.
+      .update({ status: 'ganado', sold_plate: normalizeSoldPlate(soldPlateInput), loss_reason_id: null, loss_reason: null } as any)
+      .eq('id', id);
+    if (error) { toast.error('Error al actualizar estado'); console.error(error); }
+    else {
+      fetchProspects();
+      const p = prospects.find(x => x.id === id);
+      if (p?.kommo_lead_id) updateKommoLeadStage(id, p.kommo_lead_id, 'ganado').catch(console.error);
+    }
+    setSoldPlateSaving(false);
+    setSoldPlateTarget(null);
+    setSoldPlateInput('');
   };
 
   // REQ1: confirm handler for the mandatory loss-reason dialog. Resolves the chosen
@@ -2090,6 +2130,36 @@ const DealershipProspectos = () => {
             <Button variant="outline" size="sm" disabled={lossReasonSaving} onClick={() => { setLossReasonTarget(null); setSelectedLossReasonId(''); }}>Cancelar</Button>
             <Button size="sm" className="gac-gradient" disabled={lossReasonSaving || !selectedLossReasonId} onClick={confirmLossReason}>
               {lossReasonSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MANDATORY SOLD-PLATE DIALOG — required before marking a prospect "ganado" */}
+      <Dialog open={soldPlateTarget !== null} onOpenChange={open => { if (!open && !soldPlateSaving) { setSoldPlateTarget(null); setSoldPlateInput(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-display">Vehículo vendido</DialogTitle>
+          </DialogHeader>
+          <div className="py-1 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Ingresa la placa del vehículo vendido para marcar este prospecto como ganado.
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs">Placa del vehículo vendido *</Label>
+              <Input
+                autoFocus
+                value={soldPlateInput}
+                onChange={e => setSoldPlateInput(e.target.value.toUpperCase())}
+                placeholder="Ej: AB123CD"
+                className="h-9 text-xs"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" disabled={soldPlateSaving} onClick={() => { setSoldPlateTarget(null); setSoldPlateInput(''); }}>Cancelar</Button>
+            <Button size="sm" className="gac-gradient" disabled={soldPlateSaving || !isValidSoldPlate(soldPlateInput)} onClick={confirmSoldPlate}>
+              {soldPlateSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Confirmar'}
             </Button>
           </DialogFooter>
         </DialogContent>

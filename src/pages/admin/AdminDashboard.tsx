@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
   MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
-  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles,
+  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles, Smile,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,7 @@ import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useIsMobile } from '@/hooks/use-mobile';
 import CustomWidgetsSection from '@/components/dashboard/CustomWidgetsSection';
 import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
+import SatisfactionOverview from '@/components/satisfaction/SatisfactionOverview';
 
 interface Prospect {
   id: string;
@@ -693,6 +694,16 @@ const AdminDashboard = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* ╔════ SECCIÓN: SATISFACCIÓN DEL CLIENTE ════╗ */}
+      <div className="pt-4 mt-4 border-t-2 border-dashed border-primary/30 space-y-4">
+        <div className="flex items-center gap-2 pb-1 border-b border-border/60">
+          <Smile className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-display font-semibold">Satisfacción del cliente</h2>
+          <span className="text-[10px] text-muted-foreground">percepción post-compra, por aspecto</span>
+        </div>
+        <SatisfactionOverview compact />
+      </div>
 
       {/* ╔════ SECCIÓN: WIDGETS PERSONALIZADOS ════╗ */}
       <div className="pt-4 mt-4 border-t-2 border-dashed border-primary/30 space-y-4">

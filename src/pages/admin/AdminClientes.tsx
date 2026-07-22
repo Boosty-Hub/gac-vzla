@@ -13,11 +13,15 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import SatisfactionOverview from '@/components/satisfaction/SatisfactionOverview';
+import ClientDetailDialog from '@/components/clients/ClientDetailDialog';
 import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { extractEdgeError } from '@/lib/edgeError';
 import { isRecurrentClient } from '@/lib/recompra';
+import { syncClientToKommo } from '@/lib/kommo';
 import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
 
 interface VehicleModel {
@@ -163,6 +167,9 @@ const AdminClientes = () => {
   const [bulkIsActive, setBulkIsActive] = useState(true);
   const [bulkConfirmDeleteOpen, setBulkConfirmDeleteOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
+
+  // Client detail preview dialog (Info / Vehículos / Encuesta tabs)
+  const [detailClient, setDetailClient] = useState<Client | null>(null);
 
   const openVehicleDetail = async (v: Vehicle) => {
     setVDetailVehicle(v);
@@ -328,9 +335,14 @@ const AdminClientes = () => {
 
       toast.success('Cliente actualizado'); setClientDialogOpen(false); fetchClients();
     } else {
-      const { error } = await supabase.from('clients').insert(payload);
+      const { data, error } = await supabase.from('clients').insert(payload).select('id').single();
       if (error) { toast.error('Error al crear cliente'); console.error(error); }
-      else { toast.success('Cliente creado'); setClientDialogOpen(false); fetchClients(); }
+      else {
+        // Fire-and-forget: sync the new client into Kommo's Post Venta "En conversación"
+        // stage without blocking the success toast/dialog close.
+        if (data?.id) syncClientToKommo(data.id).catch(console.error);
+        toast.success('Cliente creado'); setClientDialogOpen(false); fetchClients();
+      }
     }
     setSaving(false);
   };
@@ -520,7 +532,13 @@ const AdminClientes = () => {
   };
 
   return (
-    <div className="space-y-3">
+    <Tabs defaultValue="clientes" className="space-y-3">
+      <TabsList>
+        <TabsTrigger value="clientes">Clientes</TabsTrigger>
+        <TabsTrigger value="satisfaccion">Satisfacción</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="clientes" className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h1 className="text-lg font-display font-bold">Clientes</h1>
@@ -657,6 +675,9 @@ const AdminClientes = () => {
                       </button>
                     </div>
                     <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDetailClient(c)} title="Ver detalle">
+                        <Eye className="w-3.5 h-3.5" />
+                      </Button>
                       <Button variant="ghost" size="icon" className="h-7 w-7 relative" onClick={() => openUsersDialog(c)}>
                         <UserPlus className="w-3.5 h-3.5" />
                         {(c.client_users?.[0]?.count || 0) > 0 && (
@@ -809,6 +830,9 @@ const AdminClientes = () => {
                     </TableCell>
                     <TableCell className="text-right" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDetailClient(c)} title="Ver detalle">
+                          <Eye className="w-3 h-3" />
+                        </Button>
                         {(() => {
                           const waUrl = buildClientWaUrl(c);
                           return waUrl ? (
@@ -1328,7 +1352,19 @@ const AdminClientes = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+      {/* Client Detail Preview Dialog (Info / Vehículos / Encuesta) */}
+      <ClientDetailDialog
+        client={detailClient}
+        open={!!detailClient}
+        onOpenChange={(o) => { if (!o) setDetailClient(null); }}
+      />
+      </TabsContent>
+
+      <TabsContent value="satisfaccion">
+        <SatisfactionOverview />
+      </TabsContent>
+    </Tabs>
   );
 };
 

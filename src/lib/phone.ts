@@ -66,3 +66,20 @@ export function phonesMatch(
   // so an exact string comparison covers both the 10-digit and short cases.
   return ca === cb;
 }
+
+/**
+ * Strips all non-digit characters from `raw` (via `normalizeVzPhone`) and
+ * returns the last `len` digits (or fewer, if the input has fewer digits
+ * than `len`).
+ *
+ * Used to match a `clients.phone` (local format, e.g. `0424-8040975`)
+ * against `satisfaction_surveys.client_phone` (international format, e.g.
+ * `+584248040975`) — both share the same last-10-digit suffix, which is
+ * used as the `ilike '%<suffix>'` join key since there is no FK between
+ * the two tables. Returns `""` for `null`/`undefined`/empty input.
+ */
+export function phoneMatchSuffix(raw: string | null | undefined, len = 10): string {
+  const digits = normalizeVzPhone(raw);
+  if (!digits) return '';
+  return digits.slice(-len);
+}
