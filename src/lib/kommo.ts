@@ -85,3 +85,13 @@ export async function updateKommoLeadFields(
   })
   if (error) console.error('[Kommo] Error actualizando campos:', error)
 }
+
+// Sync a newly-created client into the Post Venta "En conversación Cliente/Empresa"
+// stage (broadcast messages), deduping against any existing Kommo contact/lead.
+// Fire-and-forget: never throws, safe to call without awaiting from UI code.
+export async function syncClientToKommo(clientId: string): Promise<void> {
+  const { error } = await supabase.functions.invoke('kommo-api', {
+    body: { action: 'sync_client', client_id: clientId },
+  })
+  if (error) console.error('[Kommo] Error sincronizando cliente:', error)
+}

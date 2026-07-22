@@ -300,6 +300,11 @@ function extractModelFromKommoFields(
 // ─── Post Venta pipeline (Reservas / Servicios) ──────────────────────────────
 const POSTVENTA_PIPELINE_ID = 13151339
 
+// Post Venta stage used for the persistent "client conversation" lead created by
+// migrate_clients / sync_client (broadcast messages), not part of the reservation
+// status flow below.
+const CONVERSATION_STAGE = 104023216  // "En conversación Cliente/Empresa"
+
 const POSTVENTA_STATUS_TO_STAGE: Record<string, number> = {
   pendiente:  101411319,  // Pendiente
   confirmada: 101411323,  // Confirmada
@@ -350,12 +355,6 @@ function normalizeVzPhone(raw: string): string {
   // which previously slipped through and broke WhatsApp delivery.
   if (digits.startsWith('0')) digits = digits.slice(1)
   return `+58${digits}`
-}
-
-// True for a Venezuelan mobile in E.164 form: +58 + valid operator prefix + 7 digits.
-// Operator prefixes: 412, 414, 416 (Movistar/Movilnet/Digitel) and 424, 426 (Movistar/Digitel).
-function isValidVzMobile(phone: string): boolean {
-  return /^\+584(12|14|16|24|26)\d{7}$/.test(phone)
 }
 
 // Strip accent marks from vowels (keeps ñ/Ñ) so WhatsApp templates render clean.
@@ -602,6 +601,138 @@ async function findExistingContact(
     (await searchContactByValue(baseUrl, authHeaders, keys.email, EMAIL_CF_ID)) ||
     (await searchContactByValue(baseUrl, authHeaders, keys.placa, CONTACT_CF.placa))
   )
+}
+
+// Given a contact already known to Kommo, returns the id of a lead it owns inside
+// `pipelineId`, or null if it has none there yet. Used to stop syncOneClientToConversation
+// from ever creating a SECOND "En conversación" lead for the same contact — a contact
+// rarely has more than a handful of leads, so this stays cheap in practice.
+async function findExistingPipelineLeadOnContact(
+  baseUrl: string,
+  authHeaders: Record<string, string>,
+  contactId: number,
+  pipelineId: number,
+): Promise<number | null> {
+  const res = await fetch(`${baseUrl}/contacts/${contactId}?with=leads`, { headers: authHeaders })
+  if (!res.ok || res.status === 204) return null
+  const data = await res.json() as Record<string, unknown>
+  const leads = ((data._embedded as Record<string, unknown>)?.leads as Array<{ id: number }>) || []
+  for (const l of leads) {
+    const leadRes = await fetch(`${baseUrl}/leads/${l.id}`, { headers: authHeaders })
+    if (!leadRes.ok) continue
+    const leadData = await leadRes.json() as Record<string, unknown>
+    if (leadData.pipeline_id === pipelineId) return l.id
+  }
+  return null
+}
+
+// Loosely normalizes a client phone for the Kommo "conversation" contact. Kept
+// separate from normalizeVzPhone() above (which strips the trunk '0' unconditionally):
+// this mirrors the exact behavior migrate_clients has always used for `clients.phone`
+// values, which are not guaranteed to be pre-normalized the way prospect phones are.
+function normalizeClientPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.startsWith('58')) return `+${digits}`
+  if (digits.startsWith('0')) return `+58${digits.slice(1)}`
+  if (digits.length === 10) return `+58${digits}`
+  return `+${digits}`
+}
+
+type SyncClientResult = { status: 'skipped' | 'linked' | 'created' | 'failed'; leadId: number | null }
+
+// Syncs ONE GAC client into the Post Venta "En conversación Cliente/Empresa" stage
+// (CONVERSATION_STAGE), for broadcast messages. Shared by the `migrate_clients` batch
+// backfill and the `sync_client` action fired right after a client is created.
+//
+// Duplicate safety (never creates a second conversation lead for the same client):
+//   1) If the client already has kommo_conversation_lead_id → 'skipped', no Kommo calls.
+//   2) Dedup the Kommo contact by CI-RIF → phone → email (findExistingContact).
+//   3) If a contact was found, check whether it ALREADY owns a lead in POSTVENTA_PIPELINE_ID
+//      (findExistingPipelineLeadOnContact) — if so, link that lead instead of creating one.
+//   4) Only create a new lead when no contact match and no existing pipeline lead were found.
+async function syncOneClientToConversation(
+  supabase: ReturnType<typeof createClient>,
+  baseUrl: string,
+  authHeaders: Record<string, string>,
+  cl: Record<string, unknown>,
+): Promise<SyncClientResult> {
+  if (cl.kommo_conversation_lead_id) {
+    return { status: 'skipped', leadId: Number(cl.kommo_conversation_lead_id) }
+  }
+
+  try {
+    const phone = cl.phone ? normalizeClientPhone(String(cl.phone)) : null
+    const cedula = (cl.cedula as string | null) || null
+    const email = (cl.email as string | null) || null
+    const estado = (cl.state as string | null) || null
+    const name = (cl.full_name as string | null) || 'Cliente'
+
+    const contactCFs: unknown[] = []
+    if (cedula) contactCFs.push({ field_id: CONTACT_CF.ci_rif, values: [{ value: cedula }] })
+    if (phone) contactCFs.push({ field_code: 'PHONE', values: [{ value: phone, enum_code: 'WORK' }] })
+    if (email) contactCFs.push({ field_code: 'EMAIL', values: [{ value: email, enum_code: 'WORK' }] })
+    if (estado) contactCFs.push({ field_id: CONTACT_CF.estado, values: [{ value: estado }] })
+
+    // 1) Dedup the contact (CI-RIF → phone → email); also honor a previously known contact id.
+    const match = await findExistingContact(baseUrl, authHeaders, { ciRif: cedula, phone, email })
+    const contactId = match?.id ?? (cl.IdContactKommo ? Number(cl.IdContactKommo) : null)
+
+    if (contactId) {
+      // 2) Anti-duplicate safeguard: does this contact already have a lead in Post Venta?
+      const existingLeadId = await findExistingPipelineLeadOnContact(baseUrl, authHeaders, contactId, POSTVENTA_PIPELINE_ID)
+      if (existingLeadId) {
+        await supabase.from('clients').update({
+          IdContactKommo: String(contactId),
+          kommo_conversation_lead_id: existingLeadId,
+        }).eq('id', cl.id as string)
+        return { status: 'linked', leadId: existingLeadId }
+      }
+
+      // Ensure identifiers exist on the contact, then attach a NEW conversation lead.
+      if (contactCFs.length) {
+        await fetch(`${baseUrl}/contacts/${contactId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({ custom_fields_values: contactCFs }),
+        }).catch(() => {})
+      }
+      const createRes = await fetch(`${baseUrl}/leads/complex`, {
+        method: 'POST', headers: authHeaders,
+        body: JSON.stringify([{
+          name, pipeline_id: POSTVENTA_PIPELINE_ID, status_id: CONVERSATION_STAGE,
+          _embedded: { contacts: [{ id: contactId }], tags: [{ name: 'Cliente GAC' }] },
+        }]),
+      })
+      const cd = await createRes.json() as Array<{ id: number }>
+      const leadId = cd?.[0]?.id ?? null
+      await supabase.from('clients').update({
+        IdContactKommo: String(contactId),
+        kommo_conversation_lead_id: leadId,
+      }).eq('id', cl.id as string)
+      return { status: leadId ? 'created' : 'failed', leadId }
+    }
+
+    // No existing contact found → create contact + lead together.
+    const createRes = await fetch(`${baseUrl}/leads/complex`, {
+      method: 'POST', headers: authHeaders,
+      body: JSON.stringify([{
+        name, pipeline_id: POSTVENTA_PIPELINE_ID, status_id: CONVERSATION_STAGE,
+        _embedded: {
+          contacts: [{ name, custom_fields_values: contactCFs }],
+          tags: [{ name: 'Cliente GAC' }],
+        },
+      }]),
+    })
+    const cd = await createRes.json() as Array<{ id: number; contact_id?: number }>
+    const leadId = cd?.[0]?.id ?? null
+    await supabase.from('clients').update({
+      IdContactKommo: cd?.[0]?.contact_id ? String(cd[0].contact_id) : null,
+      kommo_conversation_lead_id: leadId,
+    }).eq('id', cl.id as string)
+    return { status: leadId ? 'created' : 'failed', leadId }
+  } catch (e) {
+    console.error(`syncOneClientToConversation ${cl.id}:`, e)
+    return { status: 'failed', leadId: null }
+  }
 }
 
 // ─── syncFromKommo: fill empty fields in GAC from Kommo ───────────────────────
@@ -1654,15 +1785,11 @@ Deno.serve(async (req) => {
 
       if (!dealerContactId) throw new Error('No se pudo obtener contacto del concesionario en Kommo')
 
-      // Keep the Kommo contact's phone in sync, but NON-DESTRUCTIVELY: only overwrite when the
-      // current Kommo number is missing/invalid AND the system has a valid VE mobile. This repairs
-      // malformed numbers (e.g. a stray trunk-0) without clobbering a good number that merely
-      // differs from the system record — WhatsApp delivers to the Kommo contact's number.
-      if (
-        existingContactPhone !== null &&
-        !isValidVzMobile(existingContactPhone) &&
-        isValidVzMobile(normalizedPhone)
-      ) {
+      // GAC is the SOURCE OF TRUTH for the dealership's WhatsApp number. WhatsApp delivers to the
+      // Kommo contact's phone, so it must always mirror whatever the admin set in GAC — no prefix
+      // or "valid mobile" filtering. If the Kommo number differs from GAC's, overwrite it. Compare
+      // on normalized digits so Kommo's own formatting doesn't trigger a needless re-write each time.
+      if (existingContactPhone === null || normalizeVzPhone(existingContactPhone) !== normalizedPhone) {
         await fetch(`${baseUrl}/contacts/${dealerContactId}`, {
           method: 'PATCH', headers: authHeaders,
           body: JSON.stringify({
@@ -1865,12 +1992,43 @@ Deno.serve(async (req) => {
       })
     }
 
+    // ── Sync ONE client into Post Venta "En conversación Cliente/Empresa" ───────
+    // Fired right after a client is created (admin/staff, or internal service call
+    // from create_reservation's manual-entry path). Not superadmin-only and not in
+    // CLIENT_ALLOWED_ACTIONS — it falls through to the generic "requires staff role"
+    // gate above, which isServiceCall/isAdmin/concesionario/vendedor all satisfy.
+    // Delegates entirely to syncOneClientToConversation for the duplicate-safe logic.
+    if (action === 'sync_client') {
+      const clientId = body.client_id
+      if (!clientId) throw new Error('Falta client_id')
+
+      const { data: cl } = await supabase
+        .from('clients')
+        .select('id, full_name, cedula, phone, email, state, "IdContactKommo", kommo_conversation_lead_id')
+        .eq('id', clientId)
+        .single()
+
+      if (!cl) throw new Error('Cliente no encontrado')
+
+      const result = await syncOneClientToConversation(supabase, baseUrl, authHeaders, cl as Record<string, unknown>)
+
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'sync_client',
+        status: result.status === 'failed' ? 'error' : 'success',
+        details: { client_id: clientId, status: result.status, lead_id: result.leadId },
+      })
+
+      return new Response(JSON.stringify({ success: true, status: result.status, lead_id: result.leadId }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     // ── Migrate GAC clients into Post Venta "En conversación Cliente/Empresa" ───
-    // Batched + idempotent. Dedup contact by CI-RIF → phone → email; reuse the
-    // existing contact (never duplicate), then attach one conversation lead.
+    // Batched + idempotent. Delegates the per-client dedup/create/link logic (and
+    // the anti-duplicate pipeline-lead check) to syncOneClientToConversation, the
+    // same helper used by the sync_client action above.
     if (action === 'migrate_clients') {
       const batchLimit = Math.min(Number(body.limit) || 25, 60)
-      const CONVERSATION_STAGE = 104023216
 
       // Always pull the next slice of NOT-yet-migrated clients (stable by id).
       // This is naturally idempotent and immune to pagination drift on re-runs.
@@ -1887,79 +2045,13 @@ Deno.serve(async (req) => {
         })
       }
 
-      const normalizeVzPhone = (raw: string): string => {
-        const digits = raw.replace(/\D/g, '')
-        if (digits.startsWith('58')) return `+${digits}`
-        if (digits.startsWith('0')) return `+58${digits.slice(1)}`
-        if (digits.length === 10) return `+58${digits}`
-        return `+${digits}`
-      }
-
       let created = 0, linked = 0, skipped = 0, failed = 0
       for (const cl of clients as Array<Record<string, unknown>>) {
-        try {
-          if (cl.kommo_conversation_lead_id) { skipped++; continue }
-
-          const phone = cl.phone ? normalizeVzPhone(String(cl.phone)) : null
-          const cedula = (cl.cedula as string | null) || null
-          const email = (cl.email as string | null) || null
-          const estado = (cl.state as string | null) || null
-          const name = (cl.full_name as string | null) || 'Cliente'
-
-          const contactCFs: unknown[] = []
-          if (cedula) contactCFs.push({ field_id: CONTACT_CF.ci_rif, values: [{ value: cedula }] })
-          if (phone) contactCFs.push({ field_code: 'PHONE', values: [{ value: phone, enum_code: 'WORK' }] })
-          if (email) contactCFs.push({ field_code: 'EMAIL', values: [{ value: email, enum_code: 'WORK' }] })
-          if (estado) contactCFs.push({ field_id: CONTACT_CF.estado, values: [{ value: estado }] })
-
-          // 1) Dedup the contact (CI-RIF → phone → email)
-          const match = await findExistingContact(baseUrl, authHeaders, { ciRif: cedula, phone, email })
-          let contactId = match?.id ?? (cl.IdContactKommo ? Number(cl.IdContactKommo) : null)
-
-          if (contactId) {
-            // Ensure identifiers exist on the contact, then attach conversation lead
-            if (contactCFs.length) {
-              await fetch(`${baseUrl}/contacts/${contactId}`, {
-                method: 'PATCH', headers: authHeaders,
-                body: JSON.stringify({ custom_fields_values: contactCFs }),
-              }).catch(() => {})
-            }
-            const createRes = await fetch(`${baseUrl}/leads/complex`, {
-              method: 'POST', headers: authHeaders,
-              body: JSON.stringify([{
-                name, pipeline_id: POSTVENTA_PIPELINE_ID, status_id: CONVERSATION_STAGE,
-                _embedded: { contacts: [{ id: contactId }], tags: [{ name: 'Cliente GAC' }] },
-              }]),
-            })
-            const cd = await createRes.json() as Array<{ id: number }>
-            await supabase.from('clients').update({
-              IdContactKommo: String(contactId),
-              kommo_conversation_lead_id: cd?.[0]?.id ?? null,
-            }).eq('id', cl.id as string)
-            linked++
-          } else {
-            // Create contact + lead together
-            const createRes = await fetch(`${baseUrl}/leads/complex`, {
-              method: 'POST', headers: authHeaders,
-              body: JSON.stringify([{
-                name, pipeline_id: POSTVENTA_PIPELINE_ID, status_id: CONVERSATION_STAGE,
-                _embedded: {
-                  contacts: [{ name, custom_fields_values: contactCFs }],
-                  tags: [{ name: 'Cliente GAC' }],
-                },
-              }]),
-            })
-            const cd = await createRes.json() as Array<{ id: number; contact_id?: number }>
-            await supabase.from('clients').update({
-              IdContactKommo: cd?.[0]?.contact_id ? String(cd[0].contact_id) : null,
-              kommo_conversation_lead_id: cd?.[0]?.id ?? null,
-            }).eq('id', cl.id as string)
-            created++
-          }
-        } catch (e) {
-          failed++
-          console.error(`migrate_clients ${cl.id}:`, e)
-        }
+        const result = await syncOneClientToConversation(supabase, baseUrl, authHeaders, cl)
+        if (result.status === 'created') created++
+        else if (result.status === 'linked') linked++
+        else if (result.status === 'skipped') skipped++
+        else failed++
       }
 
       return new Response(JSON.stringify({

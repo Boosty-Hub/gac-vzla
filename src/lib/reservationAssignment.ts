@@ -1,3 +1,5 @@
+import { syncClientToKommo } from '@/lib/kommo';
+
 /**
  * Resolves which client/vehicle (or walk-in) columns a reservation/incidencia
  * should be saved with, from the unified search selection state.
@@ -227,6 +229,13 @@ export async function createOrReuseManualEntities(
       }
     }
     throw vehicleError || new Error('No se pudo crear el vehículo');
+  }
+
+  // Fire-and-forget: sync into Kommo's Post Venta "En conversación" stage only when
+  // a genuinely NEW client was inserted above (not on the cedula/phone reuse branches),
+  // and only after the vehicle insert succeeded so a rolled-back client is never synced.
+  if (clientWasCreated && clientId) {
+    syncClientToKommo(clientId).catch(() => {});
   }
 
   return { vehicle: { id: vehicleData.id, client_id: vehicleData.client_id } };
