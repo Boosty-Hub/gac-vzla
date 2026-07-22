@@ -59,6 +59,8 @@ interface VehicleServiceRecord {
   service_notes: string | null;
   technical_report_url: string | null;
   completed_at: string | null;
+  /** Client-visible follow-up recommendation. Staff-only `internal_notes` is deliberately NOT selected/exposed here. */
+  recommendation: string | null;
   dealerships: { name: string } | null;
 }
 
@@ -94,6 +96,8 @@ interface Reservation {
   service_notes: string | null;
   technical_report_url: string | null;
   completed_at: string | null;
+  /** Client-visible follow-up recommendation. Staff-only `internal_notes` is deliberately NOT selected/exposed here. */
+  recommendation: string | null;
   dealerships: { name: string } | null;
   vehicles: { plate: string; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
@@ -346,7 +350,7 @@ const UserPortal = () => {
         // Fetch reservations for this client
         const { data: res } = await supabase
           .from('reservations')
-          .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+          .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, recommendation, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
           .eq('client_id', clientId)
           .order('reservation_date', { ascending: false })
           .limit(50);
@@ -540,7 +544,7 @@ const UserPortal = () => {
     setLoadingVehHistory(true);
     const { data } = await supabase
       .from('reservations')
-      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, technical_report_url, completed_at, dealerships(name)')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, technical_report_url, completed_at, recommendation, dealerships(name)')
       .eq('vehicle_id', v.id)
       .order('reservation_date', { ascending: false })
       .limit(50);
@@ -604,7 +608,7 @@ const UserPortal = () => {
       // Refresh reservations
       const { data: res } = await supabase
         .from('reservations')
-        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, recommendation, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
         .eq('client_id', clientData.id)
         .order('reservation_date', { ascending: false })
         .limit(50);
@@ -625,7 +629,7 @@ const UserPortal = () => {
     if (!clientData) return;
     const { data: res } = await supabase
       .from('reservations')
-      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
+      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, recommendation, dealerships(name), vehicles(plate, year, vehicle_models(name, brand))')
       .eq('client_id', clientData.id)
       .order('reservation_date', { ascending: false })
       .limit(50);
@@ -1228,6 +1232,14 @@ const UserPortal = () => {
                         )}
                       </div>
                     )}
+                    {detailRes.status === 'completada' && detailRes.recommendation && (
+                      <div className="bg-green-50 border border-green-200 rounded-md p-2.5 text-xs">
+                        <p className="font-semibold text-green-800 mb-1 flex items-center gap-1">
+                          <ClipboardList className="w-3.5 h-3.5" /> Recomendación
+                        </p>
+                        <p className="text-green-700 whitespace-pre-wrap">{detailRes.recommendation}</p>
+                      </div>
+                    )}
                     {detailRes.technical_report_url && (
                       <div className="space-y-1.5">
                         <p className="text-xs font-semibold flex items-center gap-1">
@@ -1562,6 +1574,12 @@ const UserPortal = () => {
                             <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardList className="w-3 h-3" /> Trabajo realizado:</p>
                             <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
                             {h.completed_at && <p className="text-green-600 text-[10px] mt-1">Completado: {new Date(h.completed_at).toLocaleString('es-VE')}</p>}
+                          </div>
+                        )}
+                        {h.recommendation && (
+                          <div className="bg-green-50 border border-green-200 rounded p-2 text-xs">
+                            <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardList className="w-3 h-3" /> Recomendación:</p>
+                            <p className="text-green-700 whitespace-pre-wrap">{h.recommendation}</p>
                           </div>
                         )}
                         {h.technical_report_url && (

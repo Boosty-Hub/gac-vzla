@@ -77,6 +77,8 @@ interface Reservation {
   service_notes: string | null;
   technical_report_url: string | null;
   satisfaction_rating: number | null;
+  /** Client-visible follow-up recommendation, filled when the service is completed. Not in generated Supabase types yet. */
+  recommendation: string | null;
   // Legacy walk-in fields: some older dealership reservations stored client/vehicle
   // as free text instead of FKs. Read them so those rows render instead of blank.
   walkin_client_name: string | null;
@@ -195,6 +197,8 @@ const AdminReservas = () => {
   const [serviceNotes, setServiceNotes] = useState('');
   const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
   const [satisfactionRating, setSatisfactionRating] = useState<number | null>(null);
+  const [completeInternalNotes, setCompleteInternalNotes] = useState('');
+  const [completeRecommendation, setCompleteRecommendation] = useState('');
   const [completing, setCompleting] = useState(false);
 
   // Service manager dialog
@@ -433,6 +437,41 @@ const AdminReservas = () => {
       return false;
     }
     return true;
+  };
+
+  // Day's non-cancelled reservations for the selected dealership+date, loaded so the
+  // incidencia time picker can flag full slots the same way DealershipReservas/PublicReserva do.
+  const [daySlotReservations, setDaySlotReservations] = useState<Array<CapacityReservation & { id: string }>>([]);
+
+  useEffect(() => {
+    if (!dialogOpen || isRepuestos || !fDealership || !fDate) {
+      setDaySlotReservations([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('reservations')
+        .select('id, reservation_time, service_type')
+        .eq('dealership_id', fDealership)
+        .eq('reservation_date', fDate)
+        .neq('status', 'cancelada');
+      if (!cancelled) setDaySlotReservations((data || []) as Array<CapacityReservation & { id: string }>);
+    })();
+    return () => { cancelled = true; };
+  }, [dialogOpen, isRepuestos, fDealership, fDate]);
+
+  // Bay occupancy for a candidate slot in the create/edit dialog. Excludes the
+  // reservation being edited so it never conflicts with its own current slot.
+  const getSlotOccupancy = (slot: string) => {
+    const existing = editingRes ? daySlotReservations.filter(r => r.id !== editingRes.id) : daySlotReservations;
+    return computeSlotOccupancy({
+      existingReservations: existing,
+      startTime: slot,
+      durationMinutes: getServiceDuration(fService),
+      bays: dealerships.find(d => d.id === fDealership)?.bays,
+      resolveDuration: getServiceDuration,
+    });
   };
 
   const resetManualFields = () => {
@@ -750,7 +789,7 @@ const AdminReservas = () => {
       if (error) { toast.error('Error al crear reserva'); console.error(error); }
       else {
         toast.success('Reserva creada'); setDialogOpen(false); fetchReservations();
-        if (adminInserted?.id && !isRepuestos) createKommoReservation(adminInserted.id).catch(console.error);
+        if (adminInserted?.id) createKommoReservation(adminInserted.id).catch(console.error);
       }
     }
     setSaving(false);
@@ -786,6 +825,8 @@ const AdminReservas = () => {
     setServiceNotes(r.service_notes || '');
     setTechnicalReportUrl(r.technical_report_url || null);
     setSatisfactionRating(r.satisfaction_rating || null);
+    setCompleteInternalNotes(r.internal_notes || '');
+    setCompleteRecommendation(r.recommendation || '');
     setCompleteOpen(true);
   };
 
@@ -799,7 +840,10 @@ const AdminReservas = () => {
       technical_report_url: technicalReportUrl || null,
       satisfaction_rating: satisfactionRating,
       completed_at: new Date().toISOString(),
-    }).eq('id', completingRes.id);
+      internal_notes: completeInternalNotes.trim() || null,
+      // `recommendation` isn't in generated Supabase types yet (see migration 20260721140000).
+      recommendation: completeRecommendation.trim() || null,
+    } as any).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
     else {
       toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations();
@@ -1557,22 +1601,45 @@ const AdminReservas = () => {
             )}
 
             {/* Fecha y Hora — Solicitud de Repuestos no ocupa horario */}
-            <div className={(INCIDENCIA_TYPES.has(fService) || isRepuestos) ? 'space-y-2' : 'grid grid-cols-2 gap-4'}>
+            <div className={isRepuestos ? 'space-y-2' : 'grid grid-cols-2 gap-4'}>
               <div className="space-y-2">
                 <Label>Fecha *</Label>
                 <Input type="date" value={fDate} onChange={e => setFDate(e.target.value)} />
               </div>
-              {!INCIDENCIA_TYPES.has(fService) && !isRepuestos && (
+              {!isRepuestos && (
                 <div className="space-y-2">
                   <Label>Hora *</Label>
-                  <Select value={fTime} onValueChange={setFTime}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {HOURS.map(h => (
-                        <SelectItem key={h} value={h}>{HOUR_LABELS[h]}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {INCIDENCIA_TYPES.has(fService) ? (
+                    // Incidencia/Falla también ocupa una bahía (duration_minutes en service_types),
+                    // así que usa el mismo picker gateado por capacidad que dealership/public.
+                    <Select value={fTime} onValueChange={setFTime}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {HOURS.map(h => {
+                          const occ = getSlotOccupancy(h);
+                          return (
+                            <SelectItem
+                              key={h}
+                              value={h}
+                              disabled={occ.full}
+                              className={occ.full ? 'line-through text-muted-foreground' : ''}
+                            >
+                              {HOUR_LABELS[h]} · {occ.occupied}/{occ.capacity}{occ.full ? ' (lleno)' : ''}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Select value={fTime} onValueChange={setFTime}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {HOURS.map(h => (
+                          <SelectItem key={h} value={h}>{HOUR_LABELS[h]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               )}
             </div>
@@ -1717,6 +1784,24 @@ const AdminReservas = () => {
                   {satisfactionRating && <span className="text-xs text-muted-foreground ml-1">{satisfactionRating}/5</span>}
                 </div>
               </div>
+              <div className="space-y-2">
+                <Label>Recomendación (opcional)</Label>
+                <Textarea
+                  value={completeRecommendation}
+                  onChange={e => setCompleteRecommendation(e.target.value)}
+                  rows={3}
+                  placeholder="Recomendaciones de seguimiento visibles para el cliente..."
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Notas internas (solo equipo GAC)</Label>
+                <Textarea
+                  value={completeInternalNotes}
+                  onChange={e => setCompleteInternalNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Observaciones internas, no visibles para el cliente..."
+                />
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -1810,14 +1895,14 @@ const AdminReservas = () => {
           {detailRes && (
             <div className="space-y-4 py-1">
               {/* Status badge */}
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 {(() => {
                   const isInc = INCIDENCIA_TYPES.has(detailRes.service_type);
                   const statusColor = isInc ? (INCIDENCIA_STATUS_COLORS[detailRes.status] || 'bg-muted') : (STATUS_COLORS[detailRes.status] || 'bg-muted');
                   const statusLabel = isInc ? (INCIDENCIA_STATUS_LABELS[detailRes.status] || detailRes.status) : (STATUS_LABELS[detailRes.status] || detailRes.status);
                   return <Badge className={cn('text-xs px-2 py-0.5', statusColor)}>{statusLabel}</Badge>;
                 })()}
-                <span className="text-xs text-muted-foreground">{formatDate(detailRes.reservation_date)} · {formatTime(detailRes.reservation_time)}</span>
+                <span className="text-xs text-muted-foreground break-words">{formatDate(detailRes.reservation_date)} · {formatTime(detailRes.reservation_time)}</span>
               </div>
               {INCIDENCIA_TYPES.has(detailRes.service_type) && (
                 <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'Cliente'}</span>{` · ${detailRes.created_by_role || 'Portal'}`}</p>
@@ -1887,13 +1972,26 @@ const AdminReservas = () => {
                 )}
               </div>
 
-              {/* Descripción de la incidencia (visible/normal) */}
-              {detailRes.notes && INCIDENCIA_TYPES.has(detailRes.service_type) && (
+              {/* Descripción de la incidencia o de la solicitud de repuestos */}
+              {detailRes.notes && (INCIDENCIA_TYPES.has(detailRes.service_type) || isPartsRequest(detailRes.service_type)) && (
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Descripción de la falla</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">
+                    {isPartsRequest(detailRes.service_type) ? 'Descripción de la solicitud' : 'Descripción de la falla'}
+                  </p>
                   <div className="flex gap-1.5">
                     <StickyNote className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                    <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.notes}</p>
+                    <p className="text-xs bg-muted rounded p-2 flex-1 min-w-0 break-words whitespace-pre-wrap">{detailRes.notes}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Recomendación (visible para el cliente) */}
+              {detailRes.recommendation && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Recomendación</p>
+                  <div className="bg-green-50 border border-green-200 rounded-md p-2 flex gap-1.5">
+                    <ClipboardCheck className="w-3.5 h-3.5 text-green-600 mt-0.5 shrink-0" />
+                    <p className="text-xs text-green-800 flex-1 whitespace-pre-wrap">{detailRes.recommendation}</p>
                   </div>
                 </div>
               )}
@@ -1904,7 +2002,7 @@ const AdminReservas = () => {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Notas Internas</p>
                   <div className="flex gap-1.5">
                     <StickyNote className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                    <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.internal_notes}</p>
+                    <p className="text-xs bg-muted rounded p-2 flex-1 min-w-0 break-words whitespace-pre-wrap">{detailRes.internal_notes}</p>
                   </div>
                 </div>
               )}
@@ -1915,7 +2013,7 @@ const AdminReservas = () => {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Notas de servicio</p>
                   <div className="flex gap-1.5">
                     <FileText className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />
-                    <p className="text-xs bg-muted rounded p-2 flex-1">{detailRes.service_notes}</p>
+                    <p className="text-xs bg-muted rounded p-2 flex-1 min-w-0 break-words whitespace-pre-wrap">{detailRes.service_notes}</p>
                   </div>
                 </div>
               )}

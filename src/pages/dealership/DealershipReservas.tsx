@@ -57,6 +57,8 @@ interface Reservation {
   created_by_profile_id: string | null;
   kommo_lead_id: number | null;
   state: string | null;
+  /** Client-visible follow-up recommendation, filled when the service is completed. Not in generated Supabase types yet. */
+  recommendation: string | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
   dealerships: { name: string; state: string | null } | null;
@@ -200,6 +202,8 @@ const DealershipReservas = () => {
   const [serviceNotes, setServiceNotes] = useState('');
   const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
   const [createTechReportUrl, setCreateTechReportUrl] = useState<string | null>(null);
+  const [completeInternalNotes, setCompleteInternalNotes] = useState('');
+  const [completeRecommendation, setCompleteRecommendation] = useState('');
   const [completing, setCompleting] = useState(false);
 
   // Create dialog (initialized from localStorage to survive page refresh)
@@ -752,7 +756,7 @@ const DealershipReservas = () => {
     if (error) { toast.error('Error al crear reserva'); console.error(error); }
     else {
       toast.success('Reserva creada exitosamente'); setCreateOpen(false); fetchReservations();
-      if (resInserted?.id && !isRepuestos) createKommoReservation(resInserted.id).catch(console.error);
+      if (resInserted?.id) createKommoReservation(resInserted.id).catch(console.error);
     }
     setSaving(false);
   };
@@ -904,7 +908,10 @@ const DealershipReservas = () => {
 
   const openComplete = (r: Reservation) => {
     setCompletingRes(r); setServiceNotes(r.service_notes || '');
-    setTechnicalReportUrl(r.technical_report_url || null); setCompleteOpen(true);
+    setTechnicalReportUrl(r.technical_report_url || null);
+    setCompleteInternalNotes(r.internal_notes || '');
+    setCompleteRecommendation(r.recommendation || '');
+    setCompleteOpen(true);
   };
 
   const handleComplete = async () => {
@@ -914,7 +921,10 @@ const DealershipReservas = () => {
     const { error } = await supabase.from('reservations').update({
       status: 'completada', service_notes: serviceNotes.trim(),
       technical_report_url: technicalReportUrl || null, completed_at: new Date().toISOString(),
-    }).eq('id', completingRes.id);
+      internal_notes: completeInternalNotes.trim() || null,
+      // `recommendation` isn't in generated Supabase types yet (see migration 20260721140000).
+      recommendation: completeRecommendation.trim() || null,
+    } as any).eq('id', completingRes.id);
     if (error) { toast.error('Error al completar'); console.error(error); }
     else {
       toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations();
@@ -1268,22 +1278,28 @@ const DealershipReservas = () => {
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
                     {detailRes.current_mileage > 0 && <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>}
                   </div>
-                  {detailRes.notes && isInc && (
+                  {detailRes.notes && (isInc || isPartsRequest(detailRes.service_type)) && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
-                      <p className="font-semibold mb-1">Descripción de la falla</p>
-                      <p className="text-muted-foreground whitespace-pre-wrap">{detailRes.notes}</p>
+                      <p className="font-semibold mb-1">{isPartsRequest(detailRes.service_type) ? 'Descripción de la solicitud' : 'Descripción de la falla'}</p>
+                      <p className="text-muted-foreground min-w-0 break-words whitespace-pre-wrap">{detailRes.notes}</p>
+                    </div>
+                  )}
+                  {detailRes.recommendation && (
+                    <div className="bg-green-50 border border-green-200 rounded-md p-2.5 text-xs">
+                      <p className="font-semibold text-green-800 mb-1 flex items-center gap-1"><ClipboardCheck className="w-3.5 h-3.5" /> Recomendación</p>
+                      <p className="text-green-700 min-w-0 break-words whitespace-pre-wrap">{detailRes.recommendation}</p>
                     </div>
                   )}
                   {detailRes.internal_notes && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
                       <p className="font-semibold mb-1">Notas Internas</p>
-                      <p className="text-muted-foreground whitespace-pre-wrap">{detailRes.internal_notes}</p>
+                      <p className="text-muted-foreground min-w-0 break-words whitespace-pre-wrap">{detailRes.internal_notes}</p>
                     </div>
                   )}
                   {detailRes.status === 'completada' && detailRes.service_notes && (
                     <div className="bg-green-50 border border-green-200 rounded-md p-2.5 text-xs">
                       <p className="font-semibold text-green-800 mb-1 flex items-center gap-1"><ClipboardCheck className="w-3.5 h-3.5" /> Trabajo realizado</p>
-                      <p className="text-green-700 whitespace-pre-wrap">{detailRes.service_notes}</p>
+                      <p className="text-green-700 min-w-0 break-words whitespace-pre-wrap">{detailRes.service_notes}</p>
                       {detailRes.completed_at && <p className="text-green-600 mt-1.5 text-[10px]">Completado: {new Date(detailRes.completed_at).toLocaleString('es-VE')}</p>}
                     </div>
                   )}
@@ -1434,6 +1450,8 @@ const DealershipReservas = () => {
               </div>
               <div className="space-y-2"><Label>¿Qué se realizó? *</Label><Textarea value={serviceNotes} onChange={e => setServiceNotes(e.target.value)} rows={4} placeholder="Trabajos realizados, repuestos, observaciones..." /></div>
               <div className="space-y-2"><Label>Informe Técnico</Label><TechnicalReportUploader maxSizeMB={40} reservationId={completingRes.id} value={technicalReportUrl} onChange={setTechnicalReportUrl} /></div>
+              <div className="space-y-2"><Label>Recomendación (opcional)</Label><Textarea value={completeRecommendation} onChange={e => setCompleteRecommendation(e.target.value)} rows={3} placeholder="Recomendaciones de seguimiento visibles para el cliente..." /></div>
+              <div className="space-y-2"><Label>Notas internas (solo equipo GAC)</Label><Textarea value={completeInternalNotes} onChange={e => setCompleteInternalNotes(e.target.value)} rows={3} placeholder="Observaciones internas, no visibles para el cliente..." /></div>
             </div>
           )}
           <DialogFooter>
