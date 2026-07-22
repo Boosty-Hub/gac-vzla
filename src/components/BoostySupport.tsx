@@ -13,12 +13,14 @@ const BOOSTY_LABEL = 'Soporte';
 const SCRIPT_ID = 'boosty-support-script';
 
 export default function BoostySupport() {
-  const { loading, profile } = useAuth();
+  const { loading, profile, role } = useAuth();
 
   useEffect(() => {
-    // Wait until auth resolves, and only load for a logged-in user so the ticket
-    // always carries the real identity (no anonymous popup on public pages).
+    // Wait until auth resolves, and only load for an ADMIN user: Soporte is
+    // admin-only (dealership/vendedor/cliente never see the floating widget).
+    // The config page is already route-gated; this closes the widget gap.
     if (loading || !profile) return;
+    if (role?.name !== 'superadmin' && role?.name !== 'admin') return;
     // The widget self-guards against double init, but keep our own guard so the tag
     // is never appended twice across route changes / re-renders.
     if (document.getElementById(SCRIPT_ID)) return;
@@ -33,7 +35,7 @@ export default function BoostySupport() {
     if (profile.full_name) script.setAttribute('data-boosty-user-name', profile.full_name);
     if (profile.email) script.setAttribute('data-boosty-user-email', profile.email);
     document.body.appendChild(script);
-  }, [loading, profile]);
+  }, [loading, profile, role]);
 
   return null;
 }
