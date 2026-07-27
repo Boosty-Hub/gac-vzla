@@ -10,6 +10,11 @@ const BOOSTY_SRC = 'https://portal.boosty.digital/boosty-support.js';
 const BOOSTY_KEY = 'bw_pk_887c9a608806a32b74f2f7dc2531e5b2';
 const BOOSTY_COLOR = '#3b82f6';
 const BOOSTY_LABEL = 'Soporte';
+// bottom-left: the widget renders inside a Shadow DOM, so external CSS can't move
+// it — its own data-boosty-position is the only lever. We anchor it bottom-LEFT so
+// the floating button stops covering the bottom-right pagination controls (reported
+// on prospectos). Only 'bottom-right' (default) and 'bottom-left' are supported.
+const BOOSTY_POSITION = 'bottom-left';
 const SCRIPT_ID = 'boosty-support-script';
 
 export default function BoostySupport() {
@@ -32,6 +37,7 @@ export default function BoostySupport() {
     script.setAttribute('data-boosty-key', BOOSTY_KEY);
     script.setAttribute('data-boosty-color', BOOSTY_COLOR);
     script.setAttribute('data-boosty-label', BOOSTY_LABEL);
+    script.setAttribute('data-boosty-position', BOOSTY_POSITION);
     if (profile.full_name) script.setAttribute('data-boosty-user-name', profile.full_name);
     if (profile.email) script.setAttribute('data-boosty-user-email', profile.email);
     document.body.appendChild(script);
