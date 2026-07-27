@@ -16,6 +16,11 @@ const BOOSTY_LABEL = 'Soporte';
 // on prospectos). Only 'bottom-right' (default) and 'bottom-left' are supported.
 const BOOSTY_POSITION = 'bottom-left';
 const SCRIPT_ID = 'boosty-support-script';
+// The floating button hardcodes `bottom: 20px` inside its (open) Shadow DOM, which
+// external CSS can't reach. We lift it a bit so it clears the bottom-left user label.
+// Injecting a <style> into the open shadowRoot is the only clean override.
+const FAB_BOTTOM_PX = 80;
+const OVERRIDE_STYLE_ID = 'boosty-position-override';
 
 export default function BoostySupport() {
   const { loading, profile, role } = useAuth();
@@ -41,6 +46,28 @@ export default function BoostySupport() {
     if (profile.full_name) script.setAttribute('data-boosty-user-name', profile.full_name);
     if (profile.email) script.setAttribute('data-boosty-user-email', profile.email);
     document.body.appendChild(script);
+
+    // The widget mounts asynchronously into an open Shadow DOM. Poll until it exists,
+    // then inject an override style that raises the floating button off the bottom edge.
+    const injectOverride = (): boolean => {
+      const host = document.querySelector('[data-boosty-support]') as HTMLElement | null;
+      const shadow = host?.shadowRoot;
+      if (!shadow) return false;
+      if (shadow.getElementById(OVERRIDE_STYLE_ID)) return true;
+      const style = document.createElement('style');
+      style.id = OVERRIDE_STYLE_ID;
+      style.textContent = `.bw-fab.bw-bottom-left{ bottom: ${FAB_BOTTOM_PX}px !important; }`;
+      shadow.appendChild(style);
+      return true;
+    };
+
+    if (!injectOverride()) {
+      const interval = window.setInterval(() => {
+        if (injectOverride()) window.clearInterval(interval);
+      }, 300);
+      // Stop polling after ~15s so we never leak the interval if the widget fails to load.
+      window.setTimeout(() => window.clearInterval(interval), 15000);
+    }
   }, [loading, profile, role]);
 
   return null;
