@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { useNotifications, Notification } from '@/hooks/useNotifications';
+import { getStatusTransition } from '@/lib/notificationText';
 import { cn } from '@/lib/utils';
 
 const typeConfig: Record<string, { icon: typeof Bell; label: string; colorClass: string }> = {
@@ -40,6 +41,9 @@ function timeAgo(dateStr: string): string {
 function NotificationItem({ notification, onMarkAsRead }: { notification: Notification; onMarkAsRead: (id: string) => void }) {
   const config = getConfig(notification.type);
   const Icon = config.icon;
+  // Two status changes on the same record seconds apart share a title and an icon, so the
+  // pair reads as one event repeated. Showing the transition makes them distinguishable.
+  const transition = getStatusTransition(notification.metadata);
 
   return (
     <button
@@ -60,6 +64,11 @@ function NotificationItem({ notification, onMarkAsRead }: { notification: Notifi
           )}
         </div>
         <p className="text-xs text-muted-foreground line-clamp-2">{notification.message}</p>
+        {transition && (
+          <p className="text-[10px] font-medium text-foreground/70">
+            {transition.from} <span aria-hidden="true">→</span> {transition.to}
+          </p>
+        )}
         <span className="text-[10px] text-muted-foreground/70">{timeAgo(notification.created_at)}</span>
       </div>
     </button>

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -19,6 +19,13 @@ export const useNotifications = () => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // Ids already applied to state, so a realtime event can never render the same row twice.
+  // This matters because AuthContext hands out a fresh `user` object on every
+  // TOKEN_REFRESHED (periodically and on tab focus), which tears down and re-creates the
+  // channel below. A straggler delivery from the closing channel can arrive after the new
+  // channel's fetch has already landed the same row.
+  const seenIds = useRef<Set<string>>(new Set());
 
   const isAdmin = role?.name === 'superadmin' || role?.name === 'admin';
   // Concesionario managers see all dealership-wide notifications (recipient_profile_id IS NULL) + their own.
@@ -46,7 +53,11 @@ export const useNotifications = () => {
 
     const [{ data }, { count }] = await Promise.all([listQ, countQ]);
 
-    setNotifications((data || []) as Notification[]);
+    const rows = (data || []) as Notification[];
+    // The fetch is the source of truth: rebuild the seen set from it so ids that fell out
+    // of the 50-row window do not pin memory forever.
+    seenIds.current = new Set(rows.map(n => n.id));
+    setNotifications(rows);
     setUnreadCount(count ?? 0);
     setLoading(false);
   }, [user, isAdmin, isConcesionario, applyFilter]);
@@ -98,6 +109,9 @@ export const useNotifications = () => {
             if (newNotif.recipient_profile_id !== user.id) return;
           }
           }
+
+          if (seenIds.current.has(newNotif.id)) return;
+          seenIds.current.add(newNotif.id);
 
           setNotifications(prev => [newNotif, ...prev].slice(0, 50));
           setUnreadCount(prev => prev + 1);
