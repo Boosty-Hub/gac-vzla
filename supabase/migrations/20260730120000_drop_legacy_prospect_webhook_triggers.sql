@@ -1,0 +1,98 @@
+-- Notificaciones de concesionario duplicadas — CAUSA RAÍZ.
+--
+-- Reporte: "las notificaciones de concesionario se están duplicando" (GAC - El Tigre).
+--
+-- HALLAZGO: no son duplicados. Son cambios de estado REALES y repetidos, producidos por
+-- un ping-pong entre un automatismo externo y la base de datos. Evidencia verificada
+-- contra la base en vivo el 2026-07-29:
+--
+--   * El prospecto "Manuel Urbaneja" alternó `cotizacion_enviada` <-> `perdido` ocho
+--     veces; cada vuelta atrás ocurrió exactamente 24 h + 1 min después de la anterior.
+--   * Picos diarios de 26-27 notificaciones a las 12:00 UTC y 24 a las 20:00 UTC.
+--   * `notify_on_prospect_status_change()` es CORRECTA: ya tiene la guarda
+--     `OLD.status IS DISTINCT FROM NEW.status`. No emite de más — el estado sí cambia.
+--   * `pg_cron` NO está instalado, así que la recurrencia no nace dentro de Postgres.
+--   * El webhook entrante de Kommo tampoco es el origen: solo 7 registros
+--     `webhook_status_update` en dos días, contra 26 cambios en una sola hora.
+--
+-- Lo que queda: dos triggers `supabase_functions.http_request` sobre `public.prospects`
+-- que NO existen en ninguna migración — fueron creados directamente contra la base, así
+-- que el control de versiones nunca los conoció. Esta migración los incorpora al
+-- versionado eliminándolos.
+--
+--   `webhookgacN8N`  -> https://automation.boosty.digital/webhook/webhookgacn8n
+--                       MUERTO. Responde HTTP 404 ("The requested webhook is not
+--                       registered"). 91 llamadas desperdiciadas en un solo día.
+--                       Dispara AFTER INSERT OR UPDATE.
+--
+--   `webhook_gac`    -> https://hook.us2.make.com/seoyfwilbs7a0iufav4p9rp5wgv55uym
+--                       VIVO. Responde HTTP 200 "Accepted", 48 llamadas el 2026-07-29.
+--                       Además devolvió HTTP 400 "Queue is full." 27 veces entre 12:05 y
+--                       12:22 — exactamente la ventana del pico de notificaciones de ese
+--                       día. Dispara AFTER INSERT OR DELETE OR UPDATE, así que Make.com
+--                       recibe cada escritura sobre prospectos, incluidos los DELETE.
+--
+-- El escenario de Make.com es el responsable restante de reescribir `prospects.status`
+-- en un ciclo de ~24 h, que es lo que produce las alternancias. Cortar el trigger corta
+-- el lazo.
+--
+-- ============================================================================
+-- NINGUNO DE LOS DOS APUNTA A KOMMO — verificado el 2026-07-30
+-- ============================================================================
+--
+-- Se planteó la hipótesis de que estos triggers le avisaban a Kommo directamente. NO es
+-- así. `pg_get_triggerdef` lleva la URL de destino escrita adentro, y ninguna es Kommo
+-- (el dominio de Kommo en este proyecto es `gacvenezuelait.kommo.com`):
+--
+--   webhook_gac    -> hook.us2.make.com          (Make.com, plataforma de automatización)
+--   webhookgacN8N  -> automation.boosty.digital  (n8n, plataforma de automatización)
+--
+-- La sincronización real con Kommo NO pasa por acá: va por la edge function `kommo-api`,
+-- invocada desde el frontend, y por `kommo-webhook` para el sentido entrante. Son caminos
+-- completamente distintos. Eliminar estos dos triggers no toca la integración con Kommo.
+--
+-- Tráfico saliente medido en `net._http_response` el 2026-07-30, últimas 6 h (la tabla se
+-- purga sola), ambos disparando todavía a las 21:00 UTC:
+--   * 94 llamadas -> HTTP 404 `{"code":404,"message":"The requested webhook \"POST
+--     webhookgacn8n\" is not registered."}`  — n8n MUERTO, puro desperdicio.
+--   * 86 llamadas -> HTTP 200 `Accepted`     — Make.com VIVO.
+--
+-- Make.com recibe cada escritura sobre prospectos (AFTER INSERT OR DELETE OR UPDATE) y es
+-- el responsable restante de reescribir `prospects.status` en un ciclo de ~24 h. Ese ciclo
+-- es lo que produce las alternancias de estado que se reportaron como "notificaciones
+-- duplicadas". Cortar el trigger corta el lazo.
+--
+-- Problema operativo separado, no resuelto aquí: la cola de Make.com se desborda
+-- ("Queue is full") durante los picos.
+--
+-- Las definiciones del bloque de reversión de abajo son las EXACTAS, capturadas con
+-- `pg_get_triggerdef` inmediatamente antes de eliminarlas — no una reconstrucción.
+-- ============================================================================
+
+-- ============================================================================
+-- 1) n8n — muerto y verificado. Solo desperdicia llamadas salientes.
+-- ============================================================================
+DROP TRIGGER IF EXISTS "webhookgacN8N" ON public.prospects;
+
+-- ============================================================================
+-- 2) Make.com — vivo. Este es el que cierra el lazo de estados.
+--    No aplicar sin la confirmación del punto 1 de "ATENCIÓN".
+-- ============================================================================
+DROP TRIGGER IF EXISTS "webhook_gac" ON public.prospects;
+
+-- ============================================================================
+-- REVERSIÓN (ejecutable — descomentar y ejecutar para restaurar)
+--
+-- EXACTA: copiada literal de `pg_get_triggerdef(t.oid)` el 2026-07-30, justo antes de
+-- eliminar los triggers. No es una reconstrucción; restaura los mismos argumentos.
+--
+-- CREATE TRIGGER "webhookgacN8N" AFTER INSERT OR UPDATE ON public.prospects
+--   FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request(
+--     'https://automation.boosty.digital/webhook/webhookgacn8n',
+--     'POST', '{"Content-type":"application/json"}', '{}', '5000');
+--
+-- CREATE TRIGGER webhook_gac AFTER INSERT OR DELETE OR UPDATE ON public.prospects
+--   FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request(
+--     'https://hook.us2.make.com/seoyfwilbs7a0iufav4p9rp5wgv55uym',
+--     'POST', '{"Content-type":"application/json"}', '{}', '5000');
+-- ============================================================================
