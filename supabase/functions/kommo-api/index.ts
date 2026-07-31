@@ -1842,8 +1842,11 @@ Deno.serve(async (req) => {
       // NOTE: do NOT stamp supabase_id on the notification lead — it is a permanent
       // per-dealership lead, not a reservation lead. Stamping it would make it collide
       // with the real reservation lead in the supabase_id-based duplicate detection.
-      // Client name goes in Observaciones so the dealership sees who the appointment is for
-      addNotif(CF.notes, `Cliente: ${clientName}${res.notes ? ' | ' + res.notes : ''}`)
+      // Observaciones carries ONLY the incident description. The client name used to be
+      // prefixed here ("Cliente: X | <notes>"), which made the field unreadable at a glance
+      // when what the dealership needs is the fault. Nothing is lost: the name already has
+      // its own dedicated field, stamped as `cliente_cita` right above (:1841).
+      addNotif(CF.notes, res.notes || '')
       // Always call addNotif so empty values clear the field (avoid stale data from the
       // previous reservation on this permanent per-dealership lead).
       addNotif(CF_RES.km_vehiculo, res.current_mileage ? String(res.current_mileage) : '')
