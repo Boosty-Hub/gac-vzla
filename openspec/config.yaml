@@ -1,0 +1,78 @@
+schema: spec-driven
+
+project: gac-vzla
+
+context: |
+  Tech stack: React 18 + TypeScript + Vite (port 8080), Tailwind CSS + shadcn/ui,
+  React Router DOM v6, Supabase (Postgres + Auth + Storage + RLS).
+  Architecture: multi-portal SPA (admin, dealership/vendedor, client, public)
+  with role/permission gating and Kommo CRM bidirectional sync via edge functions.
+  Testing: Vitest (jsdom) unit tests in src/lib/, no integration/E2E suite yet.
+  Style: Spanish UI copy, English code/identifiers, kebab-case migration files.
+
+sdd_session:
+  execution_mode: auto
+  artifact_store: openspec
+  engram_available: false
+  delivery_strategy: exception-ok
+  chain_strategy: not-applicable-single-pr
+  review_budget_lines: 2000
+
+strict_tdd: false
+strict_tdd_reason: >
+  A real Vitest suite exists and is wired to `npm run test`, but coverage is
+  thin (13 unit spec files under src/lib/, no component/integration or E2E
+  layer, no CI test gate). Enabling strict TDD project-wide would misrepresent
+  actual test-first discipline. Treat as "tests available, not enforced";
+  revisit once component/integration coverage and a CI test gate exist.
+
+testing:
+  test_command: "npm run test"
+  test_watch_command: "npm run test:watch"
+  framework: Vitest 3 (jsdom environment, globals: true)
+  config_file: vitest.config.ts
+  setup_file: src/test/setup.ts
+  layers:
+    unit: true
+    integration: false
+    e2e: false
+  coverage:
+    available: false
+    command: ""
+  quality:
+    linter: "npm run lint (ESLint 9, flat config)"
+    type_checker: "tsc via `npm run build` (no standalone `tsc --noEmit` script)"
+    formatter: none_detected
+  build_command: "npm run build"
+  build_dev_command: "npm run build:dev"
+  ci: "Only .github/workflows/gitleaks.yml (secret scanning). No CI test/build/lint gate detected."
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes (DB migrations, edge function deploys, RLS policy changes)
+    - State which portals are affected (admin, dealership/vendedor, client, public)
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Call out role/permission implications explicitly (superadmin, admin, concesionario, vendedor, client)
+  design:
+    - Document DB schema changes as forward-compatible migrations (ALTER TABLE ... ADD COLUMN IF NOT EXISTS)
+    - Flag Kommo CRM sync impact (kommo-api, kommo-webhook) when prospects/reservations fields change
+    - Document architecture decisions with rationale
+  tasks:
+    - Order tasks by dependency: DB migration -> apply migration -> frontend -> edge functions -> deploy
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Follow existing code patterns (see openspec/project.md and .claude/skills/frontend-gac, supabase-gac, kommo-gac)
+      - Local-first: never commit or push without explicit user authorization
+      - Run `npm run build` before considering frontend work done (TypeScript errors fail the build silently in dev)
+    tdd: false
+    test_command: "npm run test"
+  verify:
+    test_command: "npm run test"
+    build_command: "npm run build"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas (DB column/table removals, RLS policy removals)
