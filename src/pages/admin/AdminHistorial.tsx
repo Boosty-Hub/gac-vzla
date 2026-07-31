@@ -40,7 +40,7 @@ interface ServiceEntry {
     mileage: number;
     warranty_active: boolean;
     purchase_date: string | null;
-    vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null } | null;
+    vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null; is_manual: boolean | null } | null;
   } | null;
 }
 
@@ -58,7 +58,26 @@ const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   en_proceso: { label: 'En Proceso', color: 'bg-purple-100 text-purple-800' },
   completada: { label: 'Completada', color: 'bg-green-100 text-green-800' },
   cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
+  culminado: { label: 'Culminado', color: 'bg-slate-100 text-slate-800' },
 };
+
+// `reservations.status` has no CHECK constraint and no enum — it is a bare `text` column,
+// so an unexpected value is possible. Render it readably instead of leaking a raw slug.
+const statusBadge = (status: string) =>
+  STATUS_CONFIG[status] ?? { label: status || 'Sin estado', color: 'bg-muted text-muted-foreground' };
+
+// Statuses that count as "closed" and therefore belong in the service history.
+// Mirrors the ARCHIVED_STATUSES set already used by AdminReservas.tsx and
+// DealershipReservas.tsx — reusing the project's own notion of closed rather than
+// inventing a second one.
+//
+// Live distribution of `reservations.status` on 2026-07-30: completada 416, pendiente 38,
+// en_proceso 28, confirmada 14, cancelada 11 — and `culminado` **zero rows**. It is kept in
+// this list anyway because two other files already treat it as an archived state, the column
+// is unconstrained `text`, and the failure mode is asymmetric: including an unused value
+// costs nothing, while omitting one that later appears silently hides those rows — which is
+// precisely the bug this change exists to fix.
+const HISTORY_STATUSES = ['completada', 'cancelada', 'culminado'];
 
 const AdminHistorial = () => {
   const { profile, role, getModuleScope } = useAuth();
@@ -105,7 +124,10 @@ const AdminHistorial = () => {
     supabase
       .from('reservations')
       .select('service_type')
-      .eq('status', 'completada')
+      // Same widening as the main query — otherwise the service-type dropdown could not
+      // offer a type that only ever appears on cancelled appointments, making those rows
+      // visible in the table but impossible to filter to.
+      .in('status', HISTORY_STATUSES)
       .then(({ data }) => {
         const types = [...new Set((data || []).map(d => d.service_type).filter(Boolean))].sort();
         setServiceTypes(types as string[]);
@@ -118,10 +140,13 @@ const AdminHistorial = () => {
     let query = supabase
       .from('reservations')
       .select(
-        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km))',
+        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual))',
         { count: 'exact' }
       )
-      .eq('status', 'completada');
+      // Was `.eq('status','completada')`, which made cancelled appointments unfindable:
+      // they exist in the DB (cancelling is an UPDATE, never a DELETE) but no surface
+      // titled "Historial de Servicios" would show them.
+      .in('status', HISTORY_STATUSES);
 
     if (isVendedor && profile?.id) {
       // Vendedor siempre ve solo sus propios registros
@@ -164,6 +189,10 @@ const AdminHistorial = () => {
         .from('reservations')
         .select('id', { count: 'exact', head: true })
         .eq('vehicle_id', entry.vehicle_id)
+        // DELIBERATELY still only 'completada' — do NOT widen this to HISTORY_STATUSES.
+        // This is the count of services actually PERFORMED on the vehicle and it feeds the
+        // warranty evaluation. A cancelled appointment is not a service; counting it would
+        // corrupt the warranty math.
         .eq('status', 'completada');
       setVehServiceCount(count || 0);
     }
@@ -173,6 +202,11 @@ const AdminHistorial = () => {
     if (!entry.vehicles) return { active: false, reason: null };
     const v = entry.vehicles;
     const m = v.vehicle_models;
+    // A manually-typed model belongs to a third-party vehicle never sold by GAC. It must never
+    // fall through to the global warrantyCond fallback below — that would silently report a
+    // competitor's car as under warranty. Mirrors the guard in src/lib/warranty.ts
+    // (resolveWarrantyCondition), which this page does not call directly.
+    if (m?.is_manual) return { active: false, reason: 'Vehículo de terceros — sin garantía GAC' };
     const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);
     const maxKm = hasModelWarranty && m!.warranty_km != null ? m!.warranty_km : warrantyCond?.max_km ?? 0;
     const maxMonths = hasModelWarranty && m!.warranty_months != null ? m!.warranty_months : warrantyCond?.max_months ?? 0;
@@ -328,6 +362,7 @@ const AdminHistorial = () => {
               <TableRow className="[&>th]:py-1.5 [&>th]:text-[11px] [&>th]:font-semibold">
                 <TableHead>Fecha</TableHead>
                 <TableHead>Hora</TableHead>
+                <TableHead>Estado</TableHead>
                 <TableHead>Placa</TableHead>
                 <TableHead>Vehículo</TableHead>
                 <TableHead>Cliente</TableHead>
@@ -344,6 +379,11 @@ const AdminHistorial = () => {
                   <TableRow key={e.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(e)}>
                     <TableCell className="font-medium">{e.reservation_date}</TableCell>
                     <TableCell>{e.reservation_time?.slice(0, 5)}</TableCell>
+                    <TableCell>
+                      <Badge className={cn('text-[10px] px-1.5 py-0 w-fit', statusBadge(e.status).color)}>
+                        {statusBadge(e.status).label}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="font-mono">{e.vehicles?.plate || '-'}</TableCell>
                     <TableCell>
                       {e.vehicles?.vehicle_models?.brand} {e.vehicles?.vehicle_models?.name} {e.vehicles?.year}
@@ -355,9 +395,9 @@ const AdminHistorial = () => {
                     <TableCell className="text-muted-foreground">{e.dealerships?.name || '-'}</TableCell>
                     <TableCell>{e.current_mileage.toLocaleString()}</TableCell>
                     <TableCell>
-                      <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-0.5 w-fit", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                        {w.active ? <ShieldCheck className="w-2.5 h-2.5" /> : <ShieldX className="w-2.5 h-2.5" />}
-                        {w.active ? 'Sí' : 'No'}
+                      <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-0.5 w-fit", e.vehicles?.vehicle_models?.is_manual ? "bg-blue-100 text-blue-800" : w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                        {e.vehicles?.vehicle_models?.is_manual ? <Car className="w-2.5 h-2.5" /> : w.active ? <ShieldCheck className="w-2.5 h-2.5" /> : <ShieldX className="w-2.5 h-2.5" />}
+                        {e.vehicles?.vehicle_models?.is_manual ? 'Terceros' : w.active ? 'Sí' : 'No'}
                       </Badge>
                     </TableCell>
                   </TableRow>
@@ -392,7 +432,7 @@ const AdminHistorial = () => {
           {detail && (() => {
             const e = detail;
             const w = evaluateWarranty(e);
-            const sc = STATUS_CONFIG[e.status] || { label: e.status, color: 'bg-muted' };
+            const sc = statusBadge(e.status);
             return (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -404,7 +444,7 @@ const AdminHistorial = () => {
                 </div>
 
                 {e.vehicles && (
-                  <Card className={cn("border-l-4", w.active ? "border-l-green-500" : "border-l-red-500")}>
+                  <Card className={cn("border-l-4", e.vehicles.vehicle_models?.is_manual ? "border-l-blue-500" : w.active ? "border-l-green-500" : "border-l-red-500")}>
                     <CardContent className="p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -414,9 +454,9 @@ const AdminHistorial = () => {
                             <p className="text-[10px] text-muted-foreground">{e.vehicles.plate || '-'}{e.vehicles.vin ? ` · VIN: ${e.vehicles.vin}` : ''}{e.vehicles.color ? ` · ${e.vehicles.color}` : ''}</p>
                           </div>
                         </div>
-                        <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-0.5", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                          {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                          {w.active ? 'Garantía' : 'Sin Garantía'}
+                        <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-0.5", e.vehicles.vehicle_models?.is_manual ? "bg-blue-100 text-blue-800" : w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                          {e.vehicles.vehicle_models?.is_manual ? <Car className="w-3 h-3" /> : w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                          {e.vehicles.vehicle_models?.is_manual ? 'Terceros' : w.active ? 'Garantía' : 'Sin Garantía'}
                         </Badge>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-center">
@@ -515,6 +555,20 @@ const AdminHistorial = () => {
 
                 {(() => {
                   const m = e.vehicles?.vehicle_models;
+                  // Third-party vehicle: never show a warranty condition, least of all the
+                  // global GAC fallback below — this section would otherwise misrepresent a
+                  // competitor's car as covered by GAC's own warranty terms.
+                  if (m?.is_manual) {
+                    return (
+                      <>
+                        <Separator />
+                        <div className="text-xs bg-blue-50 border border-blue-200 rounded-md p-2.5">
+                          <p className="font-semibold text-blue-800 mb-1 flex items-center gap-1"><Car className="w-3 h-3" /> Vehículo de terceros</p>
+                          <p className="text-blue-700">Este vehículo no fue vendido por GAC y no tiene relación de garantía con la marca.</p>
+                        </div>
+                      </>
+                    );
+                  }
                   const hasModelWarranty = m && (m.warranty_km != null || m.warranty_months != null);
                   if (hasModelWarranty) {
                     const intervalKm = m!.warranty_service_interval_km ?? warrantyCond?.service_interval_km;
