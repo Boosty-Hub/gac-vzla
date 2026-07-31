@@ -25,6 +25,13 @@ interface SurveyInfo {
   dealership_name: string | null;
   status: string;
   already_responded: boolean;
+  /**
+   * Plain-text brand (GAC / DFSK / SHINERAY), nullable — shown as text, never
+   * as a logo. Optional here on purpose: `get_survey_by_token` does not
+   * return it yet (that RPC change belongs to a different work unit); this
+   * stays forward-compatible with no code change once it does.
+   */
+  brand?: string | null;
 }
 
 // Steps: 0 = intro, 1..5 = one per SATISFACTION_ASPECTS entry, 6 = NPS, 7 = optional comment.
@@ -42,6 +49,7 @@ const PublicEncuesta = () => {
   const [screen, setScreen] = useState<Screen>('loading');
   const [clientName, setClientName] = useState('');
   const [dealershipName, setDealershipName] = useState<string | null>(null);
+  const [brandName, setBrandName] = useState<string | null>(null);
 
   const [step, setStep] = useState(0);
   // Presence of a key in `ratings` doubles as the per-aspect "touched" flag —
@@ -80,6 +88,7 @@ const PublicEncuesta = () => {
       }
       setClientName(row.client_name || '');
       setDealershipName(row.dealership_name || null);
+      setBrandName(row.brand || null);
       setScreen('survey');
     };
     load();
@@ -135,10 +144,15 @@ const PublicEncuesta = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-start sm:items-center justify-center p-4 py-8">
-      <Card className="w-full max-w-md gac-shadow">
+      <Card className="w-full max-w-md imb-shadow">
         <CardContent className="p-6">
-          <div className="flex justify-center mb-5">
-            <img src="/gac-logo.png" alt="GAC Motor Venezuela" className="h-8" />
+          {/* Brand-agnostic typographic header — no logo image, so the same
+              form works identically across every brand (requirements.md R10). */}
+          <div className="flex flex-col items-center gap-1 mb-5 text-center">
+            <span className="text-lg font-display font-bold tracking-tight">Encuesta de Satisfacción</span>
+            {brandName && (
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{brandName}</span>
+            )}
           </div>
 
           {screen === 'loading' && (
@@ -310,7 +324,7 @@ const PublicEncuesta = () => {
 
               <div className="pt-1">
                 {step === 0 && (
-                  <Button onClick={goNext} className="w-full h-12 gac-gradient text-base font-semibold">
+                  <Button onClick={goNext} className="w-full h-12 imb-gradient text-base font-semibold">
                     Comenzar
                   </Button>
                 )}
@@ -320,7 +334,7 @@ const PublicEncuesta = () => {
                     <Button variant="outline" onClick={goBack} className="flex-1 h-11">
                       <ArrowLeft className="w-4 h-4 mr-1" /> Atrás
                     </Button>
-                    <Button onClick={goNext} disabled={!canAdvance} className="flex-1 h-11 gac-gradient">
+                    <Button onClick={goNext} disabled={!canAdvance} className="flex-1 h-11 imb-gradient">
                       Siguiente <ArrowRight className="w-4 h-4 ml-1" />
                     </Button>
                   </div>
@@ -331,7 +345,7 @@ const PublicEncuesta = () => {
                     <Button variant="outline" onClick={goBack} disabled={submitting} className="flex-1 h-11">
                       <ArrowLeft className="w-4 h-4 mr-1" /> Atrás
                     </Button>
-                    <Button onClick={handleSubmit} disabled={submitting} className="flex-1 h-11 gac-gradient">
+                    <Button onClick={handleSubmit} disabled={submitting} className="flex-1 h-11 imb-gradient">
                       {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Enviar encuesta'}
                     </Button>
                   </div>

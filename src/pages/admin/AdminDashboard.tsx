@@ -9,6 +9,7 @@ import {
   Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles, Smile,
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -18,7 +19,7 @@ import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useIsMobile } from '@/hooks/use-mobile';
 import CustomWidgetsSection from '@/components/dashboard/CustomWidgetsSection';
 import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
-import SatisfactionOverview from '@/components/satisfaction/SatisfactionOverview';
+import SatisfactionDashboard from '@/components/satisfaction/SatisfactionDashboard';
 
 interface Prospect {
   id: string;
@@ -308,6 +309,13 @@ const AdminDashboard = () => {
         />
       </div>
 
+      <Tabs defaultValue="resumen" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="resumen" className="gap-1.5"><LayoutGrid className="w-3.5 h-3.5" /> Resumen</TabsTrigger>
+          <TabsTrigger value="satisfaccion" className="gap-1.5"><Smile className="w-3.5 h-3.5" /> Satisfacción</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="resumen" className="space-y-6">
       {/* ╔════ SECCIÓN: VISTA GENERAL ════╗ */}
       <div className="flex items-center gap-2 pb-1 border-b border-border/60">
         <LayoutGrid className="w-4 h-4 text-primary" />
@@ -695,16 +703,6 @@ const AdminDashboard = () => {
         </CardContent>
       </Card>
 
-      {/* ╔════ SECCIÓN: SATISFACCIÓN DEL CLIENTE ════╗ */}
-      <div className="pt-4 mt-4 border-t-2 border-dashed border-primary/30 space-y-4">
-        <div className="flex items-center gap-2 pb-1 border-b border-border/60">
-          <Smile className="w-4 h-4 text-primary" />
-          <h2 className="text-sm font-display font-semibold">Satisfacción del cliente</h2>
-          <span className="text-[10px] text-muted-foreground">percepción post-compra, por aspecto</span>
-        </div>
-        <SatisfactionOverview compact />
-      </div>
-
       {/* ╔════ SECCIÓN: WIDGETS PERSONALIZADOS ════╗ */}
       <div className="pt-4 mt-4 border-t-2 border-dashed border-primary/30 space-y-4">
         <div className="flex items-center gap-2 pb-1 border-b border-border/60">
@@ -714,6 +712,12 @@ const AdminDashboard = () => {
         </div>
         <CustomWidgetsSection dealerships={dealerships.map(d => ({ id: d.id, name: d.name }))} />
       </div>
+        </TabsContent>
+
+        <TabsContent value="satisfaccion">
+          <SatisfactionDashboard />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

@@ -33,7 +33,8 @@ import { useProspectEvents } from '@/hooks/useProspectEvents';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 import { useLossReasons } from '@/hooks/useLossReasons';
-import { normalizeSoldPlate, isValidSoldPlate } from '@/lib/plate';
+import WonProspectDialog, { type WonProspectResult } from '@/components/prospects/WonProspectDialog';
+import { describeSkippedDelivery } from '@/components/clients/surveyDelivery';
 
 
 const VENEZUELA_STATES = ['Amazonas','Anzoátegui','Apure','Aragua','Barinas','Bolívar','Carabobo','Cojedes','Delta Amacuro','Dependencias Federales','Distrito Capital','Falcón','Guárico','Lara','Mérida','Miranda','Monagas','Nueva Esparta','Portuguesa','Sucre','Táchira','Trujillo','Vargas','Yaracuy','Zulia'];
@@ -362,13 +363,11 @@ const DealershipProspectos = () => {
   // caller's read scope, so we render these fields directly (no re-fetch).
   const [duplicateProspect, setDuplicateProspect] = useState<{ id: string; name: string; phone: string | null; salesperson: string | null; dealership_id: string; status: string | null } | null>(null);
 
-  // Sold-plate capture: moving a prospect to "ganado" via the inline status
-  // Select must capture the sold vehicle plate before persisting. The DB
-  // trigger (create_satisfaction_survey_on_won) reads sold_plate from the
-  // same update, so status and plate are written together on confirm.
+  // Won-prospect capture: moving a prospect to "ganado" opens WonProspectDialog, which
+  // collects plate + model + year per vehicle (fleet or single) and submits everything
+  // through the register_won_prospect RPC (creates/resolves the client, the vehicle(s),
+  // and the satisfaction survey in one atomic call).
   const [soldPlateTarget, setSoldPlateTarget] = useState<string | null>(null);
-  const [soldPlateInput, setSoldPlateInput] = useState('');
-  const [soldPlateSaving, setSoldPlateSaving] = useState(false);
 
 
   useEffect(() => {
@@ -476,11 +475,20 @@ const DealershipProspectos = () => {
   });
 
   const CLOSED_STATUSES = ['ganado', 'perdido'];
-  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados' | 'ganados'>('abiertos');
+  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados' | 'ganados' | 'falta_placa'>('abiertos');
   const openProspects = sortedProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
   const ganadosProspects = sortedProspects.filter(p => p.status === 'ganado');
   const closedProspects = sortedProspects.filter(p => p.status === 'perdido');
-  const displayedProspects = activeTab === 'ganados' ? ganadosProspects : activeTab === 'cerrados' ? closedProspects : openProspects;
+  // "Falta placa" — derived, not stored (design.md section 4): the Kommo webhook path
+  // moves a prospect to "ganado" without a plate (no plate custom field on Ventas leads),
+  // so these prospects have no vehicle/model/year yet and their survey has no vehicle_id.
+  // Reopening WonProspectDialog and confirming calls register_won_prospect again, which is
+  // idempotent and backfills the vehicles row + satisfaction_surveys.vehicle_id.
+  const faltaPlacaProspects = sortedProspects.filter(p => p.status === 'ganado' && !p.sold_plate);
+  const displayedProspects = activeTab === 'ganados' ? ganadosProspects
+    : activeTab === 'cerrados' ? closedProspects
+    : activeTab === 'falta_placa' ? faltaPlacaProspects
+    : openProspects;
   const totalPages = Math.ceil(displayedProspects.length / PAGE_SIZE);
   const paginatedProspects = displayedProspects.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
@@ -1092,9 +1100,8 @@ const DealershipProspectos = () => {
       return;
     }
     // Moving to "ganado" must capture the sold vehicle plate first; defer the
-    // write until the user confirms in the sold-plate dialog.
+    // write until the user confirms in the won-prospect dialog.
     if (newStatus === 'ganado') {
-      setSoldPlateInput('');
       setSoldPlateTarget(id);
       return;
     }
@@ -1108,28 +1115,39 @@ const DealershipProspectos = () => {
     }
   };
 
-  // Confirm handler for the mandatory sold-plate dialog: writes status +
-  // sold_plate in the same update, then runs the same Kommo sync the normal
-  // inline status change runs.
-  const confirmSoldPlate = async () => {
-    if (!soldPlateTarget || !isValidSoldPlate(soldPlateInput)) return;
+  // Confirm handler for WonProspectDialog: the RPC already wrote status/sold_plate/
+  // is_fleet, created the client + vehicle(s) + survey atomically, and (unless suppressed)
+  // the dialog already attempted delivery via kommo-api. register_won_prospect doesn't
+  // touch loss_reason columns, so clear them here to preserve the existing "recovered from
+  // perdido" behavior; then run the same Kommo lead-stage sync the normal inline status
+  // change runs, refresh the list, and report the win and the survey/delivery outcome as
+  // two separate, honest toasts — the win always succeeded even when delivery is skipped
+  // or fails (never "enviada" unless delivered).
+  const handleWonProspectConfirmed = async (result: WonProspectResult) => {
     const id = soldPlateTarget;
-    setSoldPlateSaving(true);
-    const { error } = await supabase
-      .from('prospects')
-      // Clear any stale loss reason (mirrors the else branch) so a recovered
-      // perdido -> ganado prospect doesn't keep a "why we lost it" note.
-      .update({ status: 'ganado', sold_plate: normalizeSoldPlate(soldPlateInput), loss_reason_id: null, loss_reason: null } as any)
-      .eq('id', id);
-    if (error) { toast.error('Error al actualizar estado'); console.error(error); }
-    else {
-      fetchProspects();
-      const p = prospects.find(x => x.id === id);
-      if (p?.kommo_lead_id) updateKommoLeadStage(id, p.kommo_lead_id, 'ganado').catch(console.error);
+    if (id) {
+      await supabase.from('prospects').update({ loss_reason_id: null, loss_reason: null } as any).eq('id', id);
     }
-    setSoldPlateSaving(false);
+    fetchProspects();
+    const p = id ? prospects.find(x => x.id === id) : undefined;
+    if (id && p?.kommo_lead_id) updateKommoLeadStage(id, p.kommo_lead_id, 'ganado').catch(console.error);
+
+    toast.success(`Venta registrada (${result.vehiclesCreated} vehículo${result.vehiclesCreated === 1 ? '' : 's'}).`);
+
+    if (result.suppressedReason) {
+      toast.warning(describeSkippedDelivery(result.suppressedReason));
+    } else if (result.delivery) {
+      if (result.delivery.kind === 'delivered') {
+        toast.success('Encuesta de satisfacción enviada.');
+      } else if (result.delivery.kind === 'skipped') {
+        toast.warning(describeSkippedDelivery(result.delivery.reason));
+      } else if (result.delivery.kind === 'config_error') {
+        toast.error(`No se envió la encuesta: configuración de Kommo incompleta (${result.delivery.message}).`);
+      } else {
+        toast.error(`No se pudo enviar la encuesta: ${result.delivery.message}`);
+      }
+    }
     setSoldPlateTarget(null);
-    setSoldPlateInput('');
   };
 
   // REQ1: confirm handler for the mandatory loss-reason dialog. Resolves the chosen
@@ -1318,6 +1336,11 @@ const DealershipProspectos = () => {
                 <Pencil className="w-3.5 h-3.5" />
               </button>
             )}
+            {canEdit && p.status === 'ganado' && !p.sold_plate && (
+              <button onClick={e => { e.stopPropagation(); setSoldPlateTarget(p.id); }} title="Falta placa: registrar vehículo" className="text-amber-600 hover:text-amber-700">
+                <AlertTriangle className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1366,7 +1389,7 @@ const DealershipProspectos = () => {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados' | 'ganados'); setSelectedIds(new Set()); setCurrentPage(1); }} className="space-y-3">
+      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados' | 'ganados' | 'falta_placa'); setSelectedIds(new Set()); setCurrentPage(1); }} className="space-y-3">
         <TabsList>
           <TabsTrigger value="abiertos" className="text-xs gap-1">
             Abiertos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{openProspects.length}</Badge>
@@ -1374,6 +1397,11 @@ const DealershipProspectos = () => {
           <TabsTrigger value="ganados" className="text-xs gap-1">
             <span className="text-green-700">Ganados</span> <Badge className="text-[10px] px-1.5 py-0 ml-1 bg-green-100 text-green-800 border-green-300">{ganadosProspects.length}</Badge>
           </TabsTrigger>
+          {faltaPlacaProspects.length > 0 && (
+            <TabsTrigger value="falta_placa" className="text-xs gap-1">
+              <span className="text-amber-700">Falta placa</span> <Badge className="text-[10px] px-1.5 py-0 ml-1 bg-amber-100 text-amber-800 border-amber-300">{faltaPlacaProspects.length}</Badge>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="cerrados" className="text-xs gap-1">
             Perdidos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{closedProspects.length}</Badge>
           </TabsTrigger>
@@ -1588,7 +1616,10 @@ const DealershipProspectos = () => {
             <CardContent className="p-8 text-center">
               <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">
-                {activeTab === 'ganados' ? 'No hay prospectos ganados' : activeTab === 'cerrados' ? 'No hay prospectos perdidos' : 'No hay prospectos abiertos'}
+                {activeTab === 'ganados' ? 'No hay prospectos ganados'
+                  : activeTab === 'cerrados' ? 'No hay prospectos perdidos'
+                  : activeTab === 'falta_placa' ? 'No hay prospectos con placa pendiente'
+                  : 'No hay prospectos abiertos'}
               </p>
             </CardContent>
           </Card>
@@ -1746,6 +1777,11 @@ const DealershipProspectos = () => {
                           {canEdit && (
                             <button onClick={(e) => { e.stopPropagation(); openEditDialog(p); }} title="Editar prospecto" className="text-muted-foreground hover:text-foreground shrink-0">
                               <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {canEdit && p.status === 'ganado' && !p.sold_plate && (
+                            <button onClick={(e) => { e.stopPropagation(); setSoldPlateTarget(p.id); }} title="Falta placa: registrar vehículo" className="text-amber-600 hover:text-amber-700 shrink-0">
+                              <AlertTriangle className="w-3.5 h-3.5" />
                             </button>
                           )}
                         </div>
@@ -2135,35 +2171,14 @@ const DealershipProspectos = () => {
         </DialogContent>
       </Dialog>
 
-      {/* MANDATORY SOLD-PLATE DIALOG — required before marking a prospect "ganado" */}
-      <Dialog open={soldPlateTarget !== null} onOpenChange={open => { if (!open && !soldPlateSaving) { setSoldPlateTarget(null); setSoldPlateInput(''); } }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-display">Vehículo vendido</DialogTitle>
-          </DialogHeader>
-          <div className="py-1 space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Ingresa la placa del vehículo vendido para marcar este prospecto como ganado.
-            </p>
-            <div className="space-y-1">
-              <Label className="text-xs">Placa del vehículo vendido *</Label>
-              <Input
-                autoFocus
-                value={soldPlateInput}
-                onChange={e => setSoldPlateInput(e.target.value.toUpperCase())}
-                placeholder="Ej: AB123CD"
-                className="h-9 text-xs"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" disabled={soldPlateSaving} onClick={() => { setSoldPlateTarget(null); setSoldPlateInput(''); }}>Cancelar</Button>
-            <Button size="sm" className="gac-gradient" disabled={soldPlateSaving || !isValidSoldPlate(soldPlateInput)} onClick={confirmSoldPlate}>
-              {soldPlateSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Confirmar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* WON-PROSPECT DIALOG — required before marking a prospect "ganado"; shared with
+          AdminProspectos.tsx (src/components/prospects/WonProspectDialog.tsx) */}
+      <WonProspectDialog
+        prospectId={soldPlateTarget}
+        modelInterest={soldPlateTarget ? (prospects.find(x => x.id === soldPlateTarget)?.model_interest ?? null) : null}
+        onOpenChange={open => { if (!open) setSoldPlateTarget(null); }}
+        onConfirmed={handleWonProspectConfirmed}
+      />
 
       {/* DUPLICATE PROSPECT ALERT (REQ4) */}
       <AlertDialog open={duplicateProspect !== null} onOpenChange={open => { if (!open) setDuplicateProspect(null); }}>

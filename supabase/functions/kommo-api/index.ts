@@ -2023,6 +2023,246 @@ Deno.serve(async (req) => {
       })
     }
 
+    // ── Deliver satisfaction survey: write link CF + toggle stage to wake SalesBot ───
+    // requirements.md R3/R4, design.md section 3 (decision D4). The delivery mechanism
+    // mirrors notify_dealership_reservation's buffer-toggle (:1877-1885), but D4 is the
+    // one deliberate divergence from that pattern: this lead is the customer's REAL,
+    // permanent conversation lead — shared with reservations, broadcasts and live chat
+    // history — not a disposable per-dealership one. So this PATCHes exactly ONE custom
+    // field and never runs a clear-on-empty sweep across the rest of the lead's fields.
+    //
+    // Request:  { action:'deliver_satisfaction_survey', prospect_id? | client_id? | survey_id?, reason?:'won'|'repurchase'|'resend' }
+    // Response: { delivered:boolean, skipped?:string, survey_id, client_id, lead_id, token }
+    //
+    // Authorization: no bespoke gate — falls through to the staff check above (:972-977).
+    // Not added to SUPERADMIN_ACTIONS. kommo-webhook fires this with the service key
+    // (isServiceCall → superadmin-equivalent, :918-926), so no new auth surface is needed.
+    if (action === 'deliver_satisfaction_survey') {
+      const survey_id = body.survey_id as string | undefined
+      const client_id_in = body.client_id as string | undefined
+      const reason = (body.reason as string | undefined) || 'won'
+
+      if (!prospect_id && !client_id_in && !survey_id) {
+        throw new Error('Falta prospect_id, client_id o survey_id')
+      }
+
+      const logDelivery = (status: string, details: Record<string, unknown>) =>
+        supabase.from('integration_logs').insert({
+          integration_name: 'kommo', event_type: 'survey_delivery',
+          prospect_id: prospect_id || null,
+          status, details: { reason, ...details },
+        })
+
+      const jsonResponse = (payload: Record<string, unknown>, status = 200) =>
+        new Response(JSON.stringify(payload), {
+          status, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+
+      // 1) Config, read at call time — never hardcode (requirements.md's config table).
+      const surveyDeliveryEnabled = config.survey_delivery_enabled === true
+      const surveyLinkFieldIdRaw = config.survey_link_field_id
+      const surveyBaseUrlRaw = config.survey_base_url
+      const surveyStageIdRaw = config.survey_stage_id
+
+      // 2) Kill switch off → quiet 200, not an error (design.md :264).
+      if (!surveyDeliveryEnabled) {
+        return jsonResponse({ delivered: false, skipped: 'disabled' })
+      }
+
+      const missingConfig = (key: string) => String((config as Record<string, unknown>)[key] ?? '').trim() === ''
+
+      // 3) Hard fail on missing config. A silent skip here would make the SalesBot never
+      // fire while the UI still looks green (design.md :265-267). design.md's own snippet
+      // reuses one literal message ('survey_stage_id_not_configured') for all three gaps;
+      // split into one message per key here so an operator can tell which slot is empty
+      // without guessing — same 400 contract, more actionable detail.
+      for (const [key, code] of [
+        ['survey_stage_id', 'survey_stage_id_not_configured'],
+        ['survey_link_field_id', 'survey_link_field_id_not_configured'],
+        ['survey_base_url', 'survey_base_url_not_configured'],
+      ] as const) {
+        if (missingConfig(key)) {
+          await logDelivery('error', { error: code })
+          return jsonResponse({ error: code }, 400)
+        }
+      }
+
+      const surveyLinkFieldId = Number(surveyLinkFieldIdRaw)
+      const surveyStageId = Number(surveyStageIdRaw)
+      const surveyBaseUrl = String(surveyBaseUrlRaw)
+
+      try {
+        // 4) Resolve the survey row. It already exists by this point — created by the
+        // trigger pair (trg_link_client_on_won / trg_create_satisfaction_survey_on_won)
+        // inside the SAME transaction that moved the prospect to 'ganado', on both the UI
+        // path (register_won_prospect RPC) and the Kommo webhook path (raw status UPDATE,
+        // design.md D5). This action never mints clients/vehicles/surveys, it only
+        // delivers what already exists — so prospect_id resolves via a direct read here,
+        // NOT a second register_won_prospect call (which requires a plate array this
+        // action does not have, and would contradict D5's "must not block on a missing
+        // plate"). The partial unique index on prospect_id guarantees at most one row.
+        type SurveyRow = {
+          id: string; token: string; client_id: string | null
+          suppressed_reason: string | null; delivered_at: string | null
+        }
+        let survey: SurveyRow | null = null
+
+        if (survey_id) {
+          const { data } = await supabase
+            .from('satisfaction_surveys')
+            .select('id, token, client_id, suppressed_reason, delivered_at')
+            .eq('id', survey_id)
+            .maybeSingle()
+          survey = data as SurveyRow | null
+        } else if (prospect_id) {
+          const { data } = await supabase
+            .from('satisfaction_surveys')
+            .select('id, token, client_id, suppressed_reason, delivered_at')
+            .eq('prospect_id', prospect_id)
+            .maybeSingle()
+          survey = data as SurveyRow | null
+        } else {
+          // client_id path (repurchase / resend): most recent survey for this client.
+          const { data } = await supabase
+            .from('satisfaction_surveys')
+            .select('id, token, client_id, suppressed_reason, delivered_at')
+            .eq('client_id', client_id_in as string)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          survey = data as SurveyRow | null
+        }
+
+        if (!survey) throw new Error('survey_not_found')
+        const clientId = survey.client_id
+        if (!clientId) throw new Error('survey_has_no_client')
+
+        // 5) Rate limit (requirements.md R4) — fn_claim_survey_slot already stamped this
+        // at survey-creation time; honor it here BEFORE any Kommo write/read of the client
+        // record, so a rate-limited survey never even reaches the shared-lead guard.
+        if (survey.suppressed_reason) {
+          return jsonResponse({
+            delivered: false, skipped: 'rate_limited_24h',
+            survey_id: survey.id, client_id: clientId, lead_id: null, token: survey.token,
+          })
+        }
+
+        // 5b) Already-delivered guard. Delivery is NOT naturally idempotent from the
+        // customer's point of view: re-running it re-PATCHes the CF and re-toggles the
+        // stage, and that stage toggle is exactly what wakes the SalesBot — so the
+        // customer receives a SECOND survey message for the same purchase.
+        //
+        // This is reachable in normal use: the "Falta placa" backfill reopens the won
+        // dialog and calls register_won_prospect again (deliberately idempotent, no
+        // no_new_plates guard), which leaves suppressed_reason NULL, so the check above
+        // does not catch it. The 24h slot was claimed once at survey creation and is
+        // never re-claimed, so it does not catch it either.
+        //
+        // 'resend' is the explicit, human-initiated escape hatch and is allowed through —
+        // that is the whole point of the resend button (R9).
+        if (survey.delivered_at && reason !== 'resend') {
+          await logDelivery('info', { survey_id: survey.id, client_id: clientId, delivered_at: survey.delivered_at })
+          return jsonResponse({
+            delivered: false, skipped: 'already_delivered',
+            survey_id: survey.id, client_id: clientId, lead_id: null, token: survey.token,
+          })
+        }
+
+        const { data: client } = await supabase
+          .from('clients')
+          .select('id, full_name, cedula, phone, email, state, "IdContactKommo", kommo_conversation_lead_id')
+          .eq('id', clientId)
+          .single()
+        if (!client) throw new Error('client_not_found')
+
+        // 6) Shared-lead guard — the only path that could deliver a survey to the wrong
+        // customer (5 such leads exist today, requirements.md). Re-checked after any
+        // fresh link below (step 7), since syncOneClientToConversation can attach an
+        // EXISTING lead that is itself already shared.
+        const guardSharedLead = async (leadId: number): Promise<boolean> => {
+          const { data: sharers } = await supabase
+            .from('clients').select('id').eq('kommo_conversation_lead_id', leadId)
+          if ((sharers?.length ?? 0) > 1) {
+            await logDelivery('warning', {
+              error: 'shared_conversation_lead', client_id: clientId, lead_id: leadId,
+              client_ids: (sharers ?? []).map((s: { id: string }) => s.id),
+            })
+            return true
+          }
+          return false
+        }
+
+        let leadId = (client as { kommo_conversation_lead_id: number | null }).kommo_conversation_lead_id ?? null
+
+        if (!leadId) {
+          // 7) No lead yet — reuse the existing dedup-safe link/create logic verbatim
+          // (:653): self-skips when set, dedups CI-RIF→phone→email, links an existing
+          // pipeline lead instead of creating a second one.
+          const syncResult = await syncOneClientToConversation(supabase, baseUrl, authHeaders, client as Record<string, unknown>)
+          leadId = syncResult.leadId
+        }
+        if (!leadId) throw new Error('kommo_lead_resolution_failed')
+
+        if (await guardSharedLead(leadId)) {
+          return jsonResponse({
+            delivered: false, skipped: 'shared_conversation_lead',
+            survey_id: survey.id, client_id: clientId, lead_id: leadId, token: survey.token,
+          })
+        }
+
+        // 8) Survey URL.
+        const url = `${surveyBaseUrl.replace(/\/+$/, '')}/encuesta/${survey.token}`
+
+        // 9) PATCH ONLY the survey link CF — D4: no clear-on-empty sweep on this shared,
+        // permanent customer lead; every other field is left untouched.
+        const cfRes = await fetch(`${baseUrl}/leads/${leadId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({
+            custom_fields_values: [{ field_id: surveyLinkFieldId, values: [{ value: url }] }],
+          }),
+        })
+        if (!cfRes.ok) throw new Error(`Kommo error al escribir CF encuesta: ${await cfRes.text()}`)
+
+        // 10) Stage toggle — the mechanism that wakes the SalesBot (mirrors :1877-1885).
+        // The buffer must differ from the target or the "entered stage" event never fires.
+        const buffer = surveyStageId === CONVERSATION_STAGE
+          ? POSTVENTA_STATUS_TO_STAGE.pendiente
+          : CONVERSATION_STAGE
+
+        const bufferRes = await fetch(`${baseUrl}/leads/${leadId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({ status_id: buffer }),
+        })
+        if (!bufferRes.ok) throw new Error(`Kommo error al mover a etapa buffer: ${await bufferRes.text()}`)
+
+        const targetRes = await fetch(`${baseUrl}/leads/${leadId}`, {
+          method: 'PATCH', headers: authHeaders,
+          body: JSON.stringify({ status_id: surveyStageId }),
+        })
+        if (!targetRes.ok) throw new Error(`Kommo error al volver a etapa de encuesta: ${await targetRes.text()}`)
+
+        // 11) Mark sent + timestamp + log. Retry-safe: the CF write and the stage toggle
+        // are both idempotent, and mark_survey_sent (20260720120000:198-218) refuses to
+        // downgrade an already-'responded' survey.
+        await supabase.rpc('mark_survey_sent', { p_survey_id: survey.id })
+        await supabase.from('satisfaction_surveys')
+          .update({ delivered_at: new Date().toISOString() })
+          .eq('id', survey.id)
+
+        await logDelivery('success', { client_id: clientId, survey_id: survey.id, lead_id: leadId })
+
+        return jsonResponse({
+          delivered: true, survey_id: survey.id, client_id: clientId, lead_id: leadId, token: survey.token,
+        })
+      } catch (deliverErr) {
+        // Mirrors notify_dealership_reservation's own wrapping try/catch (:1707/:1940):
+        // record the failure in integration_logs instead of letting the generic
+        // top-level catch (:2212) swallow it into an unlogged 500.
+        await logDelivery('error', { error: (deliverErr as Error).message })
+        return jsonResponse({ error: (deliverErr as Error).message }, 500)
+      }
+    }
+
     // ── Migrate GAC clients into Post Venta "En conversación Cliente/Empresa" ───
     // Batched + idempotent. Delegates the per-client dedup/create/link logic (and
     // the anti-duplicate pipeline-lead check) to syncOneClientToConversation, the

@@ -35,13 +35,24 @@ interface SatisfactionOverviewProps {
    * main Admin Dashboard) that already provides its own heading.
    */
   compact?: boolean;
+  /**
+   * When provided, the component renders this data instead of performing its
+   * own fetch (design.md D8). Used by the admin Dashboard's "Satisfacción"
+   * tab, which owns one RLS-scoped fetch and applies brand/model/month
+   * filters before handing rows down here. When absent, the component keeps
+   * fetching independently exactly as before — `AdminClientes.tsx`'s own
+   * "Satisfacción" tab keeps working unchanged (uncontrolled fallback).
+   */
+  surveys?: SurveyRow[];
 }
 
-const SatisfactionOverview = ({ compact }: SatisfactionOverviewProps) => {
-  const [surveys, setSurveys] = useState<SurveyRow[]>([]);
-  const [loading, setLoading] = useState(true);
+const SatisfactionOverview = ({ compact, surveys: controlledSurveys }: SatisfactionOverviewProps) => {
+  const isControlled = controlledSurveys !== undefined;
+  const [fetchedSurveys, setFetchedSurveys] = useState<SurveyRow[]>([]);
+  const [loading, setLoading] = useState(!isControlled);
 
   useEffect(() => {
+    if (isControlled) return; // parent owns the data — skip the internal fetch entirely
     const fetchSurveys = async () => {
       setLoading(true);
       const { data, error } = await (supabase as any)
@@ -55,12 +66,14 @@ const SatisfactionOverview = ({ compact }: SatisfactionOverviewProps) => {
         return;
       }
 
-      setSurveys((data || []) as SurveyRow[]);
+      setFetchedSurveys((data || []) as SurveyRow[]);
       setLoading(false);
     };
 
     fetchSurveys();
-  }, []);
+  }, [isControlled]);
+
+  const surveys = isControlled ? controlledSurveys! : fetchedSurveys;
 
   // `response` embeds as a single object (or null), never an array — see SurveyRow.
   const respondedSurveys = surveys.filter(s => s.response != null);

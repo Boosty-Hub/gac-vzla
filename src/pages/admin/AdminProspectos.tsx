@@ -38,7 +38,8 @@ import { useProspectEvents } from '@/hooks/useProspectEvents';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 import { phonesMatch } from '@/lib/phone';
-import { normalizeSoldPlate, isValidSoldPlate } from '@/lib/plate';
+import WonProspectDialog, { type WonProspectResult } from '@/components/prospects/WonProspectDialog';
+import { deliverSatisfactionSurvey, describeSkippedDelivery } from '@/components/clients/surveyDelivery';
 
 
 interface Dealership {
@@ -312,13 +313,11 @@ const AdminProspectos = () => {
   // Duplicate-phone alert (same UX as the dealership portal)
   const [duplicateMatch, setDuplicateMatch] = useState<{ id: string; name: string; phone: string | null; salesperson: string | null } | null>(null);
 
-  // Sold-plate capture: moving a prospect to "ganado" via the inline status
-  // Select must capture the sold vehicle plate before persisting. The DB
-  // trigger (create_satisfaction_survey_on_won) reads sold_plate from the
-  // same update, so status and plate are written together on confirm.
+  // Won-prospect capture: moving a prospect to "ganado" opens WonProspectDialog, which
+  // collects plate + model + year per vehicle (fleet or single) and submits everything
+  // through the register_won_prospect RPC (creates/resolves the client, the vehicle(s),
+  // and the satisfaction survey in one atomic call).
   const [soldPlateTarget, setSoldPlateTarget] = useState<string | null>(null);
-  const [soldPlateInput, setSoldPlateInput] = useState('');
-  const [soldPlateSaving, setSoldPlateSaving] = useState(false);
 
   // Import XLSX
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -634,9 +633,8 @@ const AdminProspectos = () => {
 
   const updateStatus = async (id: string, newStatus: string) => {
     // Moving to "ganado" must capture the sold vehicle plate first; defer the
-    // write until the user confirms in the sold-plate dialog.
+    // write until the user confirms in the won-prospect dialog.
     if (newStatus === 'ganado') {
-      setSoldPlateInput('');
       setSoldPlateTarget(id);
       return;
     }
@@ -651,28 +649,36 @@ const AdminProspectos = () => {
     }
   };
 
-  // Confirm handler for the mandatory sold-plate dialog: writes status +
-  // sold_plate in the same update, then runs the same Kommo sync the normal
-  // inline status change runs.
-  const confirmSoldPlate = async () => {
-    if (!soldPlateTarget || !isValidSoldPlate(soldPlateInput)) return;
+  // Confirm handler for WonProspectDialog: the RPC already wrote status/sold_plate/
+  // is_fleet, created the client + vehicle(s) + survey atomically, and (unless suppressed)
+  // the dialog already attempted delivery via kommo-api. Here we only run the same Kommo
+  // lead-stage sync the normal inline status change runs, refresh the list, and report the
+  // win and the survey/delivery outcome as two separate, honest toasts — the win always
+  // succeeded even when delivery is skipped or fails (never "enviada" unless delivered).
+  const handleWonProspectConfirmed = (result: WonProspectResult) => {
     const id = soldPlateTarget;
-    setSoldPlateSaving(true);
-    const { error } = await supabase
-      .from('prospects')
-      .update({ status: 'ganado', sold_plate: normalizeSoldPlate(soldPlateInput) } as any)
-      .eq('id', id);
-    if (error) { toast.error('Error al actualizar estado'); console.error(error); }
-    else {
-      fetchProspects();
-      const p = prospects.find(x => x.id === id);
-      if (p?.kommo_lead_id) {
-        updateKommoLeadStage(id, p.kommo_lead_id, 'ganado').catch(console.error);
+    fetchProspects();
+    const p = id ? prospects.find(x => x.id === id) : undefined;
+    if (id && p?.kommo_lead_id) {
+      updateKommoLeadStage(id, p.kommo_lead_id, 'ganado').catch(console.error);
+    }
+
+    toast.success(`Venta registrada (${result.vehiclesCreated} vehículo${result.vehiclesCreated === 1 ? '' : 's'}).`);
+
+    if (result.suppressedReason) {
+      toast.warning(describeSkippedDelivery(result.suppressedReason));
+    } else if (result.delivery) {
+      if (result.delivery.kind === 'delivered') {
+        toast.success('Encuesta de satisfacción enviada.');
+      } else if (result.delivery.kind === 'skipped') {
+        toast.warning(describeSkippedDelivery(result.delivery.reason));
+      } else if (result.delivery.kind === 'config_error') {
+        toast.error(`No se envió la encuesta: configuración de Kommo incompleta (${result.delivery.message}).`);
+      } else {
+        toast.error(`No se pudo enviar la encuesta: ${result.delivery.message}`);
       }
     }
-    setSoldPlateSaving(false);
     setSoldPlateTarget(null);
-    setSoldPlateInput('');
   };
 
   const openDetail = (p: Prospect) => {
@@ -767,72 +773,35 @@ const AdminProspectos = () => {
     setSendingWa(null);
   };
 
-  // Manual "Enviar encuesta" (ganado prospects only). Looks up the prospect's
-  // satisfaction survey — creating one if the "ganado" DB trigger hasn't
-  // produced it yet (legacy/edge case) — marks it "sent" via the `mark_survey_sent`
-  // RPC when it was still "pending", copies the public link to the clipboard,
-  // and opens WhatsApp with the link when the prospect has a phone on file.
-  // `satisfaction_surveys` is not in the generated types.ts (new table, no
-  // regen), so all calls below use `(supabase as any)` — same convention as
-  // SatisfactionOverview.tsx / ClientDetailDialog.tsx.
+  // Manual "Enviar encuesta" (ganado prospects only) — now routed through the same
+  // Kommo delivery path as every other surface (tasks.md 3.5).
+  //
+  // This REPLACES the previous wa.me implementation, which was not merely a different
+  // channel but actively unsafe alongside the new pipeline:
+  //   * It INSERTed a `satisfaction_surveys` row directly, bypassing `fn_claim_survey_slot`
+  //     and therefore the one-survey-per-client-per-24h limit (R4) entirely.
+  //   * That direct insert now races the partial unique index on `prospect_id`.
+  //   * Rows created that way carry no `client_id`, so they never appear as navigable
+  //     entries in the Satisfacción dashboard's client list.
+  //   * Two competing "send survey" mechanisms meant staff could double-contact a customer.
+  //
+  // `reason: 'resend'` is correct here: this is a human pressing a button on purpose, which
+  // is the deliberate escape hatch past the already-delivered guard in kommo-api.
   const handleSendSurvey = async (p: Prospect) => {
     if (sendingSurvey) return;
     setSendingSurvey(p.id);
     try {
-      const { data: existing, error: fetchError } = await (supabase as any)
-        .from('satisfaction_surveys')
-        .select('id, token, status')
-        .eq('prospect_id', p.id)
-        .limit(1);
-      if (fetchError) throw fetchError;
-
-      let survey = existing?.[0] as { id: string; token: string; status: string } | undefined;
-
-      if (!survey) {
-        // Mirrors create_satisfaction_survey_on_won's row shape (see the
-        // satisfaction migration) — created directly here for prospects that
-        // reached "ganado" before that trigger existed, or any other edge
-        // case where the trigger-created row is missing.
-        const { data: inserted, error: insertError } = await (supabase as any)
-          .from('satisfaction_surveys')
-          .insert({
-            prospect_id: p.id,
-            kommo_lead_id: p.kommo_lead_id,
-            dealership_id: p.dealership_id,
-            salesperson: p.salesperson,
-            client_name: p.name,
-            client_phone: p.phone,
-            sold_plate: p.sold_plate ?? null,
-            eligible_at: new Date().toISOString(),
-            status: 'sent',
-            sent_at: new Date().toISOString(),
-          })
-          .select('id, token, status')
-          .single();
-        if (insertError) throw insertError;
-        survey = inserted;
-      } else if (survey.status === 'pending') {
-        // Reuse the existing staff-facing RPC (guards against downgrading an
-        // already sent/responded survey, and applies the same dealership/
-        // vendedor authorization the survey's RLS policies use).
-        const { error: rpcError } = await (supabase as any).rpc('mark_survey_sent', { p_survey_id: survey.id });
-        if (rpcError) throw rpcError;
+      const outcome = await deliverSatisfactionSurvey({ prospect_id: p.id }, 'resend');
+      switch (outcome.kind) {
+        case 'delivered':
+          toast.success('Encuesta de satisfacción enviada.');
+          break;
+        case 'skipped':
+          toast.warning(describeSkippedDelivery(outcome.reason));
+          break;
+        default:
+          toast.error(outcome.message);
       }
-      // status === 'sent' / 'responded' → reuse the existing token as-is.
-
-      const link = `${window.location.origin}/encuesta/${survey.token}`;
-      await navigator.clipboard.writeText(link);
-      toast.success('Link de encuesta copiado');
-
-      if (p.phone) {
-        const digits = p.phone.replace(/\D/g, '');
-        const waPhone = digits.startsWith('58') ? digits : digits.startsWith('0') ? `58${digits.slice(1)}` : `58${digits}`;
-        const message = `Hola ${p.name}, gracias por tu compra. Nos encantaría conocer tu experiencia: ${link}`;
-        window.open(`https://wa.me/${waPhone}?text=${encodeURIComponent(message)}`, '_blank');
-      }
-    } catch (err) {
-      console.error('Error al enviar encuesta:', err);
-      toast.error('Error al enviar la encuesta');
     } finally {
       setSendingSurvey(null);
     }
@@ -1205,7 +1174,7 @@ const AdminProspectos = () => {
 
   const CLOSED_STATUSES = ['ganado', 'perdido'];
 
-  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados' | 'ganados'>('abiertos');
+  const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados' | 'ganados' | 'falta_placa'>('abiertos');
 
   // Stats
   const totalNuevos = prospects.filter(p => p.status === 'nuevo').length;
@@ -1215,7 +1184,16 @@ const AdminProspectos = () => {
   const openProspects = sortedProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
   const ganadosProspects = sortedProspects.filter(p => p.status === 'ganado');
   const closedProspects = sortedProspects.filter(p => p.status === 'perdido');
-  const displayedProspects = activeTab === 'ganados' ? ganadosProspects : activeTab === 'cerrados' ? closedProspects : openProspects;
+  // "Falta placa" — derived, not stored (design.md section 4): the Kommo webhook path
+  // moves a prospect to "ganado" without a plate (no plate custom field on Ventas leads),
+  // so these prospects have no vehicle/model/year yet and their survey has no vehicle_id.
+  // Reopening WonProspectDialog and confirming calls register_won_prospect again, which is
+  // idempotent and backfills the vehicles row + satisfaction_surveys.vehicle_id.
+  const faltaPlacaProspects = sortedProspects.filter(p => p.status === 'ganado' && !p.sold_plate);
+  const displayedProspects = activeTab === 'ganados' ? ganadosProspects
+    : activeTab === 'cerrados' ? closedProspects
+    : activeTab === 'falta_placa' ? faltaPlacaProspects
+    : openProspects;
   const totalPages = Math.ceil(displayedProspects.length / PAGE_SIZE);
   const paginatedProspects = displayedProspects.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
@@ -1339,6 +1317,12 @@ const AdminProspectos = () => {
                     : <Send className="w-3.5 h-3.5 text-primary" />}
                 </Button>
               )}
+              {p.status === 'ganado' && !p.sold_plate && (
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0" title="Falta placa: registrar vehículo"
+                  onClick={(e) => { e.stopPropagation(); setSoldPlateTarget(p.id); }}>
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                </Button>
+              )}
               {canEdit && (
                 <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
                   <FileText className="w-3.5 h-3.5" />
@@ -1451,7 +1435,7 @@ const AdminProspectos = () => {
         </Card>
       </div>
 
-      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados' | 'ganados'); setSelectedIds(new Set()); setCurrentPage(1); }} className="space-y-3">
+      <Tabs value={activeTab} onValueChange={v => { setActiveTab(v as 'abiertos' | 'cerrados' | 'ganados' | 'falta_placa'); setSelectedIds(new Set()); setCurrentPage(1); }} className="space-y-3">
         <TabsList>
           <TabsTrigger value="abiertos" className="text-xs gap-1">
             Abiertos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{openProspects.length}</Badge>
@@ -1459,6 +1443,11 @@ const AdminProspectos = () => {
           <TabsTrigger value="ganados" className="text-xs gap-1">
             <span className="text-green-700">Ganados</span> <Badge className="text-[10px] px-1.5 py-0 ml-1 bg-green-100 text-green-800 border-green-300">{ganadosProspects.length}</Badge>
           </TabsTrigger>
+          {faltaPlacaProspects.length > 0 && (
+            <TabsTrigger value="falta_placa" className="text-xs gap-1">
+              <span className="text-amber-700">Falta placa</span> <Badge className="text-[10px] px-1.5 py-0 ml-1 bg-amber-100 text-amber-800 border-amber-300">{faltaPlacaProspects.length}</Badge>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="cerrados" className="text-xs gap-1">
             Perdidos <Badge variant="outline" className="text-[10px] px-1.5 py-0 ml-1">{closedProspects.length}</Badge>
           </TabsTrigger>
@@ -1684,7 +1673,10 @@ const AdminProspectos = () => {
             <CardContent className="p-8 text-center">
               <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground">
-                {activeTab === 'abiertos' ? 'No hay prospectos abiertos' : activeTab === 'ganados' ? 'No hay prospectos ganados' : 'No hay prospectos perdidos'}
+                {activeTab === 'abiertos' ? 'No hay prospectos abiertos'
+                  : activeTab === 'ganados' ? 'No hay prospectos ganados'
+                  : activeTab === 'falta_placa' ? 'No hay prospectos con placa pendiente'
+                  : 'No hay prospectos perdidos'}
               </p>
             </CardContent>
           </Card>
@@ -1844,6 +1836,12 @@ const AdminProspectos = () => {
                                 : <Send className="w-3.5 h-3.5 text-primary" />}
                             </Button>
                           )}
+                          {p.status === 'ganado' && !p.sold_plate && (
+                            <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Falta placa: registrar vehículo"
+                              onClick={(e) => { e.stopPropagation(); setSoldPlateTarget(p.id); }}>
+                              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                            </Button>
+                          )}
                           {canEdit && (
                             <Button size="sm" variant="ghost" className="text-[10px] h-6 px-2" onClick={(e) => { e.stopPropagation(); openEdit(p); }}>
                               Editar
@@ -1992,35 +1990,14 @@ const AdminProspectos = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* MANDATORY SOLD-PLATE DIALOG — required before marking a prospect "ganado" */}
-      <Dialog open={soldPlateTarget !== null} onOpenChange={open => { if (!open && !soldPlateSaving) { setSoldPlateTarget(null); setSoldPlateInput(''); } }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-display">Vehículo vendido</DialogTitle>
-          </DialogHeader>
-          <div className="py-1 space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Ingresa la placa del vehículo vendido para marcar este prospecto como ganado.
-            </p>
-            <div className="space-y-1">
-              <Label className="text-xs">Placa del vehículo vendido *</Label>
-              <Input
-                autoFocus
-                value={soldPlateInput}
-                onChange={e => setSoldPlateInput(e.target.value.toUpperCase())}
-                placeholder="Ej: AB123CD"
-                className="h-9 text-xs"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" disabled={soldPlateSaving} onClick={() => { setSoldPlateTarget(null); setSoldPlateInput(''); }}>Cancelar</Button>
-            <Button size="sm" className="gac-gradient" disabled={soldPlateSaving || !isValidSoldPlate(soldPlateInput)} onClick={confirmSoldPlate}>
-              {soldPlateSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Confirmar'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* WON-PROSPECT DIALOG — required before marking a prospect "ganado"; shared with
+          DealershipProspectos.tsx (src/components/prospects/WonProspectDialog.tsx) */}
+      <WonProspectDialog
+        prospectId={soldPlateTarget}
+        modelInterest={soldPlateTarget ? (prospects.find(x => x.id === soldPlateTarget)?.model_interest ?? null) : null}
+        onOpenChange={open => { if (!open) setSoldPlateTarget(null); }}
+        onConfirmed={handleWonProspectConfirmed}
+      />
 
       {/* IMPORT PREVIEW DIALOG */}
       <Dialog open={importOpen} onOpenChange={setImportOpen}>

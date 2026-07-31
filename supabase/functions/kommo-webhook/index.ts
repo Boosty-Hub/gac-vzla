@@ -412,6 +412,10 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       (Deno.env.get('SB_SECRET_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'))!
     )
+    // Reused below for the explicit-bearer self-invoke of kommo-api's deliver_satisfaction_survey
+    // action, mirroring kommo-api's own service-to-service self-invocations (:1509/:1676/:1978)
+    // so the call is recognized as a trusted internal caller (isServiceCall, kommo-api:918-926).
+    const serviceKey = (Deno.env.get('SB_SECRET_KEY') ?? Deno.env.get('SUPABASE_SERVICE_ROLE_KEY'))!
 
     // ── Verificacion de origen (A3) ──────────────────────────────────────────
     // Secreto compartido opt-in: si KOMMO_WEBHOOK_SECRET esta configurado, Kommo
@@ -523,6 +527,52 @@ Deno.serve(async (req) => {
           status: 'success',
           details: { old_status: prospect.status, new_status: ourStatus, kommo_status_id: statusId },
         })
+
+        if (ourStatus === 'ganado') {
+          // Plate is NOT capturable here (no plate CF on Ventas leads) and MUST NOT block:
+          // Kommo already moved the lead, so refusing would permanently desync CRM and DB
+          // (design.md D5). The client + satisfaction_surveys row already exist by this point —
+          // trg_link_client_on_won (BEFORE) and trg_create_satisfaction_survey_on_won (AFTER)
+          // both fired inside the UPDATE above, in the same transaction. This only delivers
+          // what already exists.
+          await supabase.from('integration_logs').insert({
+            integration_name: 'kommo', event_type: 'webhook_won_needs_plate',
+            prospect_id: prospect.id, kommo_lead_id: parseInt(statusLeadId),
+            status: 'warning', details: { reason: 'sold_plate not captured on webhook path' },
+          })
+
+          // Nested inside the status-CHANGE guard above (prospect.status !== ourStatus), not a
+          // bare `ourStatus === 'ganado'` check: deliver_satisfaction_survey has no "already
+          // delivered" gate of its own beyond the 24h claim recorded at survey creation (design.md
+          // section 3 — "resend does not re-claim, it reuses the existing token"). A Kommo webhook
+          // retry re-runs this whole handler with the SAME statusId; by then prospect.status is
+          // already 'ganado' in our DB, so this branch — and the delivery call inside it — is not
+          // re-entered. That is what keeps a redelivered webhook from sending a second survey.
+          try {
+            const { error: deliverError } = await supabase.functions.invoke('kommo-api', {
+              body: { action: 'deliver_satisfaction_survey', prospect_id: prospect.id, reason: 'won' },
+              // Explicit bearer: supabase-js does not put sb_secret_* keys in Authorization on
+              // its own, and kommo-api's auth guard must see this call as a trusted internal one.
+              headers: { Authorization: `Bearer ${serviceKey}` },
+            })
+            if (deliverError) {
+              await supabase.from('integration_logs').insert({
+                integration_name: 'kommo', event_type: 'webhook_survey_delivery_failed',
+                prospect_id: prospect.id, kommo_lead_id: parseInt(statusLeadId),
+                status: 'error',
+                details: { error: (deliverError as Error)?.message ?? String(deliverError) },
+              })
+            }
+          } catch (deliverEx) {
+            // Kommo retries failed webhooks, which would re-run this whole handler — a
+            // delivery failure must never bubble up and 500 the webhook response.
+            await supabase.from('integration_logs').insert({
+              integration_name: 'kommo', event_type: 'webhook_survey_delivery_failed',
+              prospect_id: prospect.id, kommo_lead_id: parseInt(statusLeadId),
+              status: 'error', details: { error: (deliverEx as Error).message },
+            }).catch(() => { /* logging failure must not break the webhook either */ })
+          }
+        }
       }
 
       // Sync all fields from Kommo → GAC (overwrite if different)
