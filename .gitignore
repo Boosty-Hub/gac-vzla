@@ -30,3 +30,9 @@ supabase/.temp/
 .env
 .env.*
 !.env.example
+
+# Caché incremental de TypeScript: la genera `tsc --noEmit` y es local de cada máquina.
+*.tsbuildinfo
+
+# Caché local del registro de skills de herramientas de asistencia.
+.atl/
