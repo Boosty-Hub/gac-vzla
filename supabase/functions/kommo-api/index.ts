@@ -2269,9 +2269,26 @@ Deno.serve(async (req) => {
         // 11) Mark sent + timestamp + log. Retry-safe: the CF write and the stage toggle
         // are both idempotent, and mark_survey_sent (20260720120000:198-218) refuses to
         // downgrade an already-'responded' survey.
-        await supabase.rpc('mark_survey_sent', { p_survey_id: survey.id })
+        // NOT mark_survey_sent: that RPC role-gates on is_admin_user()/get_user_role(),
+        // which both read auth.uid(). This handler runs on the service key, where auth.uid()
+        // is NULL, so the call always raised 'No autorizado' — and the error was never
+        // checked, so it failed silently and every automatic delivery left `status` at
+        // 'pending' with `sent_at` NULL while the survey had in fact gone out. Verified
+        // against production on the first real end-to-end send.
+        //
+        // Same semantics applied directly (the service-key client is not subject to RLS):
+        // promote ONLY a survey still 'pending', so a survey already 'responded' is never
+        // downgraded by a resend.
+        const nowIso = new Date().toISOString()
         await supabase.from('satisfaction_surveys')
-          .update({ delivered_at: new Date().toISOString() })
+          .update({ status: 'sent', sent_at: nowIso, updated_at: nowIso })
+          .eq('id', survey.id)
+          .eq('status', 'pending')
+
+        // delivered_at is stamped unconditionally — it records that the message left, which
+        // is true even for a resend against an already-'responded' survey.
+        await supabase.from('satisfaction_surveys')
+          .update({ delivered_at: nowIso })
           .eq('id', survey.id)
 
         await logDelivery('success', { client_id: clientId, survey_id: survey.id, lead_id: leadId })
