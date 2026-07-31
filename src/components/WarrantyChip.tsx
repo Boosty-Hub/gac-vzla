@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Badge } from '@/components/ui/badge';
-import { ShieldCheck, ShieldX, AlertTriangle } from 'lucide-react';
+import { ShieldCheck, ShieldX, AlertTriangle, Car } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   evaluateWarranty,
@@ -24,11 +24,13 @@ interface VehicleData {
     warranty_km: number | null;
     warranty_months: number | null;
     warranty_service_interval_km: number | null;
+    is_manual: boolean | null;
   } | null;
 }
 
 export const WarrantyChip = ({ vehicleId, className }: Props) => {
   const [evaluation, setEvaluation] = useState<WarrantyEvaluation | null>(null);
+  const [isManual, setIsManual] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -42,7 +44,7 @@ export const WarrantyChip = ({ vehicleId, className }: Props) => {
       const [vehRes, condsRes, servicesRes] = await Promise.all([
         supabase
           .from('vehicles')
-          .select('mileage, warranty_active, purchase_date, vehicle_models(warranty_condition_id, warranty_km, warranty_months, warranty_service_interval_km)')
+          .select('mileage, warranty_active, purchase_date, vehicle_models(warranty_condition_id, warranty_km, warranty_months, warranty_service_interval_km, is_manual)')
           .eq('id', vehicleId)
           .maybeSingle(),
         supabase.from('warranty_conditions').select('id, name, max_km, max_months, service_interval_km, is_active'),
@@ -67,6 +69,7 @@ export const WarrantyChip = ({ vehicleId, className }: Props) => {
         resolved,
         completed,
       );
+      setIsManual(!!vehicle.vehicle_models?.is_manual);
       setEvaluation(result);
       setLoading(false);
     })();
@@ -103,6 +106,14 @@ export const WarrantyChip = ({ vehicleId, className }: Props) => {
       <Badge className={cn('bg-green-100 text-green-800 gap-1 text-[11px]', className)}>
         <ShieldCheck className="w-3 h-3" /> Garantía activa
         {evaluation.conditionName && <span className="font-normal opacity-75">· {evaluation.conditionName}</span>}
+      </Badge>
+    );
+  }
+
+  if (isManual) {
+    return (
+      <Badge className={cn('bg-blue-100 text-blue-800 gap-1 text-[11px]', className)}>
+        <Car className="w-3 h-3" /> Vehículo de terceros — sin garantía GAC
       </Badge>
     );
   }

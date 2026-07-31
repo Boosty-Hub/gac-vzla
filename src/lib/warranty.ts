@@ -14,6 +14,12 @@ export interface ModelWarrantyRef {
   warranty_km?: number | null;
   warranty_months?: number | null;
   warranty_service_interval_km?: number | null;
+  /**
+   * true for a model typed in by hand for a third-party vehicle that came in for a
+   * one-off service. Such a model must NEVER inherit warranty terms — see
+   * `resolveWarrantyCondition`.
+   */
+  is_manual?: boolean | null;
 }
 
 export interface VehicleWarrantyRef {
@@ -47,6 +53,17 @@ export function resolveWarrantyCondition(
   model: ModelWarrantyRef | null | undefined,
   conditions: WarrantyConditionRef[]
 ): ResolvedCondition | null {
+  // A manually-typed model belongs to a third-party vehicle we did not sell. It must never
+  // resolve to any warranty condition — least of all the global fallback below, which would
+  // silently report a competitor's car as "Garantía activa" under our own terms, count it in
+  // the AdminGarantias KPIs, and show it that way to the customer. Returning null puts it in
+  // the 'unknown' branch of evaluateWarranty, which is the honest answer: we have no warranty
+  // relationship with this vehicle.
+  //
+  // The DB backs this up: chk_manual_model_has_no_warranty (migration 20260730140000)
+  // forbids storing warranty values on a manual model in the first place.
+  if (model?.is_manual) return null;
+
   if (model?.warranty_condition_id != null) {
     const c = conditions.find(cond => cond.id === model.warranty_condition_id);
     if (c) {

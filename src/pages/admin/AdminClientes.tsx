@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { findOrCreateManualModel, type ManualModelClient } from '@/lib/manualVehicleModel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,7 +18,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SatisfactionOverview from '@/components/satisfaction/SatisfactionOverview';
 import ClientDetailDialog from '@/components/clients/ClientDetailDialog';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { extractEdgeError } from '@/lib/edgeError';
@@ -43,8 +45,17 @@ interface Vehicle {
   purchase_date: string | null;
   warranty_active: boolean;
   is_active: boolean;
+  // true = third-party vehicle registered only to record a one-off service —
+  // never a unit we sold. See supabase/migrations/20260730140000_manual_vehicles_and_clients.sql.
+  is_manual: boolean;
   vehicle_models: VehicleModel | null;
 }
+
+// Sentinel for the "Otro / escribir manualmente" option in the model Select —
+// never a real vehicle_models.id (those are UUIDs).
+const MANUAL_MODEL_VALUE = '__manual__';
+
+
 
 interface ClientUser {
   id: string;
@@ -71,6 +82,7 @@ interface ServiceRecord {
 interface ClientVehicleInfo {
   id: string;
   warranty_active: boolean;
+  is_manual: boolean;
   vehicle_models: { brand: string } | null;
 }
 
@@ -84,6 +96,9 @@ interface Client {
   city: string | null;
   state: string | null;
   is_active: boolean;
+  // true = person registered only to invoice a one-off service — not a real
+  // customer. Excluded from the list/count by default (see fetchClients).
+  is_manual: boolean;
   created_at: string;
   profile_id: string | null;
   profiles: { pin_code: string | null } | null;
@@ -94,6 +109,7 @@ interface Client {
 const AdminClientes = () => {
   const { hasPermission } = useAuth();
   const isMobile = useIsMobile();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canCreate = hasPermission('clientes.create');
   const canEdit = hasPermission('clientes.edit');
   const canDelete = hasPermission('clientes.delete');
@@ -109,6 +125,10 @@ const AdminClientes = () => {
   const [filterStatus, setFilterStatus] = useState('todos');
   const [filterWarranty, setFilterWarranty] = useState('todos');
   const [filterCity, setFilterCity] = useState('todos');
+  // Manual (third-party/service-only) clients are excluded by default so they
+  // never pollute the real customer base — this toggle brings them back into
+  // the same list, visually badged. See fetchClients.
+  const [showManualClients, setShowManualClients] = useState(false);
 
   // Client dialog
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
@@ -138,6 +158,8 @@ const AdminClientes = () => {
   const [vFormMileage, setVFormMileage] = useState('0');
   const [vFormPurchaseDate, setVFormPurchaseDate] = useState('');
   const [vFormWarranty, setVFormWarranty] = useState(true);
+  const [vFormManualBrand, setVFormManualBrand] = useState('');
+  const [vFormManualModel, setVFormManualModel] = useState('');
   const [savingVehicle, setSavingVehicle] = useState(false);
 
   // Client users dialog
@@ -188,9 +210,18 @@ const AdminClientes = () => {
 
   const fetchClients = async () => {
     setLoading(true);
-    let query = supabase
+    let query = (supabase as any)
       .from('clients')
-      .select('*, vehicles(id, warranty_active, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)', { count: 'exact' });
+      .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)', { count: 'exact' });
+
+    // Excluded server-side (not filtered after the fact) so `count: 'exact'`
+    // always matches what's actually displayed — filtering client-side while
+    // still counting the excluded rows would desync pagination (the last
+    // page could render empty). When the toggle is on, manual clients are
+    // included in the same list instead of a separate exclusive view.
+    if (!showManualClients) {
+      query = query.eq('is_manual', false);
+    }
 
     if (busqueda.trim()) {
       query = query.or(`full_name.ilike.%${busqueda}%,cedula.ilike.%${busqueda}%,email.ilike.%${busqueda}%,phone.ilike.%${busqueda}%`);
@@ -226,10 +257,14 @@ const AdminClientes = () => {
   };
 
   const fetchModels = async () => {
-    const { data } = await supabase
+    // is_manual = false: manual models are per-vehicle placeholders for
+    // third-party service, not commercial catalog — they must never populate
+    // this picker (see 20260730140000_manual_vehicles_and_clients.sql).
+    const { data } = await (supabase as any)
       .from('vehicle_models')
       .select('id, name, brand, year')
       .eq('is_active', true)
+      .eq('is_manual', false)
       .order('brand')
       .order('name');
     if (data) setModels(data);
@@ -249,15 +284,50 @@ const AdminClientes = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [busqueda, pageSize, filterStatus, filterWarranty, filterCity]);
+  }, [busqueda, pageSize, filterStatus, filterWarranty, filterCity, showManualClients]);
 
   useEffect(() => {
     fetchClients();
-  }, [page, busqueda, pageSize, filterStatus, filterWarranty, filterCity]);
+  }, [page, busqueda, pageSize, filterStatus, filterWarranty, filterCity, showManualClients]);
 
   useEffect(() => {
     fetchModels();
   }, []);
+
+  // Deep link from the Satisfacción dashboard: `?client=<id>&tab=encuestas`. Works
+  // identically at both /admin/clientes and /concesionario/clientes (this component
+  // is mounted at both routes — see src/App.tsx) since useSearchParams is
+  // route-agnostic; the base path is never hardcoded. Fetches the target client
+  // directly by id (not from the currently loaded/paginated `clients` list) so it
+  // resolves regardless of pagination/filters. On failure (deleted client, or out of
+  // this user's RLS-visible scope) it fails quietly and visibly: a toast, no crash,
+  // no empty dialog, and the params are cleared immediately.
+  const clientParam = searchParams.get('client');
+  const tabParam = searchParams.get('tab');
+
+  useEffect(() => {
+    if (!clientParam) return;
+    let cancelled = false;
+
+    const openFromDeepLink = async () => {
+      const { data, error } = await (supabase as any)
+        .from('clients')
+        .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
+        .eq('id', clientParam)
+        .maybeSingle();
+      if (cancelled) return;
+
+      if (error || !data) {
+        toast.error('No se pudo abrir el cliente indicado: no existe o no tienes acceso.');
+        setSearchParams({}, { replace: true });
+        return;
+      }
+      setDetailClient(data as Client);
+    };
+
+    openFromDeepLink();
+    return () => { cancelled = true; };
+  }, [clientParam]);
 
   const toggleExpand = (clientId: string) => {
     if (expandedClient === clientId) {
@@ -354,13 +424,25 @@ const AdminClientes = () => {
     setVFormModelId(''); setVFormYear(new Date().getFullYear().toString());
     setVFormPlate(''); setVFormVin(''); setVFormColor('');
     setVFormMileage('0'); setVFormPurchaseDate(''); setVFormWarranty(true);
+    setVFormManualBrand(''); setVFormManualModel('');
     setVehicleDialogOpen(true);
   };
 
   const openEditVehicle = (vehicle: Vehicle) => {
     setEditingVehicle(vehicle);
     setVehicleClientId(vehicle.client_id);
-    setVFormModelId(vehicle.model_id);
+    if (vehicle.is_manual && vehicle.vehicle_models) {
+      // Manual models are excluded from `models` (the picker's options), so
+      // there is no matching SelectItem for vehicle.model_id — reopen in
+      // "Otro" mode with the typed brand/model prefilled instead of showing
+      // a blank Select.
+      setVFormModelId(MANUAL_MODEL_VALUE);
+      setVFormManualBrand(vehicle.vehicle_models.brand);
+      setVFormManualModel(vehicle.vehicle_models.name);
+    } else {
+      setVFormModelId(vehicle.model_id);
+      setVFormManualBrand(''); setVFormManualModel('');
+    }
     setVFormYear(vehicle.year.toString());
     setVFormPlate(vehicle.plate || '');
     setVFormVin(vehicle.vin || '');
@@ -371,31 +453,62 @@ const AdminClientes = () => {
     setVehicleDialogOpen(true);
   };
 
+  const handleVFormModelChange = (value: string) => {
+    setVFormModelId(value);
+    if (value !== MANUAL_MODEL_VALUE) {
+      setVFormManualBrand('');
+      setVFormManualModel('');
+    }
+  };
+
   const handleSaveVehicle = async () => {
-    if (!vFormModelId || !vFormYear) {
+    const isManualModel = vFormModelId === MANUAL_MODEL_VALUE;
+    if ((!isManualModel && !vFormModelId) || !vFormYear) {
       toast.error('Modelo y año son requeridos');
+      return;
+    }
+    if (isManualModel && (!vFormManualBrand.trim() || !vFormManualModel.trim())) {
+      toast.error('Marca y modelo son requeridos');
       return;
     }
     setSavingVehicle(true);
 
+    let modelId = vFormModelId;
+    if (isManualModel) {
+      const resolvedId = await findOrCreateManualModel(
+        supabase as unknown as ManualModelClient,
+        vFormManualBrand,
+        vFormManualModel,
+      );
+      if (!resolvedId) {
+        toast.error('No se pudo registrar el modelo manual');
+        setSavingVehicle(false);
+        return;
+      }
+      modelId = resolvedId;
+    }
+
     const payload = {
       client_id: vehicleClientId,
-      model_id: vFormModelId,
+      model_id: modelId,
       year: parseInt(vFormYear),
       plate: vFormPlate.trim().toUpperCase() || null,
       vin: vFormVin.trim().toUpperCase() || null,
       color: vFormColor.trim() || null,
       mileage: parseInt(vFormMileage) || 0,
       purchase_date: vFormPurchaseDate || null,
-      warranty_active: vFormWarranty,
+      // A third-party vehicle never carries our warranty, regardless of the
+      // switch's last value.
+      warranty_active: isManualModel ? false : vFormWarranty,
+      is_manual: isManualModel,
     };
 
     if (editingVehicle) {
-      const { error } = await supabase.from('vehicles').update(payload).eq('id', editingVehicle.id);
+      const { error } = await (supabase as any).from('vehicles').update(payload).eq('id', editingVehicle.id);
       if (error) { toast.error('Error al actualizar vehículo'); console.error(error); }
       else { toast.success('Vehículo actualizado'); setVehicleDialogOpen(false); fetchVehicles(vehicleClientId); }
     } else {
-      const { error } = await supabase.from('vehicles').insert(payload);
+      const { error } = await (supabase as any).from('vehicles').insert(payload);
       if (error) { toast.error('Error al crear vehículo'); console.error(error); }
       else { toast.success('Vehículo registrado'); setVehicleDialogOpen(false); fetchVehicles(vehicleClientId); }
     }
@@ -479,8 +592,14 @@ const AdminClientes = () => {
     } else {
       normalized = `+58${digits}`;
     }
-    const brand = c.vehicles?.find(v => v.vehicle_models?.brand)?.vehicle_models?.brand || '';
-    const msg = `¡Es un gusto saludarte! *${c.full_name}* Te hablamos del departamento de post venta de *${brand}*`;
+    // Only ever reference a brand we actually sell — a manually-typed
+    // third-party vehicle must never appear as "our" brand in this greeting.
+    // Without this guard, a client whose only vehicle is manual would leave
+    // `brand` empty and produce a broken "post venta de **" message.
+    const brand = c.vehicles?.find(v => !v.is_manual && v.vehicle_models?.brand)?.vehicle_models?.brand;
+    const msg = brand
+      ? `¡Es un gusto saludarte! *${c.full_name}* Te hablamos del departamento de post venta de *${brand}*`
+      : `¡Es un gusto saludarte! *${c.full_name}* Te hablamos del departamento de post venta`;
     return `https://wa.me/${normalized.replace('+', '')}?text=${encodeURIComponent(msg)}`;
   };
 
@@ -593,6 +712,17 @@ const AdminClientes = () => {
             <SelectItem value="1000">1000 filas</SelectItem>
           </SelectContent>
         </Select>
+        <Button
+          type="button"
+          variant={showManualClients ? 'default' : 'outline'}
+          size="sm"
+          className="h-8 text-xs gap-1.5"
+          onClick={() => setShowManualClients(v => !v)}
+          title="Clientes de tercero, registrados solo para un servicio puntual"
+        >
+          <Wrench className="w-3.5 h-3.5" />
+          {showManualClients ? 'Ocultar externos' : 'Mostrar externos'}
+        </Button>
       </div>
 
       {loading ? (
@@ -633,6 +763,11 @@ const AdminClientes = () => {
                           <Badge variant={c.is_active ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
                             {c.is_active ? 'Activo' : 'Inactivo'}
                           </Badge>
+                          {c.is_manual && (
+                            <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 gap-0.5" title="Cliente de tercero, registrado solo para un servicio puntual">
+                              <Wrench className="w-2.5 h-2.5" /> Externo
+                            </Badge>
+                          )}
                           {isRecurrent && (
                             <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 gap-0.5">
                               <Repeat className="w-2.5 h-2.5" /> Recurrente
@@ -783,7 +918,16 @@ const AdminClientes = () => {
                         ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
                         : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
                     </TableCell>
-                    <TableCell className="font-medium">{c.full_name}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-1.5">
+                        <span>{c.full_name}</span>
+                        {c.is_manual && (
+                          <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800 gap-0.5" title="Cliente de tercero, registrado solo para un servicio puntual">
+                            <Wrench className="w-2.5 h-2.5" /> Externo
+                          </Badge>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>{c.cedula || '-'}</TableCell>
                     <TableCell>{c.phone || '-'}</TableCell>
                     <TableCell className="text-muted-foreground">{c.email || '-'}</TableCell>
@@ -1300,17 +1444,35 @@ const AdminClientes = () => {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
+              <div className="space-y-2 col-span-2">
                 <Label>Modelo *</Label>
-                <Select value={vFormModelId} onValueChange={setVFormModelId}>
+                <Select value={vFormModelId} onValueChange={handleVFormModelChange}>
                   <SelectTrigger><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
                     {models.map(m => (
                       <SelectItem key={m.id} value={m.id}>{m.brand} {m.name}</SelectItem>
                     ))}
+                    <SelectItem value={MANUAL_MODEL_VALUE}>Otro / escribir manualmente</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              {vFormModelId === MANUAL_MODEL_VALUE && (
+                <div className="col-span-2 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-2.5">
+                  <p className="text-[11px] text-amber-800 leading-snug">
+                    Vehículo de un tercero (no vendido por nosotros). Se registrará <strong>sin garantía</strong>: solo queda constancia del servicio realizado.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label>Marca *</Label>
+                      <Input value={vFormManualBrand} onChange={e => setVFormManualBrand(e.target.value)} placeholder="Ej: Toyota" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Modelo *</Label>
+                      <Input value={vFormManualModel} onChange={e => setVFormManualModel(e.target.value)} placeholder="Ej: Corolla" />
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="space-y-2">
                 <Label>Año *</Label>
                 <Input type="number" value={vFormYear} onChange={e => setVFormYear(e.target.value)} placeholder="2024" />
@@ -1336,13 +1498,17 @@ const AdminClientes = () => {
                 <Input type="date" value={vFormPurchaseDate} onChange={e => setVFormPurchaseDate(e.target.value)} />
               </div>
             </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <Label>Garantía Activa</Label>
-                <p className="text-xs text-muted-foreground">El vehículo tiene garantía vigente</p>
+            {vFormModelId === MANUAL_MODEL_VALUE ? (
+              <p className="text-xs text-muted-foreground">Sin garantía (vehículo de tercero)</p>
+            ) : (
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Garantía Activa</Label>
+                  <p className="text-xs text-muted-foreground">El vehículo tiene garantía vigente</p>
+                </div>
+                <Switch checked={vFormWarranty} onCheckedChange={setVFormWarranty} />
               </div>
-              <Switch checked={vFormWarranty} onCheckedChange={setVFormWarranty} />
-            </div>
+            )}
           </div>
           <DialogFooter className="flex-row gap-2">
             <Button variant="outline" className="flex-1" onClick={() => setVehicleDialogOpen(false)}>Cancelar</Button>
@@ -1357,7 +1523,16 @@ const AdminClientes = () => {
       <ClientDetailDialog
         client={detailClient}
         open={!!detailClient}
-        onOpenChange={(o) => { if (!o) setDetailClient(null); }}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDetailClient(null);
+            // Clear/normalize the deep-link params on close so a back-navigation
+            // does not immediately reopen the dialog.
+            if (clientParam || tabParam) setSearchParams({}, { replace: true });
+          }
+        }}
+        models={models}
+        defaultTab={tabParam === 'encuestas' ? 'encuesta' : undefined}
       />
       </TabsContent>
 

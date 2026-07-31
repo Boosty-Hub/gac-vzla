@@ -39,6 +39,7 @@ interface VehicleRow {
     warranty_months: number | null;
     warranty_service_interval_km: number | null;
     warranty_condition_id: number | null;
+    is_manual: boolean;
   } | null;
   clients: { full_name: string; cedula: string | null; phone: string | null } | null;
 }
@@ -79,6 +80,36 @@ const StatusIcon = ({ status, className }: { status: WarrantyEvaluation['status'
   return <ShieldX className={className} />;
 };
 
+// A manually-typed model (third-party vehicle serviced one-off, never sold by GAC) always
+// resolves to warranty status 'unknown'. Left as a plain "Sin condición" badge that reads
+// the same as missing warranty data, staff have no way to tell "we forgot to configure this"
+// from "this car isn't ours to begin with". This badge makes that distinction explicit.
+const WarrantyBadge = ({
+  vehicle,
+  status,
+  className,
+  iconClassName = 'w-3 h-3',
+}: {
+  vehicle: VehicleRow;
+  status: WarrantyEvaluation['status'];
+  className?: string;
+  iconClassName?: string;
+}) => {
+  if (vehicle.vehicle_models?.is_manual) {
+    return (
+      <Badge className={cn('bg-blue-100 text-blue-800 gap-1', className)}>
+        <Car className={iconClassName} /> Terceros
+      </Badge>
+    );
+  }
+  return (
+    <Badge className={cn(statusBadgeClass(status), className)}>
+      <StatusIcon status={status} className={iconClassName} />
+      {statusLabel(status)}
+    </Badge>
+  );
+};
+
 const AdminGarantias = () => {
   const isMobile = useIsMobile();
   const [conditions, setConditions] = useState<WarrantyCondition[]>([]);
@@ -106,7 +137,7 @@ const AdminGarantias = () => {
     while (hasMore) {
       const { data } = await supabase
         .from('vehicles')
-        .select('id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, warranty_condition_id), clients(full_name, cedula, phone)')
+        .select('id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, warranty_condition_id, is_manual), clients(full_name, cedula, phone)')
         .eq('is_active', true)
         .order('created_at', { ascending: false })
         .range(from, from + PAGE_SIZE - 1);
@@ -183,9 +214,13 @@ const AdminGarantias = () => {
     return true;
   });
 
-  const totalActive = vehiclesWithWarranty.filter(x => x.warranty.status === 'active').length;
-  const totalExpired = vehiclesWithWarranty.filter(x => x.warranty.status === 'expired').length;
-  const totalViolated = vehiclesWithWarranty.filter(x => x.warranty.status === 'violated').length;
+  // resolveWarrantyCondition already returns null (status 'unknown') for a manual model, so
+  // these `!is_manual` checks are currently redundant with the guard in src/lib/warranty.ts.
+  // Kept anyway as defense-in-depth: a serviced third-party vehicle must never inflate the
+  // warranty KPIs, even if that guard were ever weakened.
+  const totalActive = vehiclesWithWarranty.filter(x => x.warranty.status === 'active' && !x.vehicle.vehicle_models?.is_manual).length;
+  const totalExpired = vehiclesWithWarranty.filter(x => x.warranty.status === 'expired' && !x.vehicle.vehicle_models?.is_manual).length;
+  const totalViolated = vehiclesWithWarranty.filter(x => x.warranty.status === 'violated' && !x.vehicle.vehicle_models?.is_manual).length;
 
   // Pagination logic
   const totalPages = Math.max(1, Math.ceil(filtered.length / rowsPerPage));
@@ -272,10 +307,7 @@ const AdminGarantias = () => {
                     <p className="text-sm font-semibold truncate">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</p>
                     <p className="text-[11px] text-muted-foreground font-mono">{v.plate || '-'}{v.vin ? ` · ${v.vin}` : ''}</p>
                   </div>
-                  <Badge className={cn("text-[10px] px-1.5 py-0 gap-0.5 shrink-0", statusBadgeClass(w.status))}>
-                    <StatusIcon status={w.status} className="w-2.5 h-2.5" />
-                    {statusLabel(w.status)}
-                  </Badge>
+                  <WarrantyBadge vehicle={v} status={w.status} className="text-[10px] px-1.5 py-0 gap-0.5 shrink-0" iconClassName="w-2.5 h-2.5" />
                 </div>
                 {/* Row 2: client + km */}
                 <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
@@ -290,6 +322,13 @@ const AdminGarantias = () => {
                   <span className="text-[10px] bg-muted rounded px-1.5 py-0.5">{w.kmRemaining > 0 ? w.kmRemaining.toLocaleString() : '0'} km rest.</span>
                   {v.purchase_date && <span className="text-[10px] bg-muted rounded px-1.5 py-0.5 flex items-center gap-1"><CalendarDays className="w-2.5 h-2.5" />{v.purchase_date}</span>}
                 </div>
+                {/* Third-party vehicle — explains the 'unknown' status plainly */}
+                {v.vehicle_models?.is_manual && (
+                  <div className="border border-blue-300 bg-blue-50 rounded-md px-2 py-1.5 flex items-start gap-1.5">
+                    <Car className="w-3 h-3 text-blue-600 mt-0.5 shrink-0" />
+                    <p className="text-[10px] text-blue-700 leading-tight font-medium">Vehículo de terceros — no vendido por GAC, sin relación de garantía</p>
+                  </div>
+                )}
                 {/* Violation alert — prominent */}
                 {w.status === 'violated' && w.reasons.length > 0 && (
                   <div className="border border-red-300 bg-red-50 rounded-md px-2 py-1.5 flex items-start gap-1.5">
@@ -360,10 +399,7 @@ const AdminGarantias = () => {
                       <TableCell className="text-xs text-center">{w.monthsRemaining > 0 ? w.monthsRemaining : '0'}</TableCell>
                       <TableCell className="text-xs text-center">{w.kmRemaining > 0 ? w.kmRemaining.toLocaleString() : '0'}</TableCell>
                       <TableCell className="text-center">
-                        <Badge className={cn("text-[10px] gap-1", statusBadgeClass(w.status))}>
-                          <StatusIcon status={w.status} className="w-3 h-3" />
-                          {statusLabel(w.status)}
-                        </Badge>
+                        <WarrantyBadge vehicle={v} status={w.status} className="text-[10px] gap-1" />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -414,10 +450,7 @@ const AdminGarantias = () => {
                     <h3 className="font-display font-bold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
                     <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
                   </div>
-                  <Badge className={cn("text-xs flex items-center gap-1", statusBadgeClass(w.status))}>
-                    <StatusIcon status={w.status} className="w-3 h-3" />
-                    {statusLabel(w.status)}
-                  </Badge>
+                  <WarrantyBadge vehicle={v} status={w.status} className="text-xs flex items-center gap-1" />
                 </div>
 
                 <div className="space-y-2 text-xs">
@@ -425,6 +458,16 @@ const AdminGarantias = () => {
                   <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground" /><span>{v.mileage.toLocaleString()} km</span></div>
                   {v.purchase_date && <div className="flex items-center gap-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground" /><span>Compra: {v.purchase_date}</span></div>}
                 </div>
+
+                {v.vehicle_models?.is_manual && (
+                  <div className="bg-blue-50 border border-blue-300 rounded-md p-2.5 text-xs flex items-start gap-2">
+                    <Car className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-blue-800 mb-1">Vehículo de terceros</p>
+                      <p className="text-blue-700">Este vehículo no fue vendido por GAC y no tiene relación de garantía con la marca. El servicio se realizó de forma independiente.</p>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                   <div className="bg-muted rounded-lg p-2 flex items-center justify-center">

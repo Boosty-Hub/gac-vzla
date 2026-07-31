@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { supabase } from '@/integrations/supabase/client';
+import { findOrCreateManualModel, type ManualModelClient } from '@/lib/manualVehicleModel';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -36,11 +37,20 @@ interface Vehicle {
   purchase_date: string | null;
   warranty_active: boolean;
   is_active: boolean;
+  // true = third-party vehicle registered only to record a one-off service —
+  // never a unit we sold. See supabase/migrations/20260730140000_manual_vehicles_and_clients.sql.
+  is_manual: boolean;
   model_id: string;
   client_id: string;
   vehicle_models: { name: string; brand: string } | null;
   clients: { full_name: string; cedula: string | null; address: string | null; city: string | null; state: string | null } | null;
 }
+
+// Sentinel for the "Otro / escribir manualmente" option in the model Select —
+// never a real vehicle_models.id (those are UUIDs).
+const MANUAL_MODEL_VALUE = '__manual__';
+
+
 
 interface ServiceRecord {
   id: string;
@@ -96,12 +106,18 @@ const AdminVehiculos = () => {
   const [eMileage, setEMileage] = useState('0');
   const [ePurchaseDate, setEPurchaseDate] = useState('');
   const [eWarranty, setEWarranty] = useState(true);
+  const [eManualBrand, setEManualBrand] = useState('');
+  const [eManualModel, setEManualModel] = useState('');
 
   const fetchModels = async () => {
-    const { data } = await supabase
+    // is_manual = false: manual models are per-vehicle placeholders for
+    // third-party service, not commercial catalog — they must never populate
+    // this picker (see 20260730140000_manual_vehicles_and_clients.sql).
+    const { data } = await (supabase as any)
       .from('vehicle_models')
       .select('id, name, brand, year')
       .eq('is_active', true)
+      .eq('is_manual', false)
       .order('brand')
       .order('name');
     if (data) setModels(data);
@@ -125,7 +141,10 @@ const AdminVehiculos = () => {
       modelIds = (matchingModels || []).map((m: { id: string }) => m.id);
     }
 
-    let query = supabase
+    // Cast: `vehicles.is_manual` isn't in the stale generated types.ts, so the
+    // untyped `*` select here would otherwise infer a Row shape missing it —
+    // the `as Vehicle[]` cast below would then fail type-checking.
+    let query = (supabase as any)
       .from('vehicles')
       .select('*, vehicle_models(name, brand), clients(full_name, cedula, address, city, state)', { count: 'exact' });
 
@@ -193,7 +212,19 @@ const AdminVehiculos = () => {
 
   const openEdit = (v: Vehicle) => {
     setEditVehicle(v);
-    setEModelId(v.model_id);
+    if (v.is_manual && v.vehicle_models) {
+      // Manual models are excluded from `models` (the picker's options), so
+      // there is no matching SelectItem for v.model_id — reopen in "Otro"
+      // mode with the typed brand/model prefilled instead of showing a blank
+      // Select.
+      setEModelId(MANUAL_MODEL_VALUE);
+      setEManualBrand(v.vehicle_models.brand);
+      setEManualModel(v.vehicle_models.name);
+    } else {
+      setEModelId(v.model_id);
+      setEManualBrand('');
+      setEManualModel('');
+    }
     setEYear(v.year.toString());
     setEPlate(v.plate || '');
     setEVin(v.vin || '');
@@ -204,22 +235,54 @@ const AdminVehiculos = () => {
     setEditOpen(true);
   };
 
+  const handleEModelChange = (value: string) => {
+    setEModelId(value);
+    if (value !== MANUAL_MODEL_VALUE) {
+      setEManualBrand('');
+      setEManualModel('');
+    }
+  };
+
   const handleSaveEdit = async () => {
     if (!editVehicle) return;
-    if (!eModelId || !eYear) {
+    const isManualModel = eModelId === MANUAL_MODEL_VALUE;
+    if ((!isManualModel && !eModelId) || !eYear) {
       toast.error('Modelo y año son requeridos');
       return;
     }
+    if (isManualModel && (!eManualBrand.trim() || !eManualModel.trim())) {
+      toast.error('Marca y modelo son requeridos');
+      return;
+    }
     setSaving(true);
-    const { error } = await supabase.from('vehicles').update({
-      model_id: eModelId,
+
+    let modelId = eModelId;
+    if (isManualModel) {
+      const resolvedId = await findOrCreateManualModel(
+        supabase as unknown as ManualModelClient,
+        eManualBrand,
+        eManualModel,
+      );
+      if (!resolvedId) {
+        toast.error('No se pudo registrar el modelo manual');
+        setSaving(false);
+        return;
+      }
+      modelId = resolvedId;
+    }
+
+    const { error } = await (supabase as any).from('vehicles').update({
+      model_id: modelId,
       year: parseInt(eYear),
       plate: ePlate.trim().toUpperCase() || null,
       vin: eVin.trim().toUpperCase() || null,
       color: eColor.trim() || null,
       mileage: parseInt(eMileage) || 0,
       purchase_date: ePurchaseDate || null,
-      warranty_active: eWarranty,
+      // A third-party vehicle never carries our warranty, regardless of the
+      // switch's last value.
+      warranty_active: isManualModel ? false : eWarranty,
+      is_manual: isManualModel,
     }).eq('id', editVehicle.id);
 
     if (error) {
@@ -499,6 +562,11 @@ const AdminVehiculos = () => {
                         <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold shrink-0">{v.vehicle_models?.brand || '-'}</Badge>
                         <span className="font-semibold text-sm truncate">{v.vehicle_models?.name || '-'}</span>
                         <span className="text-xs text-muted-foreground shrink-0">{v.year}</span>
+                        {v.is_manual && (
+                          <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800" title="Vehículo de tercero, no vendido por nosotros">
+                            Externo
+                          </Badge>
+                        )}
                       </div>
                       {v.plate && <p className="text-xs font-mono text-muted-foreground mt-0.5">{v.plate}{v.color ? ` · ${v.color}` : ''}</p>}
                     </div>
@@ -566,7 +634,16 @@ const AdminVehiculos = () => {
                       checked={selectedIds.has(v.id)} onChange={() => toggleSelect(v.id)} />
                   </TableCell>
                   <TableCell><Badge variant="outline" className="text-[10px] px-1.5 py-0 font-semibold">{v.vehicle_models?.brand || '-'}</Badge></TableCell>
-                  <TableCell className="font-medium">{v.vehicle_models?.name || '-'}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-1.5">
+                      <span>{v.vehicle_models?.name || '-'}</span>
+                      {v.is_manual && (
+                        <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800" title="Vehículo de tercero, no vendido por nosotros">
+                          Externo
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>{v.year}</TableCell>
                   <TableCell className="font-mono">{v.plate || '-'}</TableCell>
                   <TableCell>{v.color || '-'}</TableCell>
@@ -734,7 +811,7 @@ const AdminVehiculos = () => {
           <div className="space-y-3 py-2">
             <div className="space-y-1">
               <Label>Modelo *</Label>
-              <Select value={eModelId} onValueChange={setEModelId}>
+              <Select value={eModelId} onValueChange={handleEModelChange}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                 <SelectContent>
                   {Array.from(new Set(models.map(m => m.brand))).map(brand => (
@@ -745,9 +822,30 @@ const AdminVehiculos = () => {
                       ))}
                     </SelectGroup>
                   ))}
+                  <SelectGroup>
+                    <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">Otro</SelectLabel>
+                    <SelectItem value={MANUAL_MODEL_VALUE}>Otro / escribir manualmente</SelectItem>
+                  </SelectGroup>
                 </SelectContent>
               </Select>
             </div>
+            {eModelId === MANUAL_MODEL_VALUE && (
+              <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-2.5">
+                <p className="text-[11px] text-amber-800 leading-snug">
+                  Vehículo de un tercero (no vendido por nosotros). Se registrará <strong>sin garantía</strong>: solo queda constancia del servicio realizado.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label>Marca *</Label>
+                    <Input value={eManualBrand} onChange={e => setEManualBrand(e.target.value)} placeholder="Ej: Toyota" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Modelo *</Label>
+                    <Input value={eManualModel} onChange={e => setEManualModel(e.target.value)} placeholder="Ej: Corolla" />
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>Año *</Label>
@@ -774,10 +872,14 @@ const AdminVehiculos = () => {
                 <Input type="date" value={ePurchaseDate} onChange={e => setEPurchaseDate(e.target.value)} />
               </div>
             </div>
-            <div className="flex items-center gap-3 pt-1">
-              <Switch checked={eWarranty} onCheckedChange={setEWarranty} />
-              <Label>Garantía activa</Label>
-            </div>
+            {eModelId === MANUAL_MODEL_VALUE ? (
+              <p className="text-xs text-muted-foreground pt-1">Sin garantía (vehículo de tercero)</p>
+            ) : (
+              <div className="flex items-center gap-3 pt-1">
+                <Switch checked={eWarranty} onCheckedChange={setEWarranty} />
+                <Label>Garantía activa</Label>
+              </div>
+            )}
           </div>
           <DialogFooter className="flex-row gap-2">
             <Button variant="outline" className="flex-1" onClick={() => setEditOpen(false)}>Cancelar</Button>
@@ -803,7 +905,14 @@ const AdminVehiculos = () => {
                 {/* Title row */}
                 <div className="flex items-start justify-between gap-2 flex-wrap">
                   <div>
-                    <h3 className="font-display font-bold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
+                    <h3 className="font-display font-bold text-sm flex items-center gap-1.5 flex-wrap">
+                      {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}
+                      {v.is_manual && (
+                        <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800" title="Vehículo de tercero, no vendido por nosotros">
+                          Externo
+                        </Badge>
+                      )}
+                    </h3>
                     <p className="text-xs text-muted-foreground">{v.plate || '-'}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">

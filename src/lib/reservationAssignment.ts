@@ -1,4 +1,5 @@
 import { syncClientToKommo } from '@/lib/kommo';
+import { findOrCreateManualModel, type ManualModelClient } from '@/lib/manualVehicleModel';
 
 /**
  * Resolves which client/vehicle (or walk-in) columns a reservation/incidencia
@@ -62,12 +63,25 @@ export function resolveReservationAssignment(sel: ReservationSelection): Reserva
  * Data captured by the "Ingresar manualmente" path: a client (name, optional
  * cedula/phone) plus a vehicle (model, optional plate/year) that are not yet in
  * the database.
+ *
+ * The vehicle's model is resolved from EXACTLY ONE of two sources:
+ *  - `modelId`: an existing row from the commercial catalog (GAC/DFSK/SHINERAY).
+ *  - `manualModel`: a hand-typed `{ brand, modelName }` pair for a third-party
+ *    vehicle that is not part of the catalog (e.g. a one-off service on a car we
+ *    don't sell). When set, `modelId` is ignored.
  */
 export interface ManualReservationInput {
   clientName: string;
   clientCedula: string;
   clientPhone: string;
   modelId: string;
+  /**
+   * Hand-typed brand/model for a third-party vehicle. Mutually exclusive with
+   * `modelId` — when present, a manual (`is_manual: true`) `vehicle_models` row is
+   * found-or-created instead of using `modelId`, and the resulting vehicle AND
+   * client are both flagged `is_manual: true` (see `createOrReuseManualEntities`).
+   */
+  manualModel?: { brand: string; modelName: string } | null;
   plate: string;
   /** Vehicle year; falls back to the current year when empty/invalid. */
   year: string;
@@ -94,6 +108,8 @@ interface ManualEntitiesQuery {
   insert: (values: Record<string, unknown>) => ManualEntitiesQuery;
   delete: () => ManualEntitiesQuery;
   eq: (column: string, value: unknown) => ManualEntitiesQuery;
+  /** Case-insensitive match, used to dedupe manual `vehicle_models` by brand/name. */
+  ilike: (column: string, pattern: string) => ManualEntitiesQuery;
   limit: (count: number) => ManualEntitiesQuery;
   maybeSingle: () => Promise<QueryResult<{ id: string; client_id?: string }>>;
   single: () => Promise<QueryResult<{ id: string; client_id: string }>>;
@@ -103,10 +119,28 @@ interface ManualEntitiesQuery {
  * Minimal slice of the Supabase client this helper needs. Accepting it as a
  * parameter keeps this lib decoupled from the generated client typings while
  * letting both reservation portals share the create-or-reuse logic.
+ *
+ * `from` is deliberately loose, matching `ManualModelClient` in
+ * `@/lib/manualVehicleModel`. The real client's `PostgrestQueryBuilder` does NOT
+ * structurally satisfy `ManualEntitiesQuery` — `eq`/`ilike`/`limit`/`maybeSingle`/
+ * `single` live on the filter builder that `.select()` returns, not on the builder
+ * `from()` hands back. Typing it strictly made both call sites fail to compile
+ * (AdminReservas, DealershipReservas) even though the chain is correct at runtime.
+ * `ManualEntitiesQuery` still documents and types the chain used inside this module,
+ * and tests keep passing a fake shaped like it.
  */
 interface ManualEntitiesClient {
-  from: (table: string) => ManualEntitiesQuery;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  from: (table: string) => any;
 }
+
+/**
+ * Manual-model resolution lives in `@/lib/manualVehicleModel` — see the import above.
+ *
+ * It used to be duplicated here and in both admin pages, and the copies had already
+ * drifted: this one wrote `is_active: true` where the others wrote `false`, and it did
+ * not escape ILIKE wildcards, so a model typed with a `%` would match an unrelated row.
+ */
 
 /**
  * Persists the manual-entry client and vehicle as REAL rows so the reservation
@@ -119,6 +153,13 @@ interface ManualEntitiesClient {
  * UNIQUE in the DB, normalized before lookup), otherwise when its phone matches;
  * only when neither matches is a new client inserted. A UNIQUE-violation (23505)
  * on cedula insert is recovered by re-reading and reusing the existing client.
+ *
+ * Manual model (`input.manualModel`): when the caller supplies a hand-typed
+ * brand/model instead of `modelId` (a third-party vehicle we don't sell), the
+ * model is found-or-created via `findOrCreateManualModel`, and BOTH the inserted
+ * vehicle and a freshly-created client are flagged `is_manual: true`. A REUSED
+ * client (matched by cedula/phone, or by an existing vehicle's plate) is never
+ * retroactively flagged — reuse means they are already a real, tracked customer.
  *
  * Atomicity: if the client was created in this call and the subsequent vehicle
  * insert fails, the freshly created client is deleted (cleanup) before throwing,
@@ -137,8 +178,19 @@ export async function createOrReuseManualEntities(
   const phone = input.clientPhone.trim();
   const plate = input.plate.trim().toUpperCase();
 
-  // Validate the model: a vehicle row cannot exist without it.
-  if (!input.modelId) throw new Error('El modelo del vehículo es requerido');
+  // Resolve the manual brand/model (if any) and validate: a vehicle row cannot
+  // exist without a model, resolved either from an existing catalog id or from a
+  // hand-typed brand/model pair — never both, never neither.
+  const manualModel = input.manualModel
+    ? { brand: input.manualModel.brand.trim(), modelName: input.manualModel.modelName.trim() }
+    : null;
+  if (manualModel) {
+    if (!manualModel.brand || !manualModel.modelName) {
+      throw new Error('La marca y el modelo son requeridos');
+    }
+  } else if (!input.modelId) {
+    throw new Error('El modelo del vehículo es requerido');
+  }
 
   // Validate the year: parse and clamp to a sane range, else fall back to current year.
   const currentYear = new Date().getFullYear();
@@ -166,6 +218,10 @@ export async function createOrReuseManualEntities(
   // Track whether WE created the client this call, so we can roll it back if the
   // vehicle insert fails (avoids leaving orphan clients behind).
   let clientWasCreated = false;
+  // Tracks the `is_manual` value actually persisted on a NEWLY created client, so
+  // the Kommo-sync guard below reads the real stored flag instead of re-deriving
+  // it. Stays false for every reuse branch — reusing a client never flags them.
+  let clientIsManual = false;
 
   if (cedula) {
     const { data } = await client.from('clients').select('id').eq('cedula', cedula).maybeSingle();
@@ -183,6 +239,9 @@ export async function createOrReuseManualEntities(
         cedula: cedula || null,
         phone: phone || null,
         is_active: true,
+        // A manual-model reservation means this person is only being invoiced for
+        // a one-off, third-party service — not a real GAC/DFSK/SHINERAY customer.
+        is_manual: Boolean(manualModel),
       })
       .select('id')
       .single();
@@ -204,17 +263,36 @@ export async function createOrReuseManualEntities(
     } else {
       clientId = data.id;
       clientWasCreated = true;
+      clientIsManual = Boolean(manualModel);
     }
   }
 
-  // 2) Insert the vehicle linked to the resolved client.
+  // 2) Resolve the model: an existing catalog id, or find-or-create a manual
+  // (is_manual: true) vehicle_models row for a hand-typed brand/model. Done AFTER
+  // the plate short-circuit above so a manual model row is never created for a
+  // plate that already resolved to an existing vehicle.
+  // The shared helper returns null when brand or model is blank; the caller-side
+  // validation should already have caught that, so treat it as a hard error here rather
+  // than letting a null reach the NOT NULL `vehicles.model_id` column.
+  const modelId = manualModel
+    ? await findOrCreateManualModel(
+        client as unknown as ManualModelClient,
+        manualModel.brand,
+        manualModel.modelName,
+      )
+    : input.modelId;
+
+  if (!modelId) throw new Error('El modelo del vehículo es requerido');
+
+  // 3) Insert the vehicle linked to the resolved client.
   const { data: vehicleData, error: vehicleError } = await client
     .from('vehicles')
     .insert({
       client_id: clientId,
-      model_id: input.modelId,
+      model_id: modelId,
       year,
       plate: plate || null,
+      is_manual: Boolean(manualModel),
     })
     .select('id, client_id')
     .single();
@@ -233,8 +311,16 @@ export async function createOrReuseManualEntities(
 
   // Fire-and-forget: sync into Kommo's Post Venta "En conversación" stage only when
   // a genuinely NEW client was inserted above (not on the cedula/phone reuse branches),
-  // and only after the vehicle insert succeeded so a rolled-back client is never synced.
-  if (clientWasCreated && clientId) {
+  // only after the vehicle insert succeeded so a rolled-back client is never synced,
+  // and NEVER when the client is manual (`clientIsManual`).
+  //
+  // DO NOT REMOVE the `!clientIsManual` guard. A manual client is a third party we
+  // serviced once for a vehicle we don't sell (`is_manual: true` on `clients`) — they
+  // are explicitly NOT a commercial customer. Syncing them would manufacture a bogus
+  // Post-Venta lead in Kommo for every walk-in third-party service, which is exactly
+  // what the reported requirement forbids: "ojo, no puede quedar con nuestros clientes."
+  // See supabase/migrations/20260730140000_manual_vehicles_and_clients.sql.
+  if (clientWasCreated && clientId && !clientIsManual) {
     syncClientToKommo(clientId).catch(() => {});
   }
 

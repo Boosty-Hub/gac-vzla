@@ -248,6 +248,12 @@ const DealershipReservas = () => {
   const [editingLegacyWalkin, setEditingLegacyWalkin] = useState(false);
   const [fWalkinCedula, setFWalkinCedula] = useState<string>(() => getDrLS().fWalkinCedula || '');
   const [fWalkinModelId, setFWalkinModelId] = useState<string>(() => getDrLS().fWalkinModelId || '');
+  // "Otro / escribir manualmente": the vehicle is not in the commercial catalog
+  // (e.g. a third-party car that only came in for a one-off service). Reveals
+  // Marca/Modelo text inputs instead of the catalog Select.
+  const [fWalkinUseManualModel, setFWalkinUseManualModel] = useState<boolean>(() => getDrLS().fWalkinUseManualModel === true);
+  const [fWalkinManualBrand, setFWalkinManualBrand] = useState<string>(() => getDrLS().fWalkinManualBrand || '');
+  const [fWalkinManualModelName, setFWalkinManualModelName] = useState<string>(() => getDrLS().fWalkinManualModelName || '');
   const [fWalkinYear, setFWalkinYear] = useState<string>(() => getDrLS().fWalkinYear || '');
   const [vehicleModels, setVehicleModels] = useState<VehicleModelOption[]>([]);
   // True while prefilling an edit, to suppress implicit single-vehicle auto-select.
@@ -323,10 +329,16 @@ const DealershipReservas = () => {
 
   useEffect(() => {
     (async () => {
-      const { data } = await supabase
+      // `is_manual` is not in the generated types.ts yet (new column, no regen) —
+      // cast to `any` for this call, matching this project's established
+      // convention for un-typed columns (see SatisfactionOverview.tsx:13-14).
+      // Manual models are excluded from this catalog picker: they're only
+      // reachable via the "Otro / escribir manualmente" typed path.
+      const { data } = await (supabase as any)
         .from('vehicle_models')
         .select('id, name, brand')
         .eq('is_active', true)
+        .eq('is_manual', false)
         .order('brand')
         .order('name');
       if (data) setVehicleModels(data as VehicleModelOption[]);
@@ -478,9 +490,9 @@ const DealershipReservas = () => {
       return;
     }
     try {
-      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinYear }));
+      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinUseManualModel, fWalkinManualBrand, fWalkinManualModelName, fWalkinYear }));
     } catch {}
-  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinYear]);
+  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinUseManualModel, fWalkinManualBrand, fWalkinManualModelName, fWalkinYear]);
 
   const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
@@ -552,6 +564,7 @@ const DealershipReservas = () => {
     setFWalkinName(''); setFWalkinPhone(''); setFWalkinPlate('');
     setManualMode(false); setEditingLegacyWalkin(false);
     setFWalkinCedula(''); setFWalkinModelId(''); setFWalkinYear('');
+    setFWalkinUseManualModel(false); setFWalkinManualBrand(''); setFWalkinManualModelName('');
     prefillingEditRef.current = false;
   };
 
@@ -569,6 +582,7 @@ const DealershipReservas = () => {
     setManualMode(false);
     setFWalkinName(''); setFWalkinPhone(''); setFWalkinPlate('');
     setFWalkinCedula(''); setFWalkinModelId(''); setFWalkinYear('');
+    setFWalkinUseManualModel(false); setFWalkinManualBrand(''); setFWalkinManualModelName('');
     setUnifiedSearched(false);
   };
 
@@ -593,13 +607,22 @@ const DealershipReservas = () => {
   // (a toast is already shown) so the caller can abort the save.
   const resolveManualVehicle = async (): Promise<{ id: string; client_id: string } | null> => {
     if (!fWalkinName.trim()) { toast.error('El nombre del cliente es requerido'); return null; }
-    if (!fWalkinModelId) { toast.error('Seleccione el modelo del vehículo'); return null; }
+    if (fWalkinUseManualModel) {
+      if (!fWalkinManualBrand.trim() || !fWalkinManualModelName.trim()) {
+        toast.error('Indique la marca y el modelo del vehículo'); return null;
+      }
+    } else if (!fWalkinModelId) {
+      toast.error('Seleccione el modelo del vehículo'); return null;
+    }
     try {
       const { vehicle } = await createOrReuseManualEntities(supabase, {
         clientName: fWalkinName,
         clientCedula: fWalkinCedula,
         clientPhone: fWalkinPhone,
         modelId: fWalkinModelId,
+        manualModel: fWalkinUseManualModel
+          ? { brand: fWalkinManualBrand, modelName: fWalkinManualModelName }
+          : null,
         plate: fWalkinPlate,
         year: fWalkinYear,
       });
@@ -1696,15 +1719,36 @@ const DealershipReservas = () => {
                           <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Cédula</Label><Input value={fWalkinCedula} onChange={e => setFWalkinCedula(e.target.value)} placeholder="V-12345678" className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
                           <div className="space-y-1">
                             <Label className="text-[13px] sm:text-xs">Marca / Modelo *</Label>
-                            <Select value={fWalkinModelId} onValueChange={setFWalkinModelId}>
+                            <Select
+                              value={fWalkinUseManualModel ? '__manual__' : fWalkinModelId}
+                              onValueChange={v => {
+                                if (v === '__manual__') { setFWalkinUseManualModel(true); setFWalkinModelId(''); }
+                                else { setFWalkinUseManualModel(false); setFWalkinModelId(v); }
+                              }}
+                            >
                               <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                               <SelectContent>
                                 {vehicleModels.map(m => (
                                   <SelectItem key={m.id} value={m.id} className="text-xs">{m.brand} {m.name}</SelectItem>
                                 ))}
+                                <SelectSeparator />
+                                <SelectItem value="__manual__" className="text-xs">Otro / escribir manualmente</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
+                          {fWalkinUseManualModel && (
+                            <>
+                              <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Marca *</Label><Input value={fWalkinManualBrand} onChange={e => setFWalkinManualBrand(e.target.value)} placeholder="Ej: Toyota" className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
+                              <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Modelo *</Label><Input value={fWalkinManualModelName} onChange={e => setFWalkinManualModelName(e.target.value)} placeholder="Ej: Corolla" className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
+                              <div className="col-span-1 sm:col-span-2 rounded-md bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-start gap-2">
+                                <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                                <p className="text-amber-700">
+                                  Este vehículo se registrará como unidad de tercero (no vendida por nosotros), <strong>sin garantía</strong>,
+                                  y el cliente <strong>no</strong> se registrará como cliente comercial.
+                                </p>
+                              </div>
+                            </>
+                          )}
                         </>
                       )}
                       <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Placa</Label><Input value={fWalkinPlate} onChange={e => setFWalkinPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="h-9 text-sm sm:h-8 sm:text-xs uppercase" /></div>

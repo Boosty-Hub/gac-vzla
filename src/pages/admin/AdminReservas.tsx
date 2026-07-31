@@ -236,6 +236,12 @@ const AdminReservas = () => {
   const [mPhone, setMPhone] = useState<string>(() => getArLS().mPhone || '');
   const [mCedula, setMCedula] = useState<string>(() => getArLS().mCedula || '');
   const [mModelId, setMModelId] = useState<string>(() => getArLS().mModelId || '');
+  // "Otro / escribir manualmente": the vehicle is not in the commercial catalog
+  // (e.g. a third-party car that only came in for a one-off service). Reveals
+  // Marca/Modelo text inputs instead of the catalog Select.
+  const [mUseManualModel, setMUseManualModel] = useState<boolean>(() => getArLS().mUseManualModel === true);
+  const [mManualBrand, setMManualBrand] = useState<string>(() => getArLS().mManualBrand || '');
+  const [mManualModelName, setMManualModelName] = useState<string>(() => getArLS().mManualModelName || '');
   const [mPlate, setMPlate] = useState<string>(() => getArLS().mPlate || '');
   const [mYear, setMYear] = useState<string>(() => getArLS().mYear || '');
   const [vehicleModels, setVehicleModels] = useState<VehicleModelOption[]>([]);
@@ -266,10 +272,16 @@ const AdminReservas = () => {
   };
 
   const fetchVehicleModels = async () => {
-    const { data } = await supabase
+    // `is_manual` is not in the generated types.ts yet (new column, no regen) — cast
+    // to `any` for this call, matching this project's established convention for
+    // un-typed columns (see SatisfactionOverview.tsx:13-14). Manual models are
+    // excluded from this catalog picker: they're only reachable via the "Otro /
+    // escribir manualmente" typed path, so they don't accumulate here over time.
+    const { data } = await (supabase as any)
       .from('vehicle_models')
       .select('id, name, brand')
       .eq('is_active', true)
+      .eq('is_manual', false)
       .order('brand')
       .order('name');
     if (data) setVehicleModels(data as VehicleModelOption[]);
@@ -326,9 +338,9 @@ const AdminReservas = () => {
       return;
     }
     try {
-      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear }));
+      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mUseManualModel, mManualBrand, mManualModelName, mPlate, mYear }));
     } catch {}
-  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mPlate, mYear]);
+  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mUseManualModel, mManualBrand, mManualModelName, mPlate, mYear]);
 
   // Client search with debounce (by name, cedula, or vehicle plate)
   useEffect(() => {
@@ -478,6 +490,7 @@ const AdminReservas = () => {
     setManualMode(false);
     setEditingLegacyWalkin(false);
     setMName(''); setMPhone(''); setMCedula(''); setMModelId(''); setMPlate(''); setMYear('');
+    setMUseManualModel(false); setMManualBrand(''); setMManualModelName('');
   };
 
   const openCreate = () => {
@@ -658,6 +671,7 @@ const AdminReservas = () => {
       setMPhone(r.walkin_client_phone || '');
       setMCedula('');
       setMModelId('');
+      setMUseManualModel(false); setMManualBrand(''); setMManualModelName('');
       setMPlate(r.walkin_plate || '');
       setMYear('');
       setClientVehicles([]);
@@ -698,7 +712,13 @@ const AdminReservas = () => {
     }
     if (manualMode) {
       if (!mName.trim()) { toast.error('El nombre del cliente es requerido'); return; }
-      if (!mModelId) { toast.error('Seleccione el modelo del vehículo'); return; }
+      if (mUseManualModel) {
+        if (!mManualBrand.trim() || !mManualModelName.trim()) {
+          toast.error('Indique la marca y el modelo del vehículo'); return;
+        }
+      } else if (!mModelId) {
+        toast.error('Seleccione el modelo del vehículo'); return;
+      }
     } else if (editingLegacyWalkin) {
       // Legacy walk-in edit: only the name is required; model is NOT, since we keep
       // it as free-text walk-in and never create a vehicle entity.
@@ -731,6 +751,7 @@ const AdminReservas = () => {
           clientCedula: mCedula,
           clientPhone: mPhone,
           modelId: mModelId,
+          manualModel: mUseManualModel ? { brand: mManualBrand, modelName: mManualModelName } : null,
           plate: mPlate,
           year: mYear,
         });
@@ -1581,15 +1602,35 @@ const AdminReservas = () => {
                       <div className="space-y-1"><Label>Cédula</Label><Input value={mCedula} onChange={e => setMCedula(e.target.value)} placeholder="V-12345678" /></div>
                       <div className="space-y-1">
                         <Label>Marca / Modelo *</Label>
-                        <Select value={mModelId} onValueChange={setMModelId}>
+                        <Select
+                          value={mUseManualModel ? '__manual__' : mModelId}
+                          onValueChange={v => {
+                            if (v === '__manual__') { setMUseManualModel(true); setMModelId(''); }
+                            else { setMUseManualModel(false); setMModelId(v); }
+                          }}
+                        >
                           <SelectTrigger><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                           <SelectContent>
                             {vehicleModels.map(m => (
                               <SelectItem key={m.id} value={m.id}>{m.brand} {m.name}</SelectItem>
                             ))}
+                            <SelectItem value="__manual__">Otro / escribir manualmente</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
+                      {mUseManualModel && (
+                        <>
+                          <div className="space-y-1"><Label>Marca *</Label><Input value={mManualBrand} onChange={e => setMManualBrand(e.target.value)} placeholder="Ej: Toyota" /></div>
+                          <div className="space-y-1"><Label>Modelo *</Label><Input value={mManualModelName} onChange={e => setMManualModelName(e.target.value)} placeholder="Ej: Corolla" /></div>
+                          <div className="col-span-2 rounded-md bg-amber-50 border border-amber-200 p-2.5 text-xs flex items-start gap-2">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-600 mt-0.5 shrink-0" />
+                            <p className="text-amber-700">
+                              Este vehículo se registrará como unidad de tercero (no vendida por nosotros), <strong>sin garantía</strong>,
+                              y el cliente <strong>no</strong> se registrará como cliente comercial.
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
                   <div className="space-y-1"><Label>Placa</Label><Input value={mPlate} onChange={e => setMPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="uppercase" /></div>

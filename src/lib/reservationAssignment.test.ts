@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveReservationAssignment, createOrReuseManualEntities } from './reservationAssignment';
+import { syncClientToKommo } from '@/lib/kommo';
+
+// createOrReuseManualEntities imports syncClientToKommo directly (not injected), so
+// it must be mocked at module level to assert on it without hitting the real
+// Supabase edge function.
+vi.mock('@/lib/kommo', () => ({ syncClientToKommo: vi.fn(() => Promise.resolve()) }));
 
 /**
  * Minimal in-memory fake of the Supabase query builder used by
@@ -19,25 +25,31 @@ interface FakeOptions {
   clientInsertConflict?: boolean;
   /** When true, inserting a vehicle returns an error (to test cleanup). */
   vehicleInsertFails?: boolean;
+  /** Existing manual `vehicle_models`, keyed by "brand|name" lowercased, for the find-or-create lookup. */
+  manualModelsByKey?: Record<string, { id: string }>;
 }
 
 function makeFakeClient(opts: FakeOptions = {}) {
   const deletedClientIds: string[] = [];
   const insertedClients: Row[] = [];
   const insertedVehicles: Row[] = [];
+  const insertedVehicleModels: Row[] = [];
   let clientIdSeq = 0;
   let vehicleIdSeq = 0;
+  let modelIdSeq = 0;
 
   const client = {
     deletedClientIds,
     insertedClients,
     insertedVehicles,
+    insertedVehicleModels,
     from(table: string) {
       const state: {
         op: 'select' | 'insert' | 'delete' | null;
         values: Row | null;
         eqs: Array<[string, unknown]>;
-      } = { op: null, values: null, eqs: [] };
+        ilikes: Array<[string, unknown]>;
+      } = { op: null, values: null, eqs: [], ilikes: [] };
 
       const builder = {
         select() {
@@ -61,6 +73,10 @@ function makeFakeClient(opts: FakeOptions = {}) {
           }
           return builder;
         },
+        ilike(column: string, value: unknown) {
+          state.ilikes.push([column, value]);
+          return builder;
+        },
         limit() {
           return builder;
         },
@@ -78,6 +94,16 @@ function makeFakeClient(opts: FakeOptions = {}) {
             }
             if (phone && opts.clientsByPhone?.[phone]) {
               return { data: opts.clientsByPhone[phone], error: null };
+            }
+            return { data: null, error: null };
+          }
+          if (table === 'vehicle_models' && state.op === 'select') {
+            const brand = state.ilikes.find(([c]) => c === 'brand')?.[1] as string | undefined;
+            const name = state.ilikes.find(([c]) => c === 'name')?.[1] as string | undefined;
+            if (brand && name) {
+              const key = `${brand.toLowerCase()}|${name.toLowerCase()}`;
+              const found = opts.manualModelsByKey?.[key];
+              if (found) return { data: found, error: null };
             }
             return { data: null, error: null };
           }
@@ -99,6 +125,11 @@ function makeFakeClient(opts: FakeOptions = {}) {
             const id = `veh-new-${++vehicleIdSeq}`;
             insertedVehicles.push({ id, ...state.values });
             return { data: { id, client_id: state.values?.client_id }, error: null };
+          }
+          if (table === 'vehicle_models' && state.op === 'insert') {
+            const id = `model-new-${++modelIdSeq}`;
+            insertedVehicleModels.push({ id, ...state.values });
+            return { data: { id }, error: null };
           }
           return { data: null, error: { message: 'unexpected single()' } };
         },
@@ -319,5 +350,115 @@ describe('createOrReuseManualEntities', () => {
     const result = await createOrReuseManualEntities(fake as never, baseInput);
     expect(result.vehicle.client_id).toBe('cli-race');
     expect(fake.insertedVehicles).toHaveLength(1);
+  });
+});
+
+describe('createOrReuseManualEntities — manual model (typed brand/model)', () => {
+  it('reuses an existing manual model matching case-insensitively instead of creating a duplicate', async () => {
+    const fake = makeFakeClient({
+      manualModelsByKey: { 'toyota|corolla': { id: 'model-manual-1' } },
+    });
+    const result = await createOrReuseManualEntities(fake as never, {
+      ...baseInput,
+      modelId: '',
+      manualModel: { brand: 'TOYOTA', modelName: 'corolla' },
+    });
+    expect(fake.insertedVehicleModels).toHaveLength(0);
+    expect(fake.insertedVehicles[0].model_id).toBe('model-manual-1');
+    expect(fake.insertedVehicles[0].is_manual).toBe(true);
+    expect(result.vehicle.id).toBeTruthy();
+  });
+
+  it('creates a manual vehicle_models row (is_manual, no warranty fields) when nothing matches', async () => {
+    const fake = makeFakeClient();
+    await createOrReuseManualEntities(fake as never, {
+      ...baseInput,
+      modelId: '',
+      manualModel: { brand: 'Toyota', modelName: 'Corolla' },
+    });
+    expect(fake.insertedVehicleModels).toHaveLength(1);
+    expect(fake.insertedVehicleModels[0]).toMatchObject({ brand: 'Toyota', name: 'Corolla', is_manual: true });
+    // The DB CHECK chk_manual_model_has_no_warranty forbids warranty values on a
+    // manual model — this asserts the client never even attempts to set them.
+    expect(fake.insertedVehicleModels[0]).not.toHaveProperty('warranty_km');
+    expect(fake.insertedVehicleModels[0]).not.toHaveProperty('warranty_months');
+    expect(fake.insertedVehicleModels[0]).not.toHaveProperty('warranty_condition_id');
+  });
+
+  it('flags both the vehicle and a newly created client as is_manual', async () => {
+    const fake = makeFakeClient();
+    await createOrReuseManualEntities(fake as never, {
+      ...baseInput,
+      modelId: '',
+      manualModel: { brand: 'Toyota', modelName: 'Corolla' },
+    });
+    expect(fake.insertedClients[0].is_manual).toBe(true);
+    expect(fake.insertedVehicles[0].is_manual).toBe(true);
+  });
+
+  it('does NOT flag a REUSED client (matched by cedula) as manual', async () => {
+    const fake = makeFakeClient({ clientsByCedula: { 'V-12345678': { id: 'cli-ced' } } });
+    const result = await createOrReuseManualEntities(fake as never, {
+      ...baseInput,
+      modelId: '',
+      manualModel: { brand: 'Toyota', modelName: 'Corolla' },
+    });
+    expect(result.vehicle.client_id).toBe('cli-ced');
+    expect(fake.insertedClients).toHaveLength(0);
+  });
+
+  it('throws when manualModel is missing the brand', async () => {
+    const fake = makeFakeClient();
+    await expect(
+      createOrReuseManualEntities(fake as never, {
+        ...baseInput,
+        modelId: '',
+        manualModel: { brand: '  ', modelName: 'Corolla' },
+      }),
+    ).rejects.toThrow(/marca.*modelo/i);
+    expect(fake.insertedClients).toHaveLength(0);
+    expect(fake.insertedVehicles).toHaveLength(0);
+  });
+
+  it('throws when manualModel is missing the model name', async () => {
+    const fake = makeFakeClient();
+    await expect(
+      createOrReuseManualEntities(fake as never, {
+        ...baseInput,
+        modelId: '',
+        manualModel: { brand: 'Toyota', modelName: '  ' },
+      }),
+    ).rejects.toThrow(/marca.*modelo/i);
+    expect(fake.insertedClients).toHaveLength(0);
+    expect(fake.insertedVehicles).toHaveLength(0);
+  });
+});
+
+describe('createOrReuseManualEntities — Kommo sync guard', () => {
+  beforeEach(() => {
+    vi.mocked(syncClientToKommo).mockClear();
+  });
+
+  it('syncs a genuinely new, non-manual client to Kommo', async () => {
+    const fake = makeFakeClient();
+    await createOrReuseManualEntities(fake as never, baseInput);
+    expect(syncClientToKommo).toHaveBeenCalledTimes(1);
+    expect(syncClientToKommo).toHaveBeenCalledWith(fake.insertedClients[0].id);
+  });
+
+  it('does NOT sync a manual client (third-party, typed model) to Kommo', async () => {
+    const fake = makeFakeClient();
+    await createOrReuseManualEntities(fake as never, {
+      ...baseInput,
+      modelId: '',
+      manualModel: { brand: 'Toyota', modelName: 'Corolla' },
+    });
+    expect(syncClientToKommo).not.toHaveBeenCalled();
+  });
+
+  it('does NOT sync a reused client even on the normal (non-manual) path', async () => {
+    const fake = makeFakeClient({ clientsByCedula: { 'V-12345678': { id: 'cli-ced' } } });
+    await createOrReuseManualEntities(fake as never, baseInput);
+    expect(syncClientToKommo).not.toHaveBeenCalled();
   });
 });

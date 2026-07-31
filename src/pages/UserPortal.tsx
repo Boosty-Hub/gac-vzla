@@ -46,7 +46,7 @@ interface Vehicle {
   vin: string | null;
   warranty_active: boolean;
   purchase_date: string | null;
-  vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null } | null;
+  vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null; is_manual: boolean | null } | null;
 }
 
 interface VehicleServiceRecord {
@@ -341,7 +341,7 @@ const UserPortal = () => {
       if (clientId) {
         const { data: vehs } = await supabase
           .from('vehicles')
-          .select('id, plate, year, color, mileage, vin, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km)')
+          .select('id, plate, year, color, mileage, vin, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual)')
           .eq('client_id', clientId)
           .eq('is_active', true)
           .order('year', { ascending: false });
@@ -450,6 +450,10 @@ const UserPortal = () => {
     return {
       active: result.active,
       reason: result.reasons.join(' · '),
+      // Third-party vehicle (never sold by GAC) — resolveWarrantyCondition already forces
+      // this to the 'unknown' status, but we surface the flag directly so the UI can show
+      // a plain "sin relación de garantía" message instead of a generic "Inactiva".
+      isManual: !!v.vehicle_models?.is_manual,
       monthsRemaining: result.monthsRemaining,
       kmRemaining: result.kmRemaining,
       servicesExpected: result.servicesExpected,
@@ -488,7 +492,7 @@ const UserPortal = () => {
     const w = evaluateVehicleWarranty(v);
     const serviceStatus = showService ? getServiceStatus(v, w) : null;
     return (
-      <Card key={v.id} className={cn("gac-shadow border-l-4 cursor-pointer hover:shadow-md transition-shadow", w.active ? "border-l-green-500" : "border-l-red-500")} onClick={() => openVehicleDetail(v)}>
+      <Card key={v.id} className={cn("gac-shadow border-l-4 cursor-pointer hover:shadow-md transition-shadow", w.isManual ? "border-l-blue-500" : w.active ? "border-l-green-500" : "border-l-red-500")} onClick={() => openVehicleDetail(v)}>
         <CardContent className="p-4">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
@@ -501,9 +505,9 @@ const UserPortal = () => {
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                {w.active ? 'Activa' : 'Inactiva'}
+              <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1", w.isManual ? "bg-blue-100 text-blue-800" : w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                {w.isManual ? <Car className="w-3 h-3" /> : w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                {w.isManual ? 'Terceros' : w.active ? 'Activa' : 'Inactiva'}
               </Badge>
               <ChevronRight className="w-4 h-4 text-muted-foreground" />
             </div>
@@ -530,7 +534,9 @@ const UserPortal = () => {
               <p className="text-[10px] text-muted-foreground">Meses rest.</p>
             </div>
           </div>
-          {!w.active && w.reason && (
+          {w.isManual ? (
+            <p className="mt-2 text-[10px] text-blue-600 font-medium">Vehículo de terceros — no aplica garantía GAC</p>
+          ) : !w.active && w.reason && (
             <p className="mt-2 text-[10px] text-red-600 font-medium">⚠ {w.reason}</p>
           )}
         </CardContent>
@@ -1399,11 +1405,15 @@ const UserPortal = () => {
               // Prioritize pending-service vehicles: vencido -> proximo -> al_dia
               const priority: Record<ServiceStatus, number> = { vencido: 0, proximo: 1, al_dia: 2 };
               filtered.sort((a, b) => priority[a.serviceStatus] - priority[b.serviceStatus]);
-              // Summary counts across the whole fleet (not the filtered subset)
+              // Summary counts across the whole fleet (not the filtered subset).
+              // Third-party vehicles (isManual) are excluded from the warranty totals — they
+              // have no warranty relationship with GAC, so they belong in neither bucket.
               const summary = enriched.reduce(
                 (acc, { w, serviceStatus }) => {
                   acc[serviceStatus] += 1;
-                  if (w.active) acc.warrantyActive += 1; else acc.warrantyExpired += 1;
+                  if (!w.isManual) {
+                    if (w.active) acc.warrantyActive += 1; else acc.warrantyExpired += 1;
+                  }
                   return acc;
                 },
                 { vencido: 0, proximo: 0, al_dia: 0, warrantyActive: 0, warrantyExpired: 0 },
@@ -1494,22 +1504,22 @@ const UserPortal = () => {
                 <ArrowLeft className="w-4 h-4" /> Volver a mis vehículos
               </button>
 
-              <Card className={cn("gac-shadow border-l-4", w.active ? "border-l-green-500" : "border-l-red-500")}>
+              <Card className={cn("gac-shadow border-l-4", w.isManual ? "border-l-blue-500" : w.active ? "border-l-green-500" : "border-l-red-500")}>
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
                       <h3 className="font-display font-bold">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</h3>
                       <p className="text-xs text-muted-foreground">{v.plate}{v.vin ? ` · VIN: ${v.vin}` : ''}</p>
                     </div>
-                    <Badge className={cn("text-xs flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                      {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                      {w.active ? 'Garantía Activa' : 'Garantía Inactiva'}
+                    <Badge className={cn("text-xs flex items-center gap-1", w.isManual ? "bg-blue-100 text-blue-800" : w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                      {w.isManual ? <Car className="w-3 h-3" /> : w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                      {w.isManual ? 'Vehículo de terceros' : w.active ? 'Garantía Activa' : 'Garantía Inactiva'}
                     </Badge>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Hash className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Kilometraje</p><p className="font-medium">{v.mileage.toLocaleString()} km</p></div></div>
-                    <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><ShieldCheck className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Garantía</p><p className={cn("font-medium", w.active ? "text-green-700" : "text-red-600")}>{w.active ? 'Activa' : 'Vencida'}</p></div></div>
+                    <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><ShieldCheck className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Garantía</p><p className={cn("font-medium", w.isManual ? "text-blue-700" : w.active ? "text-green-700" : "text-red-600")}>{w.isManual ? 'No aplica' : w.active ? 'Activa' : 'Vencida'}</p></div></div>
                     {v.color && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><Car className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Color</p><p className="font-medium">{v.color}</p></div></div>}
                     {v.purchase_date && <div className="flex items-center gap-2 bg-muted/50 rounded-md p-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground" /><div><p className="text-[10px] text-muted-foreground">Compra</p><p className="font-medium">{v.purchase_date}</p></div></div>}
                   </div>
@@ -1531,7 +1541,12 @@ const UserPortal = () => {
                     </div>
                   </div>
 
-                  {!w.active && w.reason && (
+                  {w.isManual ? (
+                    <div className="bg-blue-50 border border-blue-200 rounded-md p-2.5 text-xs">
+                      <p className="font-semibold text-blue-800 mb-1">Vehículo de terceros</p>
+                      <p className="text-blue-700">Este vehículo no fue vendido por GAC, por lo que no tiene garantía con la marca. El servicio se realiza de forma independiente.</p>
+                    </div>
+                  ) : !w.active && w.reason && (
                     <div className="bg-red-50 border border-red-200 rounded-md p-2.5 text-xs">
                       <p className="font-semibold text-red-800 mb-1">Razón</p>
                       <p className="text-red-700">{w.reason}</p>
@@ -1687,9 +1702,9 @@ const UserPortal = () => {
                           {v.color ? ` · ${v.color}` : ''}
                         </p>
                       </div>
-                      <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1", w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
-                        {w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
-                        {w.active ? 'Garantía' : 'Vencida'}
+                      <Badge className={cn("text-[10px] px-1.5 py-0 flex items-center gap-1", w.isManual ? "bg-blue-100 text-blue-800" : w.active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800")}>
+                        {w.isManual ? <Car className="w-3 h-3" /> : w.active ? <ShieldCheck className="w-3 h-3" /> : <ShieldX className="w-3 h-3" />}
+                        {w.isManual ? 'Terceros' : w.active ? 'Garantía' : 'Vencida'}
                       </Badge>
                     </div>
                     );
