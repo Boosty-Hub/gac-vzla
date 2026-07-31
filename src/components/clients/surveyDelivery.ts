@@ -75,6 +75,10 @@ export function describeSkippedDelivery(reason: string): string {
     // 'resend' is the deliberate escape hatch and is always allowed through.
     case 'already_delivered':
       return 'Esta encuesta ya se había enviado; no se envió de nuevo. Usá "Reenviar encuesta" si querés mandarla otra vez.';
+    // The survey is scheduled, not refused: pg_cron's dispatcher picks it up once
+    // `eligible_at` passes (20 hours after the win by default).
+    case 'not_yet_eligible':
+      return 'La encuesta quedó programada y se enviará automáticamente 20 horas después de marcar la venta. Usá "Reenviar encuesta" si necesitás mandarla ahora.';
     default:
       return `No se envió la encuesta (motivo: ${reason}).`;
   }

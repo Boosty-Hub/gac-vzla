@@ -2107,20 +2107,21 @@ Deno.serve(async (req) => {
         type SurveyRow = {
           id: string; token: string; client_id: string | null
           suppressed_reason: string | null; delivered_at: string | null
+          eligible_at: string | null
         }
         let survey: SurveyRow | null = null
 
         if (survey_id) {
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at')
             .eq('id', survey_id)
             .maybeSingle()
           survey = data as SurveyRow | null
         } else if (prospect_id) {
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at')
             .eq('prospect_id', prospect_id)
             .maybeSingle()
           survey = data as SurveyRow | null
@@ -2128,7 +2129,7 @@ Deno.serve(async (req) => {
           // client_id path (repurchase / resend): most recent survey for this client.
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at')
             .eq('client_id', client_id_in as string)
             .order('created_at', { ascending: false })
             .limit(1)
@@ -2168,6 +2169,27 @@ Deno.serve(async (req) => {
           return jsonResponse({
             delivered: false, skipped: 'already_delivered',
             survey_id: survey.id, client_id: clientId, lead_id: null, token: survey.token,
+          })
+        }
+
+        // 5c) Eligibility gate — the delay required by the ticket ("enviar N horas tras
+        // marcar ganado", currently 20h via `survey_delay_hours`). `eligible_at` was being
+        // computed and stored since the original migration but never read, so every caller
+        // delivered instantly.
+        //
+        // Putting the gate HERE makes all callers correct at once rather than teaching each
+        // one to wait: kommo-webhook and both portals fire at win time and now no-op, and
+        // pg_cron's fn_dispatch_eligible_surveys passes naturally because it only selects
+        // rows whose eligible_at has already passed.
+        //
+        // 'resend' bypasses it deliberately — that button is a human overriding the wait,
+        // and it is also the only way to run a manual end-to-end test without waiting 20h.
+        // Repurchase is unaffected: register_client_repurchase sets eligible_at = now().
+        if (reason !== 'resend' && survey.eligible_at && new Date(survey.eligible_at) > new Date()) {
+          return jsonResponse({
+            delivered: false, skipped: 'not_yet_eligible',
+            survey_id: survey.id, client_id: clientId, lead_id: null, token: survey.token,
+            eligible_at: survey.eligible_at,
           })
         }
 
