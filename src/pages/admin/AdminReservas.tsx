@@ -1618,10 +1618,13 @@ const AdminReservas = () => {
                         >
                           <SelectTrigger><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                           <SelectContent>
+                            {/* FIRST, not last: the catalog holds 269 active models, so at the
+                                bottom this option was effectively invisible — users reported
+                                not being able to type a model at all. */}
+                            <SelectItem value="__manual__" className="font-medium">Otro / escribir manualmente</SelectItem>
                             {vehicleModels.map(m => (
                               <SelectItem key={m.id} value={m.id}>{m.brand} {m.name}</SelectItem>
                             ))}
-                            <SelectItem value="__manual__">Otro / escribir manualmente</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

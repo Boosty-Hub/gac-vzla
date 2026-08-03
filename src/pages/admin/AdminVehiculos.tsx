@@ -818,6 +818,9 @@ const AdminVehiculos = () => {
               <Select value={eModelId} onValueChange={handleEModelChange}>
                 <SelectTrigger><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                 <SelectContent>
+                  {/* FIRST, not last: the catalog holds 269 active models, so at the bottom
+                      this option was effectively invisible. */}
+                  <SelectItem value={MANUAL_MODEL_VALUE} className="font-medium">Otro / escribir manualmente</SelectItem>
                   {Array.from(new Set(models.map(m => m.brand))).map(brand => (
                     <SelectGroup key={brand}>
                       <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
@@ -826,10 +829,6 @@ const AdminVehiculos = () => {
                       ))}
                     </SelectGroup>
                   ))}
-                  <SelectGroup>
-                    <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">Otro</SelectLabel>
-                    <SelectItem value={MANUAL_MODEL_VALUE}>Otro / escribir manualmente</SelectItem>
-                  </SelectGroup>
                 </SelectContent>
               </Select>
             </div>

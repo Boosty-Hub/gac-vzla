@@ -1735,11 +1735,14 @@ const DealershipReservas = () => {
                             >
                               <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                               <SelectContent>
+                                {/* FIRST, not last: the catalog holds 269 active models, so at
+                                    the bottom this option was effectively invisible — users
+                                    reported not being able to type a model at all. */}
+                                <SelectItem value="__manual__" className="text-xs font-medium">Otro / escribir manualmente</SelectItem>
+                                <SelectSeparator />
                                 {vehicleModels.map(m => (
                                   <SelectItem key={m.id} value={m.id} className="text-xs">{m.brand} {m.name}</SelectItem>
                                 ))}
-                                <SelectSeparator />
-                                <SelectItem value="__manual__" className="text-xs">Otro / escribir manualmente</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>

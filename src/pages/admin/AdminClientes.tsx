@@ -1550,10 +1550,12 @@ const AdminClientes = () => {
                 <Select value={vFormModelId} onValueChange={handleVFormModelChange}>
                   <SelectTrigger><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
                   <SelectContent>
+                    {/* FIRST, not last: the catalog holds 269 active models, so at the bottom
+                        this option was effectively invisible. */}
+                    <SelectItem value={MANUAL_MODEL_VALUE} className="font-medium">Otro / escribir manualmente</SelectItem>
                     {models.map(m => (
                       <SelectItem key={m.id} value={m.id}>{m.brand} {m.name}</SelectItem>
                     ))}
-                    <SelectItem value={MANUAL_MODEL_VALUE}>Otro / escribir manualmente</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

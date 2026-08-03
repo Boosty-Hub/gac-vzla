@@ -53,11 +53,25 @@ interface VehicleModelOption {
   name: string;
 }
 
+/** What a plate lookup found, per row. `null` = nothing found (a brand-new vehicle). */
+interface PlateMatch {
+  vehicleId: string;
+  modelId: string | null;
+  modelLabel: string;
+  year: number | null;
+  ownerName: string | null;
+}
+
 interface VehicleRow {
   key: string;
   plate: string;
   modelId: string;
   year: string;
+  /** undefined = not looked up yet, null = looked up and free. */
+  match?: PlateMatch | null;
+  lookingUp?: boolean;
+  /** User confirmed the transfer of an existing vehicle to this buyer. */
+  linkExisting?: boolean;
 }
 
 export interface WonProspectResult {
@@ -91,6 +105,10 @@ const makeEmptyRow = (): VehicleRow => ({
 const isRowValid = (row: VehicleRow): boolean => {
   if (!isValidSoldPlate(row.plate)) return false;
   if (!row.modelId) return false;
+  // A plate that already belongs to somebody else cannot be submitted until the user has
+  // explicitly accepted the transfer — otherwise the RPC rejects it anyway, and a
+  // disabled button explains the situation better than an error after the fact.
+  if (row.match && !row.linkExisting) return false;
   const yearTrim = row.year.trim();
   if (!yearTrim) return false;
   const yearNum = Number(yearTrim);
@@ -182,6 +200,57 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
     setRows(prev => prev.map(r => (r.key === key ? { ...r, ...patch } : r)));
   };
 
+  /**
+   * Looks the plate up when the field loses focus (not on every keystroke — a plate is only
+   * meaningful once fully typed, and this hits the network).
+   *
+   * Goes through `staff_lookup_vehicle_by_plate`, a SECURITY DEFINER RPC, NOT a direct
+   * `vehicles` read: RLS only lets a salesperson see vehicles tied to their own dealership's
+   * reservations, so a direct query would report "free" for a plate that actually exists and
+   * the win would still fail on submit.
+   */
+  const lookupPlate = async (key: string, rawPlate: string) => {
+    const plate = normalizeSoldPlate(rawPlate);
+    if (!plate) {
+      updateRow(key, { match: undefined, linkExisting: false });
+      return;
+    }
+    updateRow(key, { lookingUp: true });
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    const { data, error } = await (supabase.rpc as any)('staff_lookup_vehicle_by_plate', { p_plate: plate });
+    const found = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+
+    if (error || !found) {
+      // A lookup failure is treated as "not found": the RPC re-validates on submit anyway,
+      // so the worst case is the user sees the explicit error there instead of here.
+      if (error) console.error('Error looking up plate:', error);
+      updateRow(key, { lookingUp: false, match: null, linkExisting: false });
+      return;
+    }
+
+    updateRow(key, {
+      lookingUp: false,
+      linkExisting: false,
+      match: {
+        vehicleId: String(found.vehicle_id),
+        modelId: found.model_id ? String(found.model_id) : null,
+        modelLabel: [found.model_brand, found.model_name].filter(Boolean).join(' ') || 'Modelo desconocido',
+        year: found.year != null ? Number(found.year) : null,
+        ownerName: found.client_full_name ? String(found.client_full_name) : null,
+      },
+    });
+  };
+
+  /** Fills model and year from the found vehicle so the user does not retype what we know. */
+  const applyMatch = (row: VehicleRow) => {
+    if (!row.match) return;
+    updateRow(row.key, {
+      linkExisting: true,
+      modelId: row.match.modelId ?? row.modelId,
+      year: row.match.year != null ? String(row.match.year) : row.year,
+    });
+  };
+
   const duplicatePlates = hasDuplicatePlates(rows);
   const canSubmit = !saving && rows.length > 0 && rows.every(isRowValid) && !duplicatePlates;
 
@@ -193,7 +262,10 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
       plate: normalizeSoldPlate(r.plate),
       model_id: r.modelId,
       year: Number(r.year.trim()),
+      // Only ever true after the user saw who owns the vehicle and accepted the transfer.
+      link_existing: !!(r.match && r.linkExisting),
     }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any).rpc('register_won_prospect', {
       p_prospect_id: prospectId,
       p_vehicles: payload,
@@ -265,10 +337,54 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
                   <Input
                     autoFocus={index === 0}
                     value={row.plate}
-                    onChange={e => updateRow(row.key, { plate: e.target.value.toUpperCase() })}
+                    onChange={e => updateRow(row.key, {
+                      plate: e.target.value.toUpperCase(),
+                      // Editing the plate invalidates whatever the previous lookup found.
+                      match: undefined,
+                      linkExisting: false,
+                    })}
+                    onBlur={e => lookupPlate(row.key, e.target.value)}
                     placeholder="Ej: AB123CD"
                     className="h-9 text-xs"
                   />
+
+                  {row.lookingUp && (
+                    <p className="text-[10px] text-muted-foreground">Buscando la placa en el sistema…</p>
+                  )}
+
+                  {/* Plate is free — the normal case for a car we just sold. */}
+                  {!row.lookingUp && row.match === null && isValidSoldPlate(row.plate) && (
+                    <p className="text-[10px] text-muted-foreground">
+                      Placa nueva: se registrará el vehículo con los datos de abajo.
+                    </p>
+                  )}
+
+                  {/* Plate already exists in the system, under someone else. */}
+                  {!row.lookingUp && row.match && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 p-2 space-y-1.5">
+                      <p className="text-[11px] text-amber-800 leading-snug">
+                        Esta placa ya existe en el sistema:{' '}
+                        <strong>{row.match.modelLabel}{row.match.year ? ` ${row.match.year}` : ''}</strong>
+                        {row.match.ownerName && <> · actualmente a nombre de <strong>{row.match.ownerName}</strong></>}.
+                      </p>
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <Checkbox
+                          checked={!!row.linkExisting}
+                          onCheckedChange={v => (v ? applyMatch(row) : updateRow(row.key, { linkExisting: false }))}
+                          className="mt-0.5"
+                        />
+                        <span className="text-[11px] text-amber-900 leading-snug">
+                          Vincular este vehículo al comprador. Se transferirá a su ficha con el modelo y
+                          el año de abajo; no se crea un duplicado.
+                        </span>
+                      </label>
+                      {!row.linkExisting && (
+                        <p className="text-[10px] text-amber-700">
+                          Sin marcar esta casilla no se puede confirmar la venta: la placa es única en el sistema.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">

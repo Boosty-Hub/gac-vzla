@@ -31,6 +31,15 @@ export function translateRegisterWonProspectError(rawMessage: string | null | un
   if (message.startsWith('plate_required_for_every_vehicle')) {
     return 'Todos los vehículos deben tener placa.';
   }
+  // Raised when the plate already belongs to a DIFFERENT client and the user did not tick
+  // the "vincular" box. Before this existed the same situation surfaced as a raw Postgres
+  // unique-violation and the whole win was lost.
+  if (message.startsWith('plate_belongs_to_another_client')) {
+    const match = message.match(/plate_belongs_to_another_client:\s*(\S+)/);
+    return match
+      ? `La placa ${match[1]} ya está registrada a nombre de otro cliente. Marca "Vincular este vehículo" para transferirla al comprador.`
+      : 'Una de las placas ya está registrada a nombre de otro cliente. Marca "Vincular este vehículo" para transferirla al comprador.';
+  }
   if (message.startsWith('model_id_required_for_every_vehicle')) {
     return 'Todos los vehículos deben tener un modelo seleccionado.';
   }

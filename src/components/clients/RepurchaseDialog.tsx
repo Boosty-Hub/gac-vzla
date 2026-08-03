@@ -308,6 +308,11 @@ export default function RepurchaseDialog({ client, open, onOpenChange, models, o
                         <SelectValue placeholder="Selecciona modelo" />
                       </SelectTrigger>
                       <SelectContent>
+                        {/* FIRST, not last: the catalog holds 269 active models, so at the
+                            bottom this option was effectively invisible. */}
+                        <SelectItem value={MANUAL_MODEL_VALUE} className="text-xs font-medium">
+                          Otro / escribir manualmente
+                        </SelectItem>
                         {brands.map(brand => (
                           <SelectGroup key={brand}>
                             <SelectLabel className="text-[10px] font-bold uppercase text-muted-foreground">{brand}</SelectLabel>
@@ -316,9 +321,6 @@ export default function RepurchaseDialog({ client, open, onOpenChange, models, o
                             ))}
                           </SelectGroup>
                         ))}
-                        <SelectItem value={MANUAL_MODEL_VALUE} className="text-xs">
-                          Otro / escribir manualmente
-                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
