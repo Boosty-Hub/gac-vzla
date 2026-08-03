@@ -58,6 +58,10 @@ const SatisfactionOverview = ({ compact, surveys: controlledSurveys }: Satisfact
       const { data, error } = await (supabase as any)
         .from('satisfaction_surveys')
         .select('id, client_name, salesperson, sold_plate, status, responded_at, dealerships(name), response:satisfaction_responses(*)')
+        // SALE surveys only — same reason as SatisfactionDashboard: a postventa survey's
+        // answers live in `service_survey_responses`, so it would arrive with a null
+        // `response` and be counted below as an unanswered sale survey.
+        .in('origin', ['won', 'repurchase'])
         .order('created_at', { ascending: false });
 
       if (error) {

@@ -19,7 +19,13 @@ export interface SatisfactionAspect {
   question: string;
 }
 
-/** Ordered list of the 5 rated aspects, shown one per step in the survey form. */
+/**
+ * Which event produced the survey. Mirrors `satisfaction_surveys.origin`.
+ * 'won' / 'repurchase' ask about the SALE; 'service' asks about a workshop visit.
+ */
+export type SurveyOrigin = 'won' | 'repurchase' | 'service';
+
+/** Ordered list of the 5 rated aspects for a SALE survey, one per step in the form. */
 export const SATISFACTION_ASPECTS: SatisfactionAspect[] = [
   {
     key: 'atencion_digital',
@@ -56,6 +62,71 @@ export const SATISFACTION_ASPECTS: SatisfactionAspect[] = [
       '¿La explicación del vehículo, el estado de limpieza y la calidez del momento de entrega cumplieron tus expectativas?',
   },
 ];
+
+/**
+ * Ordered list of the 5 rated aspects for a POST-SERVICE (postventa) survey.
+ *
+ * Deliberately a separate list rather than reworded sale questions: the answers land in
+ * `service_survey_responses`, whose columns are named after THESE aspects. `column` here
+ * is the RPC parameter base name for `submit_service_survey_response` (arg = `p_${column}`)
+ * and the DB column base name (`q_${column}`), exactly as with the sale list.
+ *
+ * Keeping the count at 5 keeps the public form's step arithmetic identical for both kinds.
+ */
+export const SERVICE_SATISFACTION_ASPECTS: SatisfactionAspect[] = [
+  {
+    key: 'agendamiento',
+    column: 'agendamiento',
+    title: 'Agendamiento de la Cita',
+    question:
+      '¿Qué tan fácil te resultó agendar tu cita y obtener una fecha que se ajustara a lo que necesitabas?',
+  },
+  {
+    key: 'recepcion_asesor',
+    column: 'recepcion_asesor',
+    title: 'Recepción y Asesor de Servicio',
+    question:
+      'Al llegar al centro de servicio, ¿cómo calificarías la atención del asesor: te escuchó, te explicó el trabajo a realizar y te dio un presupuesto claro?',
+  },
+  {
+    key: 'tiempo_entrega',
+    column: 'tiempo_entrega',
+    title: 'Tiempo de Entrega',
+    question: '¿Se cumplió el tiempo de entrega que te prometieron cuando dejaste tu vehículo?',
+  },
+  {
+    key: 'calidad_servicio',
+    column: 'calidad_servicio',
+    title: 'Calidad del Servicio',
+    question:
+      'Pensando en el trabajo realizado, ¿tu vehículo te fue entregado en las condiciones que esperabas y se resolvió lo que solicitaste?',
+  },
+  {
+    key: 'instalaciones',
+    column: 'instalaciones',
+    title: 'Instalaciones',
+    question: '¿Qué tan cómodas, limpias y adecuadas te parecieron nuestras instalaciones mientras esperabas?',
+  },
+];
+
+/** Aspect list matching a survey's origin. Unknown/absent origin falls back to the sale
+ *  set, which is what every survey created before postventa existed is. */
+export function getAspectsForOrigin(origin: string | null | undefined): SatisfactionAspect[] {
+  return origin === 'service' ? SERVICE_SATISFACTION_ASPECTS : SATISFACTION_ASPECTS;
+}
+
+/** The RPC that accepts this origin's answers. The two are not interchangeable — each one
+ *  rejects the other's token server-side (see migration 20260803130000). */
+export function getSubmitRpcForOrigin(origin: string | null | undefined): string {
+  return origin === 'service' ? 'submit_service_survey_response' : 'submit_survey_response';
+}
+
+/** Human label for a survey's origin, shared by the client dialog and the dashboard. */
+export const SURVEY_ORIGIN_LABEL: Record<string, string> = {
+  won: 'Compra',
+  repurchase: 'Recompra',
+  service: 'Postventa',
+};
 
 export interface SatisfactionLevel {
   label: string;

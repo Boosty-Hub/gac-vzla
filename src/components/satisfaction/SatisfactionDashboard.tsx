@@ -44,6 +44,12 @@ const SatisfactionDashboard = () => {
           'created_at, responded_at, dealership_id, salesperson, dealerships(name), ' +
           'vehicles(plate, vehicle_models(brand, name)), response:satisfaction_responses(*)',
         )
+        // SALE surveys only. Postventa surveys (origin = 'service') store their answers in
+        // `service_survey_responses`, so without this filter they would arrive here with a
+        // null `response` and be counted as sale surveys that were sent and never answered —
+        // silently inflating "enviadas" and deflating the response rate on this panel.
+        // Postventa results are surfaced in the vehicle history instead (R7).
+        .in('origin', ['won', 'repurchase'])
         .order('created_at', { ascending: false });
 
       if (error) {

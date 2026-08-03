@@ -2090,9 +2090,22 @@ Deno.serve(async (req) => {
         }
       }
 
-      const surveyLinkFieldId = Number(surveyLinkFieldIdRaw)
-      const surveyStageId = Number(surveyStageIdRaw)
       const surveyBaseUrl = String(surveyBaseUrlRaw)
+
+      // A postventa survey must NOT wake the sale SalesBot: its template greets the customer
+      // for joining the family, which is nonsense after a workshop visit. When these two
+      // optional config keys are present, a survey with origin='service' is delivered
+      // through its OWN custom field and stage, so it can be answered by its own bot.
+      //
+      // Both fall back to the sale pair when absent, which is deliberate: until the Kommo
+      // objects exist, a postventa survey still gets its link written and stays visible on
+      // the lead rather than silently going nowhere. Delivery is gated by
+      // `survey_delivery_enabled` anyway, so nothing reaches a customer before it is
+      // switched on.
+      const serviceLinkFieldIdRaw = config.survey_link_field_id_service
+      const serviceStageIdRaw = config.survey_stage_id_service
+      const hasServiceRouting =
+        String(serviceLinkFieldIdRaw ?? '').trim() !== '' && String(serviceStageIdRaw ?? '').trim() !== ''
 
       try {
         // 4) Resolve the survey row. It already exists by this point — created by the
@@ -2108,20 +2121,23 @@ Deno.serve(async (req) => {
           id: string; token: string; client_id: string | null
           suppressed_reason: string | null; delivered_at: string | null
           eligible_at: string | null
+          // 'won' | 'repurchase' | 'service' — selects which Kommo field/stage pair to
+          // drive, i.e. which SalesBot ends up answering.
+          origin: string | null
         }
         let survey: SurveyRow | null = null
 
         if (survey_id) {
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin')
             .eq('id', survey_id)
             .maybeSingle()
           survey = data as SurveyRow | null
         } else if (prospect_id) {
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin')
             .eq('prospect_id', prospect_id)
             .maybeSingle()
           survey = data as SurveyRow | null
@@ -2129,7 +2145,7 @@ Deno.serve(async (req) => {
           // client_id path (repurchase / resend): most recent survey for this client.
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin')
             .eq('client_id', client_id_in as string)
             .order('created_at', { ascending: false })
             .limit(1)
@@ -2138,6 +2154,15 @@ Deno.serve(async (req) => {
         }
 
         if (!survey) throw new Error('survey_not_found')
+
+        // Route to the postventa field/stage pair only once we know this survey's origin.
+        const useServiceRouting = survey.origin === 'service' && hasServiceRouting
+        const surveyLinkFieldId = Number(useServiceRouting ? serviceLinkFieldIdRaw : surveyLinkFieldIdRaw)
+        const surveyStageId = Number(useServiceRouting ? serviceStageIdRaw : surveyStageIdRaw)
+        if (!Number.isFinite(surveyLinkFieldId) || !Number.isFinite(surveyStageId)) {
+          await logDelivery('error', { error: 'survey_routing_not_numeric', origin: survey.origin })
+          return jsonResponse({ error: 'survey_routing_not_numeric' }, 400)
+        }
         const clientId = survey.client_id
         if (!clientId) throw new Error('survey_has_no_client')
 

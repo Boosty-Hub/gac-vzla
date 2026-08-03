@@ -18,6 +18,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Search, Car, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, User, Pencil, X, Trash2, Palette, Power, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildVehicleSearchFilter, sanitizeSearchTerm } from '@/lib/vehicleSearch';
+import { useServiceSurveys } from '@/hooks/useServiceSurveys';
+import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 import { toast } from 'sonner';
 
 interface VehicleModel {
@@ -93,6 +95,8 @@ const AdminVehiculos = () => {
   const [detailVehicle, setDetailVehicle] = useState<Vehicle | null>(null);
   const [detailHistory, setDetailHistory] = useState<ServiceRecord[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  // R7 — the postventa survey result for each service in the history above.
+  const { surveys: serviceSurveys } = useServiceSurveys(detailHistory.map(h => h.id));
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
@@ -990,6 +994,7 @@ const AdminVehiculos = () => {
                               <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
                             </div>
                           )}
+                          <ServiceSurveyInline survey={serviceSurveys.get(h.id)} />
                         </div>
                       );
                     })}

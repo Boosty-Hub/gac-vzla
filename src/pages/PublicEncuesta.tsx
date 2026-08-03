@@ -10,12 +10,16 @@ import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { ArrowLeft, ArrowRight, CheckCircle2, Heart, Loader2, ThumbsDown, ThumbsUp, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { SATISFACTION_ASPECTS, getSatisfactionLevel } from '@/lib/satisfaction';
+import { getAspectsForOrigin, getSubmitRpcForOrigin, getSatisfactionLevel } from '@/lib/satisfaction';
 
-// Public, unauthenticated post-purchase satisfaction survey (/encuesta/:token).
+// Public, unauthenticated satisfaction survey (/encuesta/:token).
 // Anon client + the two RPCs below only — no direct table access (mirrors the
 // login-by-plate / lookup_vehicle_by_plate pattern used by /reservar).
-// Backend: supabase/migrations/20260720120000_satisfaction_surveys.sql (already applied).
+// Backend: supabase/migrations/20260720120000_satisfaction_surveys.sql (sale) and
+// 20260803130000_service_satisfaction_survey.sql (postventa).
+//
+// The SAME url serves both kinds. `get_survey_by_token` returns `origin`, which selects
+// the question set and the submit RPC — the customer never picks anything.
 
 type Screen = 'loading' | 'invalid' | 'already-responded' | 'survey' | 'thanks';
 
@@ -32,13 +36,13 @@ interface SurveyInfo {
    * stays forward-compatible with no code change once it does.
    */
   brand?: string | null;
+  /** 'won' | 'repurchase' | 'service'. Absent on responses from an older RPC build,
+   *  in which case the sale question set is the correct fallback. */
+  origin?: string | null;
+  /** Postventa only — shown on the intro so the customer knows WHICH visit is being asked about. */
+  plate?: string | null;
+  service_type?: string | null;
 }
-
-// Steps: 0 = intro, 1..5 = one per SATISFACTION_ASPECTS entry, 6 = NPS, 7 = optional comment.
-const LAST_ASPECT_STEP = SATISFACTION_ASPECTS.length; // 5
-const NPS_STEP = LAST_ASPECT_STEP + 1; // 6
-const COMMENT_STEP = NPS_STEP + 1; // 7
-const TOTAL_QUESTIONS = NPS_STEP; // "Pregunta X de 6" — 5 aspects + NPS; the comment step is optional and not counted.
 
 // Neutral/unselected slider accent, matches --imb-silver (src/index.css) so an
 // untouched aspect never hints at a "default" rating before the user interacts.
@@ -50,6 +54,21 @@ const PublicEncuesta = () => {
   const [clientName, setClientName] = useState('');
   const [dealershipName, setDealershipName] = useState<string | null>(null);
   const [brandName, setBrandName] = useState<string | null>(null);
+  const [origin, setOrigin] = useState<string | null>(null);
+  const [plate, setPlate] = useState<string | null>(null);
+  const [serviceType, setServiceType] = useState<string | null>(null);
+
+  // Question set is chosen by the survey's origin, so every step boundary is derived from
+  // the resolved list rather than from a module-level constant. Both lists happen to hold
+  // 5 aspects today; deriving keeps that a coincidence instead of a hidden dependency.
+  // Steps: 0 = intro, 1..N = one per aspect, N+1 = NPS, N+2 = optional comment.
+  const aspects = getAspectsForOrigin(origin);
+  const LAST_ASPECT_STEP = aspects.length;
+  const NPS_STEP = LAST_ASPECT_STEP + 1;
+  const COMMENT_STEP = NPS_STEP + 1;
+  // "Pregunta X de N" — aspects + NPS. The comment step is optional and not counted.
+  const TOTAL_QUESTIONS = NPS_STEP;
+  const isService = origin === 'service';
 
   const [step, setStep] = useState(0);
   // Presence of a key in `ratings` doubles as the per-aspect "touched" flag —
@@ -89,6 +108,9 @@ const PublicEncuesta = () => {
       setClientName(row.client_name || '');
       setDealershipName(row.dealership_name || null);
       setBrandName(row.brand || null);
+      setOrigin(row.origin || null);
+      setPlate(row.plate || null);
+      setServiceType(row.service_type || null);
       setScreen('survey');
     };
     load();
@@ -97,7 +119,7 @@ const PublicEncuesta = () => {
     };
   }, [token]);
 
-  const currentAspect = step >= 1 && step <= LAST_ASPECT_STEP ? SATISFACTION_ASPECTS[step - 1] : null;
+  const currentAspect = step >= 1 && step <= LAST_ASPECT_STEP ? aspects[step - 1] : null;
   const currentRating = currentAspect ? ratings[currentAspect.key] : undefined;
   const aspectTouched = currentRating !== undefined;
   const currentLevel = getSatisfactionLevel(currentRating ?? 3);
@@ -113,7 +135,7 @@ const PublicEncuesta = () => {
   const canAdvance = currentAspect ? aspectTouched : step === NPS_STEP ? nps !== null : true;
 
   const handleSubmit = async () => {
-    const allRatingsSet = SATISFACTION_ASPECTS.every(a => ratings[a.key] !== undefined);
+    const allRatingsSet = aspects.every(a => ratings[a.key] !== undefined);
     if (!allRatingsSet || nps === null) {
       toast.error('Faltan respuestas. Vuelve atrás y completa la encuesta.');
       return;
@@ -121,13 +143,13 @@ const PublicEncuesta = () => {
 
     setSubmitting(true);
     const payload: Record<string, unknown> = { p_token: token };
-    SATISFACTION_ASPECTS.forEach(a => {
+    aspects.forEach(a => {
       payload[`p_${a.column}`] = ratings[a.key];
     });
     payload.p_nps = nps;
     payload.p_comment = comment.trim() || null;
 
-    const { error } = await (supabase.rpc as any)('submit_survey_response', payload);
+    const { error } = await (supabase.rpc as any)(getSubmitRpcForOrigin(origin), payload);
     setSubmitting(false);
 
     if (error) {
@@ -149,7 +171,9 @@ const PublicEncuesta = () => {
           {/* Brand-agnostic typographic header — no logo image, so the same
               form works identically across every brand (requirements.md R10). */}
           <div className="flex flex-col items-center gap-1 mb-5 text-center">
-            <span className="text-lg font-display font-bold tracking-tight">Encuesta de Satisfacción</span>
+            <span className="text-lg font-display font-bold tracking-tight">
+              {isService ? 'Encuesta de Postventa' : 'Encuesta de Satisfacción'}
+            </span>
             {brandName && (
               <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{brandName}</span>
             )}
@@ -220,8 +244,18 @@ const PublicEncuesta = () => {
                     <div className="space-y-2">
                       <h2 className="text-xl font-display font-bold">¡Hola, {clientName}! 👋</h2>
                       <p className="text-sm text-muted-foreground">
-                        Tu opinión es el motor que nos mueve a mejorar. Te toma menos de 2 minutos.
+                        {isService
+                          ? 'Acabamos de atender tu vehículo y queremos saber cómo nos fue. Te toma menos de 2 minutos.'
+                          : 'Tu opinión es el motor que nos mueve a mejorar. Te toma menos de 2 minutos.'}
                       </p>
+                      {/* Postventa: name the visit being asked about. A fleet client can have
+                          several vehicles serviced in the same week — without this they cannot
+                          tell which one the survey refers to. */}
+                      {isService && (plate || serviceType) && (
+                        <p className="text-xs font-medium text-foreground/70">
+                          {[serviceType, plate].filter(Boolean).join(' · ')}
+                        </p>
+                      )}
                       {dealershipName && <p className="text-xs text-muted-foreground/70">{dealershipName}</p>}
                     </div>
                   </div>

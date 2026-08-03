@@ -1,5 +1,5 @@
 import { Document, Page, View, Text, StyleSheet } from '@react-pdf/renderer';
-import { SATISFACTION_ASPECTS, getSatisfactionLevel } from '@/lib/satisfaction';
+import { getAspectsForOrigin, getSatisfactionLevel, SURVEY_ORIGIN_LABEL } from '@/lib/satisfaction';
 
 /**
  * Printable PDF document for a single answered satisfaction survey.
@@ -52,6 +52,13 @@ export interface SurveyResponsePdfProps {
   npsRecomienda: boolean | null;
   comment: string | null;
   overallScore: number;
+  /**
+   * 'won' | 'repurchase' | 'service'. Selects the aspect titles — a postventa survey
+   * scored the workshop, not the sale, so rendering it under the sale titles would
+   * misreport what the customer actually answered. Optional: absent means the sale set,
+   * which is what every survey predating postventa is.
+   */
+  origin?: string | null;
 }
 
 const styles = StyleSheet.create({
@@ -163,15 +170,23 @@ const SurveyResponsePdf = ({
   npsRecomienda,
   comment,
   overallScore,
+  origin,
 }: SurveyResponsePdfProps) => {
   const overallLevel = getSatisfactionLevel(Math.round(overallScore));
   const overallColor = hslTripletToHex(overallLevel.color);
+  const aspects = getAspectsForOrigin(origin);
+  const isService = origin === 'service';
 
   return (
     <Document>
       <Page size="A4" style={styles.page}>
-        <Text style={styles.title}>Encuesta de Satisfacción</Text>
-        <Text style={styles.subtitle}>{clientName} — {respondedAt}</Text>
+        <Text style={styles.title}>
+          {isService ? 'Encuesta de Postventa' : 'Encuesta de Satisfacción'}
+        </Text>
+        <Text style={styles.subtitle}>
+          {clientName} — {respondedAt}
+          {origin && SURVEY_ORIGIN_LABEL[origin] ? ` — ${SURVEY_ORIGIN_LABEL[origin]}` : ''}
+        </Text>
 
         <View style={styles.metaBlock}>
           <View style={styles.metaItem}>
@@ -179,7 +194,9 @@ const SurveyResponsePdf = ({
             <Text style={styles.metaValue}>{dealershipName || '-'}</Text>
           </View>
           <View style={styles.metaItem}>
-            <Text style={styles.metaLabel}>Vendedor</Text>
+            {/* A postventa survey has no salesperson — the field is the service advisor's
+                counterpart and is simply absent on that origin. */}
+            <Text style={styles.metaLabel}>{isService ? 'Asesor' : 'Vendedor'}</Text>
             <Text style={styles.metaValue}>{salesperson || '-'}</Text>
           </View>
           <View style={styles.metaItem}>
@@ -189,7 +206,7 @@ const SurveyResponsePdf = ({
         </View>
 
         <Text style={styles.sectionTitle}>Evaluación por aspecto</Text>
-        {SATISFACTION_ASPECTS.map(aspect => {
+        {aspects.map(aspect => {
           const response = responses.find(r => r.key === aspect.key);
           const score = response?.score ?? 0;
           const level = getSatisfactionLevel(score);
