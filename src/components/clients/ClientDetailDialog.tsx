@@ -272,22 +272,24 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   const handleAssignDriver = async (vehicleId: string, value: string) => {
     const nextDriverId = value === UNASSIGNED_DRIVER ? null : value;
     setAssigningVehicleId(vehicleId);
-    const { data, error } = await (supabase as any)
-      .from('vehicles')
-      .update({ driver_id: nextDriverId })
-      .eq('id', vehicleId)
-      .select('id');
+    // Goes through `assign_vehicle_driver` rather than a direct UPDATE on `vehicles`. RLS is
+    // row-level, not column-level: granting UPDATE would also open mileage, plate, warranty
+    // and model. This RPC only ever writes `driver_id`, and it is the SAME entry point the
+    // client portal uses, so authorization lives in one place.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)('assign_vehicle_driver', {
+      p_vehicle_id: vehicleId,
+      p_driver_id: nextDriverId,
+    });
     setAssigningVehicleId(null);
 
     if (error) {
       console.error(error);
-      toast.error('Error al asignar el chofer');
-      return;
-    }
-    // RLS rejects by matching zero rows, not by erroring — without this check the UI would
-    // show the new driver while the DB kept the old one.
-    if (!data || data.length === 0) {
-      toast.error('No se pudo asignar el chofer: tu usuario no tiene permisos sobre este vehículo.');
+      toast.error(
+        (error.message || '').includes('not_authorized')
+          ? 'No se pudo asignar el chofer: tu usuario no tiene permisos sobre este vehículo.'
+          : 'Error al asignar el chofer',
+      );
       return;
     }
 

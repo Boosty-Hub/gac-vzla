@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X, Pencil, Trash2 } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
+import ModelCombobox, { MANUAL_MODEL_VALUE } from '@/components/vehicles/ModelCombobox';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
@@ -1726,25 +1727,16 @@ const DealershipReservas = () => {
                           <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Cédula</Label><Input value={fWalkinCedula} onChange={e => setFWalkinCedula(e.target.value)} placeholder="V-12345678" className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
                           <div className="space-y-1">
                             <Label className="text-[13px] sm:text-xs">Marca / Modelo *</Label>
-                            <Select
-                              value={fWalkinUseManualModel ? '__manual__' : fWalkinModelId}
-                              onValueChange={v => {
-                                if (v === '__manual__') { setFWalkinUseManualModel(true); setFWalkinModelId(''); }
+                            {/* Searchable: 269 active models make a plain Select unusable. */}
+                            <ModelCombobox
+                              className="h-9 text-sm sm:h-8 sm:text-xs"
+                              models={vehicleModels}
+                              value={fWalkinUseManualModel ? MANUAL_MODEL_VALUE : fWalkinModelId}
+                              onChange={v => {
+                                if (v === MANUAL_MODEL_VALUE) { setFWalkinUseManualModel(true); setFWalkinModelId(''); }
                                 else { setFWalkinUseManualModel(false); setFWalkinModelId(v); }
                               }}
-                            >
-                              <SelectTrigger className="h-9 text-sm sm:h-8 sm:text-xs"><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
-                              <SelectContent>
-                                {/* FIRST, not last: the catalog holds 269 active models, so at
-                                    the bottom this option was effectively invisible — users
-                                    reported not being able to type a model at all. */}
-                                <SelectItem value="__manual__" className="text-xs font-medium">Otro / escribir manualmente</SelectItem>
-                                <SelectSeparator />
-                                {vehicleModels.map(m => (
-                                  <SelectItem key={m.id} value={m.id} className="text-xs">{m.brand} {m.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            />
                           </div>
                           {fWalkinUseManualModel && (
                             <>

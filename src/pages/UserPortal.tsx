@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Separator } from '@/components/ui/separator';
+import DriversManager from '@/components/clients/DriversManager';
+import { driverLabel, type DriverOption } from '@/lib/drivers';
 import { MapPin, Clock, Car, CalendarDays, Check, ArrowLeft, User, LogOut, Building, Wrench, ClipboardList, ShieldCheck, ShieldX, Hash, ChevronRight, Pencil, XCircle, FileText, ExternalLink, Search, KeyRound, Eye, EyeOff } from 'lucide-react';
 import gacLogo from '@/assets/gac-logo.png';
 import dfskLogo from '@/assets/dfsk-logo.png';
@@ -26,6 +28,10 @@ import { resolveWarrantyCondition, evaluateWarranty, formatServiceCount, type Wa
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isInternalServiceType } from '@/lib/serviceTypes';
 
+// Radix Select cannot hold an empty value, so "no driver" needs a sentinel that can never
+// collide with a real driver id (those are UUIDs).
+const UNASSIGNED_DRIVER = '__none__';
+
 interface ClientData {
   id: string;
   full_name: string;
@@ -35,6 +41,8 @@ interface ClientData {
   address: string | null;
   city: string | null;
   state: string | null;
+  /** Fleet account: unlocks driver management in this portal. */
+  is_fleet?: boolean | null;
 }
 
 interface Vehicle {
@@ -245,6 +253,12 @@ const UserPortal = () => {
   const [fleetSearch, setFleetSearch] = useState('');
   const [fleetServiceFilter, setFleetServiceFilter] = useState<'todos' | 'vencido' | 'proximo' | 'al_dia'>('todos');
   const [fleetWarrantyFilter, setFleetWarrantyFilter] = useState<'todas' | 'activa' | 'vencida'>('todas');
+  // Driver roster for fleet clients: managed in the collapsible card and consumed by the
+  // per-vehicle picker below it.
+  const [driversOpen, setDriversOpen] = useState(false);
+  const [driversReloadKey, setDriversReloadKey] = useState(0);
+  const [portalDrivers, setPortalDrivers] = useState<DriverOption[]>([]);
+  const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(null);
 
   const handleSignOut = async () => {
     try { await signOut(); } catch (e) { console.error(e); }
@@ -489,6 +503,48 @@ const UserPortal = () => {
     return 'al_dia';
   };
 
+  // Driver roster for the per-vehicle picker. Only fleet clients have one.
+  useEffect(() => {
+    if (!clientData?.id || !clientData?.is_fleet) { setPortalDrivers([]); return; }
+    let cancelled = false;
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase as any)
+        .from('drivers')
+        .select('id, full_name, cedula, phone')
+        .eq('client_id', clientData.id)
+        .eq('is_active', true)
+        .order('full_name');
+      if (!cancelled) setPortalDrivers((data || []) as DriverOption[]);
+    })();
+    return () => { cancelled = true; };
+  }, [clientData?.id, clientData?.is_fleet, driversReloadKey]);
+
+  const handleAssignDriver = async (vehicleId: string, value: string) => {
+    const nextDriverId = value === UNASSIGNED_DRIVER ? null : value;
+    setAssigningVehicleId(vehicleId);
+    // `assign_vehicle_driver` rather than a direct UPDATE: RLS is row-level, so granting a
+    // client UPDATE on `vehicles` would also open mileage, plate, warranty and model. This
+    // RPC only ever writes `driver_id`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)('assign_vehicle_driver', {
+      p_vehicle_id: vehicleId,
+      p_driver_id: nextDriverId,
+    });
+    setAssigningVehicleId(null);
+
+    if (error) {
+      console.error(error);
+      toast.error('No se pudo asignar el chofer. Intentá de nuevo.');
+      return;
+    }
+    const driver = portalDrivers.find(d => d.id === nextDriverId) || null;
+    setVehicles(prev => prev.map(v => (
+      v.id === vehicleId ? { ...v, drivers: driver ? { full_name: driver.full_name } : null } : v
+    )));
+    toast.success(nextDriverId ? 'Chofer asignado' : 'Chofer removido');
+  };
+
   // Shared vehicle card used by both the simple list and the fleet-control view.
   // Passing showService renders the service-status badge (fleet view only).
   const renderVehicleCard = (v: Vehicle, showService = false) => {
@@ -546,6 +602,29 @@ const UserPortal = () => {
             <p className="mt-2 text-[10px] text-blue-600 font-medium">Vehículo de terceros — no aplica garantía GAC</p>
           ) : !w.active && w.reason && (
             <p className="mt-2 text-[10px] text-red-600 font-medium">⚠ {w.reason}</p>
+          )}
+
+          {/* Driver picker — fleet clients only, and only in the fleet view. `stopPropagation`
+              because the whole card is a click target that opens the vehicle detail. */}
+          {showService && clientData?.is_fleet && (
+            <div className="mt-2 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+              <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+              <Select
+                value={portalDrivers.find(d => d.full_name === v.drivers?.full_name)?.id ?? UNASSIGNED_DRIVER}
+                onValueChange={val => handleAssignDriver(v.id, val)}
+                disabled={assigningVehicleId === v.id || portalDrivers.length === 0}
+              >
+                <SelectTrigger className="h-7 text-xs">
+                  <SelectValue placeholder={portalDrivers.length === 0 ? 'Registrá choferes arriba' : 'Sin chofer asignado'} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNASSIGNED_DRIVER} className="text-xs">Sin chofer asignado</SelectItem>
+                  {portalDrivers.map(d => (
+                    <SelectItem key={d.id} value={d.id} className="text-xs">{driverLabel(d)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -1407,12 +1486,13 @@ const UserPortal = () => {
                 // Search across everything printed on the card, not just the plate. Nobody
                 // remembers 27 plates; they remember "the D1 2024" or "the one Moisés drives".
                 if (q) {
+                  // Plate, model and driver only — the three things someone actually
+                  // remembers about a vehicle. Year and color were noise: "2025" matched
+                  // half the fleet at once.
                   const haystack = [
                     v.plate,
                     v.vehicle_models?.brand,
                     v.vehicle_models?.name,
-                    v.year,
-                    v.color,
                     v.drivers?.full_name,
                   ].filter(Boolean).join(' ').toLowerCase();
                   // Every word must appear somewhere, so "dfsk d1 2024" matches a card whose
@@ -1457,12 +1537,40 @@ const UserPortal = () => {
                     </CardContent>
                   </Card>
 
+                  {/* Drivers — fleet clients manage their own roster from here, and the
+                      per-vehicle picker below is fed by it. */}
+                  {clientData?.is_fleet && clientData?.id && (
+                    <Card className="gac-shadow">
+                      <CardContent className="p-3 space-y-2">
+                        <button
+                          type="button"
+                          className="flex items-center justify-between w-full text-left"
+                          onClick={() => setDriversOpen(o => !o)}
+                        >
+                          <span className="text-sm font-semibold flex items-center gap-1.5">
+                            <User className="w-4 h-4" /> Choferes
+                          </span>
+                          <ChevronRight className={cn('w-4 h-4 text-muted-foreground transition-transform', driversOpen && 'rotate-90')} />
+                        </button>
+                        {driversOpen && (
+                          <DriversManager
+                            clientId={clientData.id}
+                            canEdit
+                            reloadKey={driversReloadKey}
+                            onDriversChanged={() => setDriversReloadKey(k => k + 1)}
+                            hint="Registrá aquí a tus choferes y luego asignalos a cada vehículo desde su tarjeta."
+                          />
+                        )}
+                      </CardContent>
+                    </Card>
+                  )}
+
                   {/* Plate search + filters */}
                   <div className="space-y-2">
                     <div className="relative">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder="Buscar por placa, modelo, año o chofer..."
+                        placeholder="Buscar por placa, modelo o chofer..."
                         className="pl-9 h-9 text-sm"
                         value={fleetSearch}
                         onChange={e => setFleetSearch(e.target.value)}

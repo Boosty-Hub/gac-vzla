@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, Star, X, Clock } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
+import ModelCombobox, { MANUAL_MODEL_VALUE } from '@/components/vehicles/ModelCombobox';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { buildWhatsAppReservationUrl } from '@/lib/whatsapp';
@@ -1609,24 +1610,15 @@ const AdminReservas = () => {
                       <div className="space-y-1"><Label>Cédula</Label><Input value={mCedula} onChange={e => setMCedula(e.target.value)} placeholder="V-12345678" /></div>
                       <div className="space-y-1">
                         <Label>Marca / Modelo *</Label>
-                        <Select
-                          value={mUseManualModel ? '__manual__' : mModelId}
-                          onValueChange={v => {
-                            if (v === '__manual__') { setMUseManualModel(true); setMModelId(''); }
+                        {/* Searchable: 269 active models make a plain Select unusable. */}
+                        <ModelCombobox
+                          models={vehicleModels}
+                          value={mUseManualModel ? MANUAL_MODEL_VALUE : mModelId}
+                          onChange={v => {
+                            if (v === MANUAL_MODEL_VALUE) { setMUseManualModel(true); setMModelId(''); }
                             else { setMUseManualModel(false); setMModelId(v); }
                           }}
-                        >
-                          <SelectTrigger><SelectValue placeholder="Seleccionar modelo" /></SelectTrigger>
-                          <SelectContent>
-                            {/* FIRST, not last: the catalog holds 269 active models, so at the
-                                bottom this option was effectively invisible — users reported
-                                not being able to type a model at all. */}
-                            <SelectItem value="__manual__" className="font-medium">Otro / escribir manualmente</SelectItem>
-                            {vehicleModels.map(m => (
-                              <SelectItem key={m.id} value={m.id}>{m.brand} {m.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        />
                       </div>
                       {mUseManualModel && (
                         <>

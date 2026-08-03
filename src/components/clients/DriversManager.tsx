@@ -26,9 +26,11 @@ interface DriversManagerProps {
   /** Notifies the parent that the roster changed, so vehicle dropdowns can refresh. */
   onDriversChanged?: () => void;
   canEdit: boolean;
+  /** Rendered above the list. Used by the client portal to explain what drivers are for. */
+  hint?: string;
 }
 
-const DriversManager = ({ clientId, reloadKey = 0, onDriversChanged, canEdit }: DriversManagerProps) => {
+const DriversManager = ({ clientId, reloadKey = 0, onDriversChanged, canEdit, hint }: DriversManagerProps) => {
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -153,6 +155,7 @@ const DriversManager = ({ clientId, reloadKey = 0, onDriversChanged, canEdit }: 
 
   return (
     <div className="space-y-2">
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
