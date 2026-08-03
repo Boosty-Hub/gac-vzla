@@ -200,6 +200,10 @@ const AdminClientes = () => {
 
   // Client detail preview dialog (Info / Vehículos / Encuesta tabs)
   const [detailClient, setDetailClient] = useState<Client | null>(null);
+  // Set when the dialog is opened from a survey row, so it lands on the Encuestas tab —
+  // that is what the user was looking at when they clicked.
+  const [surveyTabOnOpen, setSurveyTabOnOpen] = useState(false);
+  const [openingSurveyClient, setOpeningSurveyClient] = useState(false);
 
   const openVehicleDetail = async (v: Vehicle) => {
     setVDetailVehicle(v);
@@ -382,6 +386,32 @@ const AdminClientes = () => {
     openFromDeepLink();
     return () => { cancelled = true; };
   }, [clientParam]);
+
+  /**
+   * Opens the client-detail dialog from a row of the Satisfacción table.
+   *
+   * The survey row only carries `client_id`, and the dialog needs the full client record
+   * (plus the nested vehicles/users/pin the list query loads), so it is fetched on demand
+   * with the SAME select as the deep-link path rather than reusing the paginated `clients`
+   * state — the client behind a survey is very often not on the current page.
+   */
+  const openClientFromSurvey = async (clientId: string) => {
+    if (openingSurveyClient) return;
+    setOpeningSurveyClient(true);
+    const { data, error } = await (supabase as any)
+      .from('clients')
+      .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
+      .eq('id', clientId)
+      .maybeSingle();
+    setOpeningSurveyClient(false);
+
+    if (error || !data) {
+      toast.error('No se pudo abrir la ficha del cliente: no existe o no tienes acceso.');
+      return;
+    }
+    setSurveyTabOnOpen(true);
+    setDetailClient(data as Client);
+  };
 
   const toggleExpand = (clientId: string) => {
     if (expandedClient === clientId) {
@@ -1590,26 +1620,31 @@ const AdminClientes = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Client Detail Preview Dialog (Info / Vehículos / Encuesta) */}
+      </TabsContent>
+
+      <TabsContent value="satisfaccion">
+        <SatisfactionOverview onSelectClient={openClientFromSurvey} />
+      </TabsContent>
+
+      {/* Client Detail Preview Dialog (Info / Vehículos / Choferes / Encuestas).
+          Rendered OUTSIDE <TabsContent> on purpose: Radix unmounts inactive tab panels, so
+          keeping it inside "clientes" meant opening a client from the Satisfacción tab
+          rendered nothing at all. */}
       <ClientDetailDialog
         client={detailClient}
         open={!!detailClient}
         onOpenChange={(o) => {
           if (!o) {
             setDetailClient(null);
+            setSurveyTabOnOpen(false);
             // Clear/normalize the deep-link params on close so a back-navigation
             // does not immediately reopen the dialog.
             if (clientParam || tabParam) setSearchParams({}, { replace: true });
           }
         }}
         models={models}
-        defaultTab={tabParam === 'encuestas' ? 'encuesta' : undefined}
+        defaultTab={surveyTabOnOpen ? 'encuesta' : tabParam === 'encuestas' ? 'encuesta' : undefined}
       />
-      </TabsContent>
-
-      <TabsContent value="satisfaccion">
-        <SatisfactionOverview />
-      </TabsContent>
     </Tabs>
   );
 };

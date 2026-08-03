@@ -5,10 +5,26 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Smile, ThumbsUp, ClipboardList, AlertTriangle, Gauge } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Smile, ThumbsUp, ClipboardList, AlertTriangle, Gauge, Search, X, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SATISFACTION_ASPECTS, getSatisfactionLevel } from '@/lib/satisfaction';
 import { computeSurveyStats, computeFunnel, type SurveyResponseLike } from '@/lib/satisfactionStats';
+import {
+  ALL_VALUE,
+  DEFAULT_TABLE_FILTERS,
+  SCORE_BUCKETS,
+  STATUS_FILTERS,
+  deriveDealershipFacets,
+  deriveSalespersonFacets,
+  filterSurveyTable,
+  hasActiveFilters,
+  type ScoreBucket,
+  type StatusFilter,
+  type SurveyTableFilterState,
+} from './surveyTableFilters';
 
 // `satisfaction_surveys` / `satisfaction_responses` are not in the generated
 // `types.ts` yet (new tables, no regen) — all Supabase calls below use `as any`,
@@ -16,10 +32,16 @@ import { computeSurveyStats, computeFunnel, type SurveyResponseLike } from '@/li
 
 interface SurveyRow {
   id: string;
+  /** Null on legacy surveys created before `client_id` existed on this table. Those rows
+   *  render normally but cannot be opened — there is nothing to open. */
+  client_id?: string | null;
   client_name: string | null;
   salesperson: string | null;
   sold_plate: string | null;
   status: string;
+  /** Optional: the dashboard passes it, this component's own fetch adds it. Used as the
+   *  date shown for a survey that has not been answered yet. */
+  created_at?: string | null;
   responded_at: string | null;
   dealerships: { name: string } | null;
   // PostgREST returns this as a single object (or null), not an array: the
@@ -44,20 +66,28 @@ interface SatisfactionOverviewProps {
    * "Satisfacción" tab keeps working unchanged (uncontrolled fallback).
    */
   surveys?: SurveyRow[];
+  /**
+   * Called with the survey's `client_id` when a row in "Encuestas respondidas" is clicked.
+   * When omitted the rows stay inert, so this component keeps working anywhere it is
+   * embedded without a client-detail surface to open.
+   */
+  onSelectClient?: (clientId: string) => void;
 }
 
-const SatisfactionOverview = ({ compact, surveys: controlledSurveys }: SatisfactionOverviewProps) => {
+const SatisfactionOverview = ({ compact, surveys: controlledSurveys, onSelectClient }: SatisfactionOverviewProps) => {
   const isControlled = controlledSurveys !== undefined;
   const [fetchedSurveys, setFetchedSurveys] = useState<SurveyRow[]>([]);
   const [loading, setLoading] = useState(!isControlled);
+  const [filters, setFilters] = useState<SurveyTableFilterState>(DEFAULT_TABLE_FILTERS);
 
   useEffect(() => {
     if (isControlled) return; // parent owns the data — skip the internal fetch entirely
     const fetchSurveys = async () => {
       setLoading(true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data, error } = await (supabase as any)
         .from('satisfaction_surveys')
-        .select('id, client_name, salesperson, sold_plate, status, responded_at, dealerships(name), response:satisfaction_responses(*)')
+        .select('id, client_id, client_name, salesperson, sold_plate, status, created_at, responded_at, dealerships(name), response:satisfaction_responses(*)')
         // SALE surveys only — same reason as SatisfactionDashboard: a postventa survey's
         // answers live in `service_survey_responses`, so it would arrive with a null
         // `response` and be counted below as an unanswered sale survey.
@@ -82,6 +112,21 @@ const SatisfactionOverview = ({ compact, surveys: controlledSurveys }: Satisfact
   // `response` embeds as a single object (or null), never an array — see SurveyRow.
   const respondedSurveys = surveys.filter(s => s.response != null);
   const responses = respondedSurveys.map(s => s.response!);
+
+  // The table lists EVERY survey, not just the answered ones. Showing only answered rows
+  // made the list contradict the "Total encuestas" KPI directly above it (22 vs 2 rows)
+  // with nothing on screen explaining the gap; "sin responder" is itself information a
+  // manager needs to chase.
+  //
+  // Table filters apply ONLY to the table. The KPI cards and the per-aspect breakdown stay
+  // on the full set on purpose: those answer "how is the operation doing", and letting a
+  // name search rewrite the averages would make the numbers mean something different on
+  // every keystroke. Facets come from the unfiltered rows too, so choosing one filter never
+  // empties another's options.
+  const dealershipFacets = deriveDealershipFacets(surveys);
+  const salespersonFacets = deriveSalespersonFacets(surveys);
+  const visibleSurveys = filterSurveyTable(surveys, filters);
+  const filtersActive = hasActiveFilters(filters);
 
   const funnel = computeFunnel(surveys);
   const stats = computeSurveyStats(responses);
@@ -195,8 +240,90 @@ const SatisfactionOverview = ({ compact, surveys: controlledSurveys }: Satisfact
       {/* Responded surveys table — omitted in compact mode */}
       {!compact && (
         <Card className="gac-shadow">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-display">Encuestas respondidas</CardTitle>
+          <CardHeader className="pb-2 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-sm font-display">Encuestas</CardTitle>
+              <span className="text-[11px] text-muted-foreground shrink-0">
+                {filtersActive
+                  ? `${visibleSurveys.length} de ${surveys.length}`
+                  : `${surveys.length}`}
+              </span>
+            </div>
+
+            {surveys.length > 0 && (
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1 min-w-0">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input
+                    value={filters.search}
+                    onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
+                    placeholder="Buscar cliente o placa"
+                    className="h-8 pl-7 text-xs"
+                  />
+                </div>
+
+                <Select
+                  value={filters.dealership}
+                  onValueChange={v => setFilters(f => ({ ...f, dealership: v }))}
+                >
+                  <SelectTrigger className="h-8 text-xs sm:w-52"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE} className="text-xs">Todos los concesionarios</SelectItem>
+                    {dealershipFacets.map(d => (
+                      <SelectItem key={d} value={d} className="text-xs">{d}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={filters.salesperson}
+                  onValueChange={v => setFilters(f => ({ ...f, salesperson: v }))}
+                >
+                  <SelectTrigger className="h-8 text-xs sm:w-44"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE} className="text-xs">Todos los vendedores</SelectItem>
+                    {salespersonFacets.map(s => (
+                      <SelectItem key={s} value={s} className="text-xs">{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={filters.status}
+                  onValueChange={v => setFilters(f => ({ ...f, status: v as StatusFilter }))}
+                >
+                  <SelectTrigger className="h-8 text-xs sm:w-44"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {STATUS_FILTERS.map(s => (
+                      <SelectItem key={s.value} value={s.value} className="text-xs">{s.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={filters.score}
+                  onValueChange={v => setFilters(f => ({ ...f, score: v as ScoreBucket }))}
+                >
+                  <SelectTrigger className="h-8 text-xs sm:w-56"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {SCORE_BUCKETS.map(b => (
+                      <SelectItem key={b.value} value={b.value} className="text-xs">{b.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {filtersActive && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-xs shrink-0"
+                    onClick={() => setFilters(DEFAULT_RESPONDED_FILTERS)}
+                  >
+                    <X className="w-3.5 h-3.5 mr-1" /> Limpiar
+                  </Button>
+                )}
+              </div>
+            )}
           </CardHeader>
           <CardContent className="p-0">
             {loading ? (
@@ -204,10 +331,10 @@ const SatisfactionOverview = ({ compact, surveys: controlledSurveys }: Satisfact
                 <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">Cargando encuestas...</p>
               </div>
-            ) : respondedSurveys.length === 0 ? (
+            ) : surveys.length === 0 ? (
               <div className="p-8 text-center">
                 <Smile className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">Aún no hay encuestas respondidas</p>
+                <p className="text-sm text-muted-foreground">Aún no hay encuestas registradas</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -220,18 +347,38 @@ const SatisfactionOverview = ({ compact, surveys: controlledSurveys }: Satisfact
                       <TableHead className="text-xs">Placa</TableHead>
                       <TableHead className="text-xs">Fecha</TableHead>
                       <TableHead className="text-xs text-center">Puntaje general</TableHead>
+                      <TableHead className="w-8" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {respondedSurveys.map(s => {
-                      const r = s.response!;
-                      const score = Number(r.overall_score);
-                      const level = getSatisfactionLevel(Math.round(score));
+                    {visibleSurveys.map(s => {
+                      const r = s.response;
+                      const score = r ? Number(r.overall_score) : null;
+                      const level = score != null ? getSatisfactionLevel(Math.round(score)) : null;
+                      // Legacy surveys predate `client_id`, so there is no client to open.
+                      // Those rows stay inert instead of showing a dead affordance.
+                      const clientId = s.client_id ?? null;
+                      const openable = !!(onSelectClient && clientId);
                       return (
-                        <TableRow key={s.id}>
+                        <TableRow
+                          key={s.id}
+                          onClick={openable ? () => onSelectClient!(clientId!) : undefined}
+                          // Keyboard parity: a row that acts as a button must be reachable
+                          // and activatable without a mouse.
+                          tabIndex={openable ? 0 : undefined}
+                          role={openable ? 'button' : undefined}
+                          onKeyDown={openable ? (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              onSelectClient!(clientId!);
+                            }
+                          } : undefined}
+                          title={openable ? `Ver ficha de ${s.client_name || 'este cliente'}` : undefined}
+                          className={cn(openable && 'cursor-pointer hover:bg-muted/60 focus-visible:bg-muted/60 outline-none')}
+                        >
                           <TableCell className="text-xs font-medium">
                             <span className="flex items-center gap-1.5">
-                              {r.has_low_score && (
+                              {r?.has_low_score && (
                                 <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" title="Puntaje bajo en algún aspecto" />
                               )}
                               {s.client_name || '-'}
@@ -241,16 +388,38 @@ const SatisfactionOverview = ({ compact, surveys: controlledSurveys }: Satisfact
                           <TableCell className="text-xs">{s.salesperson || '-'}</TableCell>
                           <TableCell className="text-xs">{s.sold_plate || '-'}</TableCell>
                           <TableCell className="text-xs">
-                            {s.responded_at ? format(new Date(s.responded_at), 'dd/MM/yyyy') : '-'}
+                            {/* Answered → when they answered. Not answered → when it was
+                                created, so "how long has this been sitting" is visible. */}
+                            {s.responded_at
+                              ? format(new Date(s.responded_at), 'dd/MM/yyyy')
+                              : s.created_at
+                                ? format(new Date(s.created_at), 'dd/MM/yyyy')
+                                : '-'}
                           </TableCell>
                           <TableCell className="text-center">
-                            <Badge className="text-[10px] gap-1" style={{ backgroundColor: `hsl(${level.color} / 0.15)`, color: `hsl(${level.color})` }}>
-                              {score.toFixed(1)} {level.emoji}
-                            </Badge>
+                            {score != null && level ? (
+                              <Badge className="text-[10px] gap-1" style={{ backgroundColor: `hsl(${level.color} / 0.15)`, color: `hsl(${level.color})` }}>
+                                {score.toFixed(1)} {level.emoji}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                Sin responder
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="p-0 pr-2">
+                            {openable && <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
                           </TableCell>
                         </TableRow>
                       );
                     })}
+                    {visibleSurveys.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center text-xs text-muted-foreground py-8">
+                          Ninguna encuesta coincide con los filtros aplicados.
+                        </TableCell>
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </div>
