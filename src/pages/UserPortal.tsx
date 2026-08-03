@@ -47,6 +47,9 @@ interface Vehicle {
   warranty_active: boolean;
   purchase_date: string | null;
   vehicle_models: { name: string; brand: string; warranty_km: number | null; warranty_months: number | null; warranty_service_interval_km: number | null; is_manual: boolean | null } | null;
+  /** Assigned driver (fleet clients). Embeds as a single object or null — `vehicles.driver_id`
+   *  is a plain FK, so the relationship is to-one. */
+  drivers: { full_name: string } | null;
 }
 
 interface VehicleServiceRecord {
@@ -341,7 +344,7 @@ const UserPortal = () => {
       if (clientId) {
         const { data: vehs } = await supabase
           .from('vehicles')
-          .select('id, plate, year, color, mileage, vin, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual)')
+          .select('id, plate, year, color, mileage, vin, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual), drivers(full_name)')
           .eq('client_id', clientId)
           .eq('is_active', true)
           .order('year', { ascending: false });
@@ -502,6 +505,11 @@ const UserPortal = () => {
               <div>
                 <p className="font-semibold text-sm">{v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}</p>
                 <p className="text-xs text-muted-foreground">{v.plate} · {v.mileage.toLocaleString()} km{v.color ? ` · ${v.color}` : ''}</p>
+                {v.drivers?.full_name && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                    <User className="w-3 h-3 shrink-0" /> {v.drivers.full_name}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-1.5">
@@ -1396,7 +1404,21 @@ const UserPortal = () => {
                 return { v, w, serviceStatus: getServiceStatus(v, w) };
               });
               const filtered = enriched.filter(({ v, w, serviceStatus }) => {
-                if (q && !(v.plate || '').toLowerCase().includes(q)) return false;
+                // Search across everything printed on the card, not just the plate. Nobody
+                // remembers 27 plates; they remember "the D1 2024" or "the one Moisés drives".
+                if (q) {
+                  const haystack = [
+                    v.plate,
+                    v.vehicle_models?.brand,
+                    v.vehicle_models?.name,
+                    v.year,
+                    v.color,
+                    v.drivers?.full_name,
+                  ].filter(Boolean).join(' ').toLowerCase();
+                  // Every word must appear somewhere, so "dfsk d1 2024" matches a card whose
+                  // brand, model and year are three separate fields.
+                  if (!q.split(/\s+/).every(term => haystack.includes(term))) return false;
+                }
                 if (fleetServiceFilter !== 'todos' && serviceStatus !== fleetServiceFilter) return false;
                 if (fleetWarrantyFilter === 'activa' && !w.active) return false;
                 if (fleetWarrantyFilter === 'vencida' && w.active) return false;
@@ -1440,7 +1462,7 @@ const UserPortal = () => {
                     <div className="relative">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder="Buscar por placa..."
+                        placeholder="Buscar por placa, modelo, año o chofer..."
                         className="pl-9 h-9 text-sm"
                         value={fleetSearch}
                         onChange={e => setFleetSearch(e.target.value)}
