@@ -47,6 +47,11 @@ const MIN_YEAR = 1980;
 const CURRENT_YEAR = new Date().getFullYear();
 const MAX_YEAR = CURRENT_YEAR + 2;
 
+/** Live plate search: wait this long after the last keystroke before hitting the network. */
+const PLATE_LOOKUP_DEBOUNCE_MS = 350;
+/** Matches the 3-character floor enforced inside `staff_search_vehicles_by_plate`. */
+const MIN_PLATE_LOOKUP_LENGTH = 3;
+
 interface VehicleModelOption {
   id: string;
   brand: string;
@@ -56,10 +61,23 @@ interface VehicleModelOption {
 /** What a plate lookup found, per row. `null` = nothing found (a brand-new vehicle). */
 interface PlateMatch {
   vehicleId: string;
+  plate: string;
   modelId: string | null;
   modelLabel: string;
   year: number | null;
   ownerName: string | null;
+}
+
+/** Maps a row from either plate RPC — both expose the same field names. */
+function toPlateMatch(row: Record<string, unknown>): PlateMatch {
+  return {
+    vehicleId: String(row.vehicle_id),
+    plate: String(row.plate ?? ''),
+    modelId: row.model_id ? String(row.model_id) : null,
+    modelLabel: [row.model_brand, row.model_name].filter(Boolean).join(' ') || 'Modelo desconocido',
+    year: row.year != null ? Number(row.year) : null,
+    ownerName: row.client_full_name ? String(row.client_full_name) : null,
+  };
 }
 
 interface VehicleRow {
@@ -72,6 +90,9 @@ interface VehicleRow {
   lookingUp?: boolean;
   /** User confirmed the transfer of an existing vehicle to this buyer. */
   linkExisting?: boolean;
+  /** Partial-plate hits, shown while typing so the user can pick without recalling the
+   *  whole plate. Never includes the exact match — that gets its own card. */
+  suggestions?: PlateMatch[];
 }
 
 export interface WonProspectResult {
@@ -134,6 +155,15 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const attemptedPreselectRef = useRef<string | null>(null);
+  /** One pending debounce timer per vehicle row, keyed by row key. */
+  const lookupTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // Drop any timer still pending when the dialog unmounts, so a lookup never fires against
+  // a closed form.
+  useEffect(() => () => {
+    Object.values(lookupTimers.current).forEach(clearTimeout);
+    lookupTimers.current = {};
+  }, []);
 
   // vehicle_models (NOT the `prospect_models` table behind `useProspectModels`, which only
   // feeds the free-text "modelo de interés" suggestion list and has no relation to
@@ -201,8 +231,7 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   };
 
   /**
-   * Looks the plate up when the field loses focus (not on every keystroke — a plate is only
-   * meaningful once fully typed, and this hits the network).
+   * Looks the plate up as the user types.
    *
    * Goes through `staff_lookup_vehicle_by_plate`, a SECURITY DEFINER RPC, NOT a direct
    * `vehicles` read: RLS only lets a salesperson see vehicles tied to their own dealership's
@@ -212,33 +241,60 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   const lookupPlate = async (key: string, rawPlate: string) => {
     const plate = normalizeSoldPlate(rawPlate);
     if (!plate) {
-      updateRow(key, { match: undefined, linkExisting: false });
+      updateRow(key, { lookingUp: false, match: undefined, linkExisting: false });
       return;
     }
     updateRow(key, { lookingUp: true });
-    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-    const { data, error } = await (supabase.rpc as any)('staff_lookup_vehicle_by_plate', { p_plate: plate });
-    const found = (Array.isArray(data) ? data[0] : data) as Record<string, unknown> | undefined;
+    // Both run in one round trip: the exact hit decides whether the "vincular" card appears,
+    // the partial hits become suggestions for a plate the user only half remembers.
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    const [exact, partial] = await Promise.all([
+      (supabase.rpc as any)('staff_lookup_vehicle_by_plate', { p_plate: plate }),
+      (supabase.rpc as any)('staff_search_vehicles_by_plate', { p_query: plate }),
+    ]);
+    /* eslint-enable @typescript-eslint/no-explicit-any */
 
-    if (error || !found) {
-      // A lookup failure is treated as "not found": the RPC re-validates on submit anyway,
-      // so the worst case is the user sees the explicit error there instead of here.
-      if (error) console.error('Error looking up plate:', error);
-      updateRow(key, { lookingUp: false, match: null, linkExisting: false });
-      return;
-    }
+    const found = (Array.isArray(exact.data) ? exact.data[0] : exact.data) as Record<string, unknown> | undefined;
+    // A lookup failure is treated as "not found": the RPC re-validates on submit anyway, so
+    // the worst case is the user sees the explicit error there instead of here.
+    if (exact.error) console.error('Error looking up plate:', exact.error);
 
-    updateRow(key, {
-      lookingUp: false,
-      linkExisting: false,
-      match: {
-        vehicleId: String(found.vehicle_id),
-        modelId: found.model_id ? String(found.model_id) : null,
-        modelLabel: [found.model_brand, found.model_name].filter(Boolean).join(' ') || 'Modelo desconocido',
-        year: found.year != null ? Number(found.year) : null,
-        ownerName: found.client_full_name ? String(found.client_full_name) : null,
-      },
-    });
+    const match = (exact.error || !found) ? null : toPlateMatch(found);
+    const suggestions = ((partial.data || []) as Record<string, unknown>[])
+      .map(toPlateMatch)
+      // The exact hit already has its own card; repeating it below would be noise.
+      .filter(s => normalizeSoldPlate(s.plate) !== plate);
+
+    setRows(prev => prev.map(r => {
+      if (r.key !== key) return r;
+      // Typing races the network: a response for "AB12" can land AFTER the one for "AB123".
+      // Applying it would show the wrong vehicle. Drop anything whose plate is no longer
+      // what the field holds.
+      if (normalizeSoldPlate(r.plate) !== plate) return r;
+      return { ...r, lookingUp: false, linkExisting: false, match, suggestions };
+    }));
+  };
+
+  /**
+   * Debounced live search. Fires 350 ms after the last keystroke instead of on every one —
+   * a 7-character plate would otherwise mean 7 round trips, and the intermediate prefixes
+   * are never what the user means.
+   */
+  const handlePlateChange = (key: string, raw: string) => {
+    const plate = raw.toUpperCase();
+    // Any previous result is stale the moment the text changes.
+    updateRow(key, { plate, match: undefined, suggestions: undefined, linkExisting: false, lookingUp: false });
+
+    const pending = lookupTimers.current[key];
+    if (pending) clearTimeout(pending);
+
+    // Below 3 characters a plate is still being typed and would match half the fleet.
+    if (normalizeSoldPlate(plate).length < MIN_PLATE_LOOKUP_LENGTH) return;
+
+    lookupTimers.current[key] = setTimeout(() => {
+      delete lookupTimers.current[key];
+      lookupPlate(key, plate);
+    }, PLATE_LOOKUP_DEBOUNCE_MS);
   };
 
   /** Fills model and year from the found vehicle so the user does not retype what we know. */
@@ -337,12 +393,9 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
                   <Input
                     autoFocus={index === 0}
                     value={row.plate}
-                    onChange={e => updateRow(row.key, {
-                      plate: e.target.value.toUpperCase(),
-                      // Editing the plate invalidates whatever the previous lookup found.
-                      match: undefined,
-                      linkExisting: false,
-                    })}
+                    onChange={e => handlePlateChange(row.key, e.target.value)}
+                    // Search as you type; the blur is a safety net for a plate shorter than
+                    // the live-search threshold that the user finished on and tabbed away.
                     onBlur={e => lookupPlate(row.key, e.target.value)}
                     placeholder="Ej: AB123CD"
                     className="h-9 text-xs"
@@ -357,6 +410,31 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
                     <p className="text-[10px] text-muted-foreground">
                       Placa nueva: se registrará el vehículo con los datos de abajo.
                     </p>
+                  )}
+
+                  {/* Partial matches while typing. Shown only when there is no exact hit —
+                      once the plate is complete its own card takes over. */}
+                  {!row.lookingUp && !row.match && (row.suggestions?.length ?? 0) > 0 && (
+                    <div className="rounded-md border bg-muted/40 divide-y">
+                      <p className="text-[10px] text-muted-foreground px-2 py-1">
+                        Vehículos que coinciden con «{normalizeSoldPlate(row.plate)}»
+                      </p>
+                      {row.suggestions!.map(s => (
+                        <button
+                          key={s.vehicleId}
+                          type="button"
+                          onClick={() => handlePlateChange(row.key, s.plate)}
+                          className="w-full text-left px-2 py-1.5 hover:bg-muted transition-colors"
+                        >
+                          <p className="text-[11px] font-medium">
+                            {s.plate} · {s.modelLabel}{s.year ? ` ${s.year}` : ''}
+                          </p>
+                          {s.ownerName && (
+                            <p className="text-[10px] text-muted-foreground truncate">{s.ownerName}</p>
+                          )}
+                        </button>
+                      ))}
+                    </div>
                   )}
 
                   {/* Plate already exists in the system, under someone else. */}
