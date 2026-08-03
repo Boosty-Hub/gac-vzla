@@ -2263,13 +2263,33 @@ Deno.serve(async (req) => {
         // 8) Survey URL.
         const url = `${surveyBaseUrl.replace(/\/+$/, '')}/encuesta/${survey.token}`
 
-        // 9) PATCH ONLY the survey link CF — D4: no clear-on-empty sweep on this shared,
-        // permanent customer lead; every other field is left untouched.
+        // 9) PATCH the survey link CF and the client's name.
+        //
+        // The name is NOT decoration: the WhatsApp template greets with `[Cliente de la
+        // Cita]` (CF_RES.cliente_cita, the same field the reservation notification uses at
+        // :1841). When that field is empty Kommo substitutes the field's SAMPLE value, so
+        // every customer was being greeted as "Pedro Perez" — the placeholder left in the
+        // template. Verified on lead 66434611.
+        //
+        // Source is `clients.full_name`, deliberately NOT the Kommo lead or contact name:
+        // when `syncOneClientToConversation` matches a contact that already existed in
+        // Kommo by phone, that contact keeps its OWN old name (lead 66434611's contact is
+        // literally named "SantiagoDev"), so greeting from it would use a stale nickname.
+        // Our `clients` row is the authoritative record of who bought the car.
+        //
+        // Still honoring D4: this only ever WRITES values, never clears a field, and the
+        // two CFs touched are the only ones this flow owns.
+        const clientFullName = String((client as { full_name: string | null }).full_name ?? '').trim()
+        const surveyCfValues: Array<{ field_id: number; values: Array<{ value: string }> }> = [
+          { field_id: surveyLinkFieldId, values: [{ value: url }] },
+        ]
+        if (clientFullName) {
+          surveyCfValues.push({ field_id: CF_RES.cliente_cita, values: [{ value: clientFullName }] })
+        }
+
         const cfRes = await fetch(`${baseUrl}/leads/${leadId}`, {
           method: 'PATCH', headers: authHeaders,
-          body: JSON.stringify({
-            custom_fields_values: [{ field_id: surveyLinkFieldId, values: [{ value: url }] }],
-          }),
+          body: JSON.stringify({ custom_fields_values: surveyCfValues }),
         })
         if (!cfRes.ok) throw new Error(`Kommo error al escribir CF encuesta: ${await cfRes.text()}`)
 
