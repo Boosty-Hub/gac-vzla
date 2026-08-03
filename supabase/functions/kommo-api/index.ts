@@ -2124,20 +2124,23 @@ Deno.serve(async (req) => {
           // 'won' | 'repurchase' | 'service' — selects which Kommo field/stage pair to
           // drive, i.e. which SalesBot ends up answering.
           origin: string | null
+          // Snapshot of WHO this survey is about, taken when it was created. For a 'won'
+          // survey that is the prospect's name — the actual person who negotiated.
+          client_name: string | null
         }
         let survey: SurveyRow | null = null
 
         if (survey_id) {
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name')
             .eq('id', survey_id)
             .maybeSingle()
           survey = data as SurveyRow | null
         } else if (prospect_id) {
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name')
             .eq('prospect_id', prospect_id)
             .maybeSingle()
           survey = data as SurveyRow | null
@@ -2145,7 +2148,7 @@ Deno.serve(async (req) => {
           // client_id path (repurchase / resend): most recent survey for this client.
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name')
             .eq('client_id', client_id_in as string)
             .order('created_at', { ascending: false })
             .limit(1)
@@ -2271,15 +2274,23 @@ Deno.serve(async (req) => {
         // every customer was being greeted as "Pedro Perez" — the placeholder left in the
         // template. Verified on lead 66434611.
         //
-        // Source is `clients.full_name`, deliberately NOT the Kommo lead or contact name:
-        // when `syncOneClientToConversation` matches a contact that already existed in
-        // Kommo by phone, that contact keeps its OWN old name (lead 66434611's contact is
-        // literally named "SantiagoDev"), so greeting from it would use a stale nickname.
-        // Our `clients` row is the authoritative record of who bought the car.
+        // Source order matters, and it is NOT the Kommo lead or contact name: when
+        // `syncOneClientToConversation` matches a contact that already existed in Kommo by
+        // phone, that contact keeps its OWN old name (lead 66434611's contact is literally
+        // named "SantiagoDev"), so greeting from it would use a stale nickname.
+        //
+        // `survey.client_name` wins over `clients.full_name` because it is the snapshot of
+        // the PERSON this survey is about, while the client row may be a company. Real
+        // case: survey "Yurima Rodriguez" belongs to client "INVERSIONES ROSOVIC CA"
+        // (cédula J400060702 — a company RIF). Greeting a WhatsApp with the company name
+        // reads like a mailing; Yurima is who actually bought the car.
         //
         // Still honoring D4: this only ever WRITES values, never clears a field, and the
         // two CFs touched are the only ones this flow owns.
-        const clientFullName = String((client as { full_name: string | null }).full_name ?? '').trim()
+        const clientFullName = (
+          String(survey.client_name ?? '').trim()
+          || String((client as { full_name: string | null }).full_name ?? '').trim()
+        )
         const surveyCfValues: Array<{ field_id: number; values: Array<{ value: string }> }> = [
           { field_id: surveyLinkFieldId, values: [{ value: url }] },
         ]
