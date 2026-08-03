@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Plus, Trash2 } from 'lucide-react';
+import { findOrCreateManualModel, type ManualModelClient } from '@/lib/manualVehicleModel';
 import { deliverSatisfactionSurvey, describeSkippedDelivery } from './surveyDelivery';
 
 /**
@@ -44,10 +45,19 @@ interface RepurchaseClient {
   full_name: string;
 }
 
+// Sentinel for the "Otro / escribir manualmente" option — never a real vehicle_models.id
+// (those are UUIDs). Same convention as AdminClientes / AdminVehiculos / AdminReservas.
+const MANUAL_MODEL_VALUE = '__manual__';
+
 interface VehicleRow {
   key: string;
   plate: string;
+  /** A real `vehicle_models.id`, or MANUAL_MODEL_VALUE while the user types a brand/model
+   *  that is not in the commercial catalog. The sentinel is resolved to a real id right
+   *  before submit — the RPC only accepts real ids. */
   modelId: string;
+  manualBrand: string;
+  manualModel: string;
   year: string;
 }
 
@@ -62,13 +72,20 @@ interface RepurchaseDialogProps {
   onSuccess: () => void;
 }
 
-const makeEmptyRow = (): VehicleRow => ({ key: crypto.randomUUID(), plate: '', modelId: '', year: '' });
+const makeEmptyRow = (): VehicleRow => ({
+  key: crypto.randomUUID(), plate: '', modelId: '', manualBrand: '', manualModel: '', year: '',
+});
 
 const normalizePlate = (raw: string): string => raw.trim().replace(/\s+/g, ' ').toUpperCase();
 
 const isRowValid = (row: VehicleRow): boolean => {
   if (!normalizePlate(row.plate)) return false;
   if (!row.modelId) return false;
+  // A manual row is only complete once BOTH free-text fields are filled; the sentinel
+  // alone is not a model.
+  if (row.modelId === MANUAL_MODEL_VALUE && (!row.manualBrand.trim() || !row.manualModel.trim())) {
+    return false;
+  }
   const yearTrim = row.year.trim();
   if (!yearTrim) return false;
   const yearNum = Number(yearTrim);
@@ -173,13 +190,28 @@ export default function RepurchaseDialog({ client, open, onOpenChange, models, o
     setFormInfo(null);
     setSaving(true);
 
-    const payload = rows.map(r => ({
-      plate: normalizePlate(r.plate),
-      model_id: r.modelId,
-      year: Number(r.year.trim()),
-    }));
+    // Resolve any hand-typed model into a real `vehicle_models` row BEFORE calling the RPC,
+    // which validates `model_id` against the table and would reject the sentinel.
+    // `findOrCreateManualModel` reuses an existing `is_manual` row for the same brand/model
+    // instead of creating a duplicate on every repurchase.
+    let payload: Array<{ plate: string; model_id: string; year: number }>;
+    try {
+      payload = await Promise.all(rows.map(async r => ({
+        plate: normalizePlate(r.plate),
+        model_id: r.modelId === MANUAL_MODEL_VALUE
+          ? await findOrCreateManualModel(supabase as unknown as ManualModelClient, r.manualBrand, r.manualModel)
+          : r.modelId,
+        year: Number(r.year.trim()),
+      })));
+    } catch (err) {
+      setSaving(false);
+      console.error(err);
+      setFormError('No se pudo registrar el modelo escrito manualmente. Inténtalo de nuevo.');
+      return;
+    }
     const dealershipId = isAdmin ? null : (selectedDealership || null);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await (supabase as any).rpc('register_client_repurchase', {
       p_client_id: client.id,
       p_vehicles: payload,
@@ -284,6 +316,9 @@ export default function RepurchaseDialog({ client, open, onOpenChange, models, o
                             ))}
                           </SelectGroup>
                         ))}
+                        <SelectItem value={MANUAL_MODEL_VALUE} className="text-xs">
+                          Otro / escribir manualmente
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -298,6 +333,35 @@ export default function RepurchaseDialog({ client, open, onOpenChange, models, o
                     />
                   </div>
                 </div>
+
+                {row.modelId === MANUAL_MODEL_VALUE && (
+                  <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-2.5">
+                    <p className="text-[11px] text-amber-800 leading-snug">
+                      Vehículo de un tercero (no vendido por nosotros). Se registrará{' '}
+                      <strong>sin garantía</strong>: solo queda constancia del servicio realizado.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Marca *</Label>
+                        <Input
+                          value={row.manualBrand}
+                          onChange={e => updateRow(row.key, { manualBrand: e.target.value })}
+                          placeholder="Ej: Toyota"
+                          className="h-9 text-xs"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Modelo *</Label>
+                        <Input
+                          value={row.manualModel}
+                          onChange={e => updateRow(row.key, { manualModel: e.target.value })}
+                          placeholder="Ej: Corolla"
+                          className="h-9 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
