@@ -25,6 +25,9 @@ import { extractEdgeError } from '@/lib/edgeError';
 import { isRecurrentClient } from '@/lib/recompra';
 import { syncClientToKommo } from '@/lib/kommo';
 import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
+import { sanitizeSearchTerm } from '@/lib/vehicleSearch';
+import { useServiceSurveys } from '@/hooks/useServiceSurveys';
+import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 
 interface VehicleModel {
   id: string;
@@ -99,6 +102,8 @@ interface Client {
   // true = person registered only to invoice a one-off service — not a real
   // customer. Excluded from the list/count by default (see fetchClients).
   is_manual: boolean;
+  // true = fleet account (R8). Unlocks driver management for this client's vehicles.
+  is_fleet: boolean;
   created_at: string;
   profile_id: string | null;
   profiles: { pin_code: string | null } | null;
@@ -142,6 +147,7 @@ const AdminClientes = () => {
   const [formCity, setFormCity] = useState('');
   const [formState, setFormState] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
+  const [formIsFleet, setFormIsFleet] = useState(false);
   const [formPin, setFormPin] = useState('');
 
   // Vehicles
@@ -177,6 +183,8 @@ const AdminClientes = () => {
   const [vDetailOpen, setVDetailOpen] = useState(false);
   const [vDetailVehicle, setVDetailVehicle] = useState<Vehicle | null>(null);
   const [vDetailHistory, setVDetailHistory] = useState<ServiceRecord[]>([]);
+  // R7 — postventa survey result per service, shown inline in the vehicle history below.
+  const { surveys: vehicleServiceSurveys } = useServiceSurveys(vDetailHistory.map(h => h.id));
   const [vDetailLoading, setVDetailLoading] = useState(false);
 
   // Bulk selection
@@ -224,7 +232,53 @@ const AdminClientes = () => {
     }
 
     if (busqueda.trim()) {
-      query = query.or(`full_name.ilike.%${busqueda}%,cedula.ilike.%${busqueda}%,email.ilike.%${busqueda}%,phone.ilike.%${busqueda}%`);
+      // Patterns are double-quoted, following `src/lib/vehicleSearch.ts`: PostgREST's
+      // `or()` grammar is comma/parenthesis delimited, and quoting is what lets those
+      // characters survive inside a term. The previous unquoted version silently produced
+      // a malformed filter for a search like "Perez, Juan".
+      const q = sanitizeSearchTerm(busqueda);
+      if (q) {
+        const clauses = [
+          `full_name.ilike."%${q}%"`,
+          `cedula.ilike."%${q}%"`,
+          `email.ilike."%${q}%"`,
+          `phone.ilike."%${q}%"`,
+        ];
+
+        // R9 — plate/model and driver live on other tables. Resolve them to client ids
+        // first and fold the result into the SAME `or()`, so filtering, `count: 'exact'`
+        // and pagination all stay server-side and consistent. Doing it client-side would
+        // desync the page count exactly like the warranty filter already does.
+        const MAX_RELATED = 1000;
+        const [modelHits, vehicleHits, driverHits] = await Promise.all([
+          (supabase as any).from('vehicle_models').select('id').or(`name.ilike."%${q}%",brand.ilike."%${q}%"`).limit(MAX_RELATED),
+          (supabase as any).from('vehicles').select('client_id').or(`plate.ilike."%${q}%",vin.ilike."%${q}%"`).limit(MAX_RELATED),
+          (supabase as any).from('drivers').select('client_id').eq('is_active', true).or(`full_name.ilike."%${q}%",cedula.ilike."%${q}%"`).limit(MAX_RELATED),
+        ]);
+
+        const relatedClientIds = new Set<string>();
+        for (const row of (vehicleHits.data || []) as { client_id: string | null }[]) {
+          if (row.client_id) relatedClientIds.add(row.client_id);
+        }
+        for (const row of (driverHits.data || []) as { client_id: string | null }[]) {
+          if (row.client_id) relatedClientIds.add(row.client_id);
+        }
+
+        // Model-name matches need one more hop: models -> vehicles -> clients.
+        const modelIds = ((modelHits.data || []) as { id: string }[]).map(m => m.id);
+        if (modelIds.length > 0) {
+          const { data: byModel } = await (supabase as any)
+            .from('vehicles').select('client_id').in('model_id', modelIds).limit(MAX_RELATED);
+          for (const row of (byModel || []) as { client_id: string | null }[]) {
+            if (row.client_id) relatedClientIds.add(row.client_id);
+          }
+        }
+
+        if (relatedClientIds.size > 0) {
+          clauses.push(`id.in.(${Array.from(relatedClientIds).join(',')})`);
+        }
+        query = query.or(clauses.join(','));
+      }
     }
 
     if (filterStatus !== 'todos') {
@@ -345,6 +399,7 @@ const AdminClientes = () => {
     setEditingClient(null);
     setFormName(''); setFormCedula(''); setFormPhone(''); setFormEmail('');
     setFormAddress(''); setFormCity(''); setFormState(''); setFormIsActive(true);
+    setFormIsFleet(false);
     setFormPin('');
     setClientDialogOpen(true);
   };
@@ -359,6 +414,7 @@ const AdminClientes = () => {
     setFormCity(client.city || '');
     setFormState(client.state || '');
     setFormIsActive(client.is_active);
+    setFormIsFleet(!!client.is_fleet);
     setFormPin(client.profiles?.pin_code || '');
     setClientDialogOpen(true);
   };
@@ -384,6 +440,10 @@ const AdminClientes = () => {
       city: formCity.trim() || null,
       state: formState.trim() || null,
       is_active: formIsActive,
+      // Optional flag (R8). It gates the assigned-driver field on this client's vehicles;
+      // it is NOT what prevents duplicate surveys — `fn_claim_survey_slot` already
+      // rate-limits every client to one survey per 24h regardless of this value.
+      is_fleet: formIsFleet,
     };
 
     if (editingClient) {
@@ -675,7 +735,7 @@ const AdminClientes = () => {
       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
         <div className="relative col-span-2 sm:flex-1 sm:min-w-[180px] sm:max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <Input placeholder="Buscar nombre, cédula, correo, teléfono..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
+          <Input placeholder="Buscar nombre, cédula, correo, teléfono, placa, modelo o chofer..." className="pl-8 h-8 text-xs" value={busqueda} onChange={e => setBusqueda(e.target.value)} />
         </div>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
           <SelectTrigger className="h-8 text-xs sm:w-[120px]"><SelectValue placeholder="Estado" /></SelectTrigger>
@@ -1131,6 +1191,16 @@ const AdminClientes = () => {
               <Switch checked={formIsActive} onCheckedChange={setFormIsActive} />
             </div>
 
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Cliente de flota</Label>
+                <p className="text-xs text-muted-foreground">
+                  Habilita el registro de choferes y su asignación a cada vehículo
+                </p>
+              </div>
+              <Switch checked={formIsFleet} onCheckedChange={setFormIsFleet} />
+            </div>
+
             {editingClient && (
               <div className="space-y-2 rounded-lg border p-3">
                 <div className="flex items-center gap-2">
@@ -1314,6 +1384,7 @@ const AdminClientes = () => {
                               <p className="text-green-700 whitespace-pre-wrap">{h.service_notes}</p>
                             </div>
                           )}
+                          <ServiceSurveyInline survey={vehicleServiceSurveys.get(h.id)} />
                         </div>
                       );
                     })}

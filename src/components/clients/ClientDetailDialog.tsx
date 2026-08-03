@@ -8,10 +8,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus, User } from 'lucide-react';
 import { phoneMatchSuffix } from '@/lib/phone';
 import { normalizeSoldPlate } from '@/lib/plate';
-import { SATISFACTION_ASPECTS, getSatisfactionLevel, firstMeaningfulNameToken } from '@/lib/satisfaction';
+import { getAspectsForOrigin, getSatisfactionLevel, firstMeaningfulNameToken, SURVEY_ORIGIN_LABEL } from '@/lib/satisfaction';
+import { driverLabel, type DriverOption } from '@/lib/drivers';
+import DriversManager from './DriversManager';
 import type { SurveyResponsePdfProps } from '@/components/satisfaction/SurveyResponsePdf';
 import RepurchaseDialog, { type RepurchaseVehicleModelOption } from './RepurchaseDialog';
 import { deliverSatisfactionSurvey, describeSkippedDelivery } from './surveyDelivery';
@@ -28,6 +31,9 @@ export interface Client {
   phone: string | null;
   email: string | null;
   cedula: string | null;
+  /** Optional (R8) — absent on callers that haven't been updated to select it, in which
+   *  case the driver features simply stay hidden rather than breaking. */
+  is_fleet?: boolean | null;
 }
 
 interface DialogVehicle {
@@ -37,38 +43,49 @@ interface DialogVehicle {
   vin: string | null;
   color: string | null;
   mileage: number;
+  driver_id: string | null;
   vehicle_models: { brand: string; name: string } | null;
 }
 
 // `satisfaction_surveys` / `satisfaction_responses` are not in the generated
 // `types.ts` yet (new tables, no regen) — matches this project's established
 // `as any` convention for un-typed tables (see SatisfactionOverview.tsx).
-interface SurveyResponseRow {
-  q_atencion_digital: number;
-  q_bienvenida_presencial: number;
-  q_negociacion_asesoria: number;
-  q_financiamiento_tramites: number;
-  q_experiencia_entrega: number;
+/**
+ * A survey's answers, keyed by the DB column base name (`q_${column}`). Sale and service
+ * surveys have DIFFERENT column sets, living in different tables, so this is indexed
+ * rather than a fixed shape — the aspect list for the row's origin says which keys to read.
+ */
+type SurveyResponseRow = Record<string, unknown> & {
   nps_recomienda: boolean | null;
   comment: string | null;
   overall_score: number | string;
   has_low_score: boolean;
-}
+};
 
 interface SurveyRow {
   id: string;
   salesperson: string | null;
   sold_plate: string | null;
   status: string;
-  // 'won' | 'repurchase' — see satisfaction_surveys.origin (design.md D3).
+  // 'won' | 'repurchase' | 'service' — see satisfaction_surveys.origin.
   origin: string;
   suppressed_reason: string | null;
   created_at: string;
   responded_at: string | null;
   dealerships: { name: string } | null;
-  // PostgREST returns this as a single object (or null), not an array — the
-  // relationship is to-one because satisfaction_responses.survey_id is UNIQUE.
+  // PostgREST returns each as a single object (or null), not an array — both
+  // *_responses tables have a UNIQUE survey_id.
+  //
+  // A survey has answers in EXACTLY ONE of these: sale answers in `satisfaction_responses`,
+  // postventa answers in `service_survey_responses`. Both are selected because a client's
+  // history mixes the two kinds, and `resolveResponse` picks whichever is present.
   response: SurveyResponseRow | null;
+  service_response: SurveyResponseRow | null;
+}
+
+/** The answers for this survey, whichever table they landed in. */
+function resolveResponse(survey: SurveyRow): SurveyResponseRow | null {
+  return survey.origin === 'service' ? survey.service_response : survey.response;
 }
 
 interface ClientDetailDialogProps {
@@ -84,10 +101,9 @@ interface ClientDetailDialogProps {
   defaultTab?: 'info' | 'vehiculos' | 'encuesta';
 }
 
-const ORIGIN_LABEL: Record<string, string> = {
-  won: 'Compra',
-  repurchase: 'Recompra',
-};
+// Radix Select cannot hold an empty-string value, so "no driver" needs a sentinel that can
+// never collide with a real driver id (those are UUIDs).
+const UNASSIGNED_DRIVER = '__none__';
 
 /** Builds a wa.me link from a local-format Venezuelan phone, mirroring the
  *  normalization used elsewhere in this module (AdminClientes.tsx's own
@@ -112,12 +128,19 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   const [resending, setResending] = useState(false);
   const [repurchaseOpen, setRepurchaseOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [drivers, setDrivers] = useState<DriverOption[]>([]);
+  const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(null);
+
+  // R5 is scoped to fleet clients: a single-vehicle owner drives their own car, so showing
+  // a driver picker there is noise. `is_fleet` is optional on the Client interface, so a
+  // caller that hasn't been updated simply never shows these controls.
+  const isFleet = !!client?.is_fleet;
 
   useEffect(() => {
     if (!open || !client) return;
 
     let cancelled = false;
-    const SURVEY_SELECT = 'id, salesperson, sold_plate, status, origin, suppressed_reason, created_at, responded_at, dealerships(name), response:satisfaction_responses(*)';
+    const SURVEY_SELECT = 'id, salesperson, sold_plate, status, origin, suppressed_reason, created_at, responded_at, dealerships(name), response:satisfaction_responses(*), service_response:service_survey_responses(*)';
 
     // Every survey linked to this client (repurchases can add more than one over
     // time), newest first. Falls back to the legacy best-effort match cascade only
@@ -194,9 +217,9 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
 
       // Vehicles must resolve first — the plate-match step (cascade step 1)
       // needs the client's vehicle plates before it can query.
-      const { data: vehiclesData, error: vehiclesError } = await supabase
+      const { data: vehiclesData, error: vehiclesError } = await (supabase as any)
         .from('vehicles')
-        .select('id, year, plate, vin, color, mileage, vehicle_models(brand, name)')
+        .select('id, year, plate, vin, color, mileage, driver_id, vehicle_models(brand, name)')
         .eq('client_id', client.id)
         .order('created_at', { ascending: false });
       if (cancelled) return;
@@ -222,22 +245,73 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
     return () => { cancelled = true; };
   }, [open, client, reloadKey]);
 
+  // Driver roster for the per-vehicle picker. Deliberately a separate effect from
+  // `fetchDetail`: adding a driver must refresh the dropdown without refetching vehicles
+  // and re-running the survey match cascade.
+  const [driversKey, setDriversKey] = useState(0);
+  useEffect(() => {
+    if (!open || !client || !isFleet) {
+      setDrivers([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await (supabase as any)
+        .from('drivers')
+        .select('id, full_name, cedula, phone')
+        .eq('client_id', client.id)
+        .eq('is_active', true)
+        .order('full_name');
+      if (cancelled) return;
+      if (error) console.error('Error loading drivers:', error);
+      setDrivers((data || []) as DriverOption[]);
+    })();
+    return () => { cancelled = true; };
+  }, [open, client, isFleet, driversKey]);
+
+  const handleAssignDriver = async (vehicleId: string, value: string) => {
+    const nextDriverId = value === UNASSIGNED_DRIVER ? null : value;
+    setAssigningVehicleId(vehicleId);
+    const { data, error } = await (supabase as any)
+      .from('vehicles')
+      .update({ driver_id: nextDriverId })
+      .eq('id', vehicleId)
+      .select('id');
+    setAssigningVehicleId(null);
+
+    if (error) {
+      console.error(error);
+      toast.error('Error al asignar el chofer');
+      return;
+    }
+    // RLS rejects by matching zero rows, not by erroring — without this check the UI would
+    // show the new driver while the DB kept the old one.
+    if (!data || data.length === 0) {
+      toast.error('No se pudo asignar el chofer: tu usuario no tiene permisos sobre este vehículo.');
+      return;
+    }
+
+    setVehicles(prev => prev.map(v => (v.id === vehicleId ? { ...v, driver_id: nextDriverId } : v)));
+    toast.success(nextDriverId ? 'Chofer asignado' : 'Chofer removido');
+  };
+
   const buildPdfProps = (survey: SurveyRow): SurveyResponsePdfProps | null => {
-    if (!client || !survey.response) return null;
-    const response = survey.response;
+    const response = resolveResponse(survey);
+    if (!client || !response) return null;
     return {
       clientName: client.full_name,
       dealershipName: survey.dealerships?.name ?? null,
       salesperson: survey.salesperson,
       soldPlate: survey.sold_plate,
       respondedAt: survey.responded_at ? format(new Date(survey.responded_at), 'dd/MM/yyyy') : '-',
-      responses: SATISFACTION_ASPECTS.map(aspect => ({
+      responses: getAspectsForOrigin(survey.origin).map(aspect => ({
         key: aspect.key,
-        score: Number(response[`q_${aspect.column}` as keyof SurveyResponseRow]),
+        score: Number(response[`q_${aspect.column}`]),
       })),
       npsRecomienda: response.nps_recomienda,
       comment: response.comment,
       overallScore: Number(response.overall_score),
+      origin: survey.origin,
     };
   };
 
@@ -280,7 +354,8 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
             <TabsList>
               <TabsTrigger value="info">Info</TabsTrigger>
               <TabsTrigger value="vehiculos">Vehículos</TabsTrigger>
-              <TabsTrigger value="encuesta">Encuesta</TabsTrigger>
+              {isFleet && <TabsTrigger value="choferes">Choferes</TabsTrigger>}
+              <TabsTrigger value="encuesta">Encuestas</TabsTrigger>
             </TabsList>
 
             {/* Info tab */}
@@ -308,6 +383,11 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                   </div>
                 </div>
               </div>
+              {isFleet && (
+                <Badge variant="outline" className="text-[10px] gap-1">
+                  <User className="w-3 h-3" /> Cliente de flota
+                </Badge>
+              )}
             </TabsContent>
 
             {/* Vehículos tab */}
@@ -329,7 +409,7 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
               ) : (
                 <div className="space-y-1.5">
                   {vehicles.map(v => (
-                    <div key={v.id} className="flex items-center justify-between bg-muted/50 rounded-md p-2 border">
+                    <div key={v.id} className="bg-muted/50 rounded-md p-2 border space-y-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <Car className="w-4 h-4 text-muted-foreground shrink-0" />
                         <div className="min-w-0">
@@ -341,11 +421,50 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                           </p>
                         </div>
                       </div>
+
+                      {/* R5 — assigned driver. A Select, never a text input: free text is
+                          exactly what produced "Moisés" / "moisés" / "Moisés López" as three
+                          separate people. New drivers are added from the Choferes tab. */}
+                      {isFleet && (
+                        <div className="flex items-center gap-2">
+                          <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                          <Select
+                            value={v.driver_id ?? UNASSIGNED_DRIVER}
+                            onValueChange={val => handleAssignDriver(v.id, val)}
+                            disabled={assigningVehicleId === v.id || drivers.length === 0}
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue
+                                placeholder={drivers.length === 0 ? 'Sin choferes registrados' : 'Sin chofer asignado'}
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={UNASSIGNED_DRIVER} className="text-xs">Sin chofer asignado</SelectItem>
+                              {drivers.map(d => (
+                                <SelectItem key={d.id} value={d.id} className="text-xs">
+                                  {driverLabel(d)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
               )}
             </TabsContent>
+
+            {/* Choferes tab — fleet clients only (R5 / R9) */}
+            {isFleet && (
+              <TabsContent value="choferes" className="space-y-2">
+                <DriversManager
+                  clientId={client.id}
+                  canEdit={canAddVehicle}
+                  onDriversChanged={() => setDriversKey(k => k + 1)}
+                />
+              </TabsContent>
+            )}
 
             {/* Encuesta tab */}
             <TabsContent value="encuesta" className="space-y-3">
@@ -390,7 +509,8 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                 </div>
               ) : (
                 surveys.map(survey => {
-                  const response = survey.response;
+                  const response = resolveResponse(survey);
+                  const surveyAspects = getAspectsForOrigin(survey.origin);
                   const overallScore = response ? Number(response.overall_score) : null;
                   const overallLevel = overallScore != null ? getSatisfactionLevel(Math.round(overallScore)) : null;
                   const pdfProps = buildPdfProps(survey);
@@ -400,7 +520,7 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                       <CardContent className="p-3 space-y-3">
                         <div className="flex items-center justify-between gap-2">
                           <Badge variant="outline" className="text-[10px]">
-                            {ORIGIN_LABEL[survey.origin] || survey.origin}
+                            {SURVEY_ORIGIN_LABEL[survey.origin] || survey.origin}
                           </Badge>
                           <span className="text-[10px] text-muted-foreground">
                             {format(new Date(survey.created_at), 'dd/MM/yyyy')}
@@ -419,9 +539,8 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                           </div>
                         ) : (
                           <>
-                            {SATISFACTION_ASPECTS.map(aspect => {
-                              const field = `q_${aspect.column}` as keyof SurveyResponseRow;
-                              const score = Number(response[field]);
+                            {surveyAspects.map(aspect => {
+                              const score = Number(response[`q_${aspect.column}`]);
                               const level = getSatisfactionLevel(score);
                               const widthPct = Math.max(0, Math.min(100, (score / 5) * 100));
                               return (
