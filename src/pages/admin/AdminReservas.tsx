@@ -855,7 +855,11 @@ const AdminReservas = () => {
     if (!completingRes) return;
     if (!serviceNotes.trim()) { toast.error('Describe lo que se realizó en el servicio'); return; }
     setCompleting(true);
-    const { error } = await supabase.from('reservations').update({
+    // `.select()` is required, not cosmetic: when an RLS policy rejects the row PostgREST
+    // updates zero rows and returns 204 with no error. Without reading the affected rows
+    // back, an unauthorized user gets a green "Servicio completado" toast on an
+    // appointment that never actually closed.
+    const { data: updated, error } = await supabase.from('reservations').update({
       status: 'completada',
       service_notes: serviceNotes.trim(),
       technical_report_url: technicalReportUrl || null,
@@ -864,8 +868,11 @@ const AdminReservas = () => {
       internal_notes: completeInternalNotes.trim() || null,
       // `recommendation` isn't in generated Supabase types yet (see migration 20260721140000).
       recommendation: completeRecommendation.trim() || null,
-    } as any).eq('id', completingRes.id);
+    } as any).eq('id', completingRes.id).select('id');
     if (error) { toast.error('Error al completar'); console.error(error); }
+    else if (!updated || updated.length === 0) {
+      toast.error('No se pudo cerrar la cita: tu usuario no tiene permisos sobre este concesionario. Contacta a un administrador.');
+    }
     else {
       toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations();
       if (completingRes.kommo_lead_id)

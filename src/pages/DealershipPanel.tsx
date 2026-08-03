@@ -577,14 +577,21 @@ const DealershipPanel = () => {
       reportUrl = url;
     }
 
-    const { error } = await supabase.from('reservations').update({
+    // `.select()` is required, not cosmetic: when an RLS policy rejects the row PostgREST
+    // updates zero rows and returns 204 with no error. Without reading the affected rows
+    // back, an unauthorized user gets a green "Servicio completado" toast on an
+    // appointment that never actually closed.
+    const { data: updated, error } = await supabase.from('reservations').update({
       status: 'completada',
       service_notes: serviceNotes.trim(),
       completed_at: new Date().toISOString(),
       technical_report_url: reportUrl,
       satisfaction_rating: satisfactionRating,
-    }).eq('id', completingRes.id);
+    }).eq('id', completingRes.id).select('id');
     if (error) { toast.error('Error al completar'); console.error(error); }
+    else if (!updated || updated.length === 0) {
+      toast.error('No se pudo cerrar la cita: tu usuario no tiene permisos sobre este concesionario. Contacta a un administrador.');
+    }
     else { toast.success('Servicio completado'); setCompleteOpen(false); fetchReservations(); }
     setCompleting(false);
   };

@@ -11,9 +11,15 @@ interface Dealership {
 
 /**
  * Resolves which dealership(s) the current user has access to.
- * - concesionario role: only their linked dealership via dealership_users
  * - vendedor role: all active dealerships (can pick any)
  * - admin/superadmin: all active dealerships (with selector)
+ * - everything else (concesionario, Asesor de Servicio, any future scoped role):
+ *   only their linked dealerships via `dealership_users`
+ *
+ * A scoped user with no `dealership_users` row resolves to an empty list. That is not
+ * just a UI inconvenience: the RLS policies on `reservations` gate on
+ * `dealership_id = ANY(current_user_dealership_ids())`, so such a user can neither read
+ * nor update ANY row. Assigning the dealership is mandatory when creating these accounts.
  */
 export function useDealershipAccess() {
   const { user, role } = useAuth();
@@ -56,7 +62,7 @@ export function useDealershipAccess() {
           setSelectedDealership(defaultDealer.id);
         }
       } else {
-        // Concesionario: get linked dealership
+        // Concesionario / Asesor de Servicio: only their linked dealerships
         const { data: links } = await supabase
           .from('dealership_users')
           .select('dealership_id, dealerships(id, name, state, bays)')
