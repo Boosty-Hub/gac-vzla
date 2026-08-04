@@ -7,6 +7,13 @@ import { supabase } from '@/integrations/supabase/client';
  *
  * One query for the whole history list, not one per row — a vehicle with 30 services would
  * otherwise fire 30 requests to render a single dialog.
+ *
+ * EN PAUSA (2026-08-04). La postventa pertenece a un proyecto mayor que aun no arranca, asi
+ * que el trigger que crea estas encuestas esta desactivado
+ * (migracion 20260804140000_pause_postventa_survey.sql). Este hook queda intacto y devuelve
+ * un Map vacio; `ServiceSurveyInline` no renderiza nada sin encuesta, de modo que el
+ * historial del vehiculo se ve exactamente igual que antes de la funcion. Al reactivar el
+ * trigger, esto vuelve a poblarse solo.
  */
 
 export interface ServiceSurveySummary {
@@ -53,6 +60,9 @@ export function useServiceSurveys(reservationIds: string[]) {
         .from('satisfaction_surveys')
         .select('id, reservation_id, status, responded_at, response:service_survey_responses(*)')
         .eq('origin', 'service')
+        // A suppressed survey must never render. It was withdrawn on purpose — showing it as
+        // "enviada, sin responder" would blame the customer for silence we caused.
+        .is('suppressed_reason', null)
         .in('reservation_id', ids);
 
       if (cancelled) return;
