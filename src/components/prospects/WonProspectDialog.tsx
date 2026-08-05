@@ -26,6 +26,13 @@ import { deliverSatisfactionSurvey, type DeliverSurveyOutcome } from '@/componen
  * call, which creates/resolves the client, inserts the vehicle(s), and creates (or
  * suppresses, per the 24h rate limit) exactly one satisfaction survey per purchase.
  *
+ * `survey_id` comes back NULL when the prospect was ALREADY `ganado` — the survey trigger
+ * only fires on a real status transition, so a prospect imported as won, or one getting its
+ * plate captured after the fact, never had a survey to begin with. That is a normal, silent
+ * outcome: the win is still confirmed, no delivery is attempted, and no survey is created
+ * retroactively (its `eligible_at` would already be in the past, so the sweep would fire a
+ * "how was your purchase?" message about a sale closed weeks ago).
+ *
  * `register_won_prospect` is brand new (not yet applied to the live DB by the sibling
  * migration slice) and therefore absent from the generated `src/integrations/supabase/
  * types.ts`. Follows the established `as any` convention used elsewhere in this codebase
@@ -333,8 +340,15 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
       return;
     }
     const row = Array.isArray(data) ? data[0] : data;
+    // No error + no row means the RPC committed and returned nothing — the win IS written.
+    // Telling the user to retry would be wrong twice over: it hides a sale that succeeded,
+    // and re-confirming a linked plate drags the vehicle between clients on every attempt.
+    // `register_won_prospect` now always returns exactly one row (migration
+    // 20260805120000), so this is a last-resort guard, not an expected path.
     if (!row) {
-      setFormError('No se pudo confirmar la venta. Inténtalo de nuevo.');
+      setFormError(
+        'La venta se registró, pero no se pudo leer la confirmación. Actualiza la página para verla — no vuelvas a confirmar.'
+      );
       return;
     }
 
