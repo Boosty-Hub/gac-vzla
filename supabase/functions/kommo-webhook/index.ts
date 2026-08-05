@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { matchDealershipByName } from '../_shared/dealershipMatch.ts'
 
 // ─── Shared constants (mirrored from kommo-api) ───────────────────────────────
 const CF = {
@@ -244,73 +245,14 @@ const CONCESIONARIO_KEYWORD: Record<number, string> = {
 }
 
 // ─── Dynamic dealership resolution (label-based, no redeploy needed) ───────────
-// Normaliza para comparar nombres: minúsculas, sin acentos, solo alfanumérico.
-function normalizeText(s: string): string {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ').trim()
-}
-
-// Distancia de edición con transposiciones (OSA) — tolera typos como "tecnho"/"techno"
-// (una transposición = distancia 1, no 2 como en Levenshtein clásico).
-function editDistance(a: string, b: string): number {
-  const m = a.length, n = b.length
-  if (!m) return n
-  if (!n) return m
-  const d: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
-  for (let i = 0; i <= m; i++) d[i][0] = i
-  for (let j = 0; j <= n; j++) d[0][j] = j
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1)
-      }
-    }
-  }
-  return d[m][n]
-}
-
-// Palabras genéricas que NO distinguen un concesionario de otro (marca, forma jurídica,
-// tipo de entidad, ciudad/estado que aparecen en muchos labels). Si las contáramos,
-// "GAC Valencia" haría match con "GAC Lecherías" sólo por compartir "gac".
-const GENERIC_TOKENS = new Set([
-  'gac', 'dfsk', 'shineray', 'shinerey', 'motor', 'motors', 'motores',
-  'automotores', 'auto', 'car', 'cars', 'group', 'grupo', 'centro', 'de', 'del',
-  'servicio', 'servicios', 'la', 'el', 'los', 'las', 'ca', 'sa', 'soy',
-  'exhibicion', 'exhibition', 'concesionario', 'caracas', 'anzoategui',
-])
-
-// Tokens distintivos de un nombre: normalizados, sin duplicados y sin palabras genéricas.
-// Si tras quitar las genéricas no queda nada, se usan todos los tokens (caso degenerado).
-function distinctiveTokens(s: string): string[] {
-  const all = [...new Set(normalizeText(s).split(' ').filter(Boolean))]
-  const distinctive = all.filter(t => !GENERIC_TOKENS.has(t))
-  return distinctive.length ? distinctive : all
-}
-
-// Dos tokens "iguales" si coinciden exacto o difieren por un typo (≥4 chars, distancia ≤1).
-function tokensMatch(x: string, y: string): boolean {
-  if (x === y) return true
-  return Math.min(x.length, y.length) >= 4 && editDistance(x, y) <= 1
-}
-
-// Score de similitud 0..1 entre dos nombres, basado SÓLO en tokens distintivos.
-// Denominador = min(#tokens) para premiar cuando el label es un superconjunto del nombre
-// (ej. "GAC Valencia (Valencia) - GAC" vs "GAC Valencia"). Requiere ≥1 token distintivo en común.
-function nameMatchScore(a: string, b: string): number {
-  const ta = distinctiveTokens(a), tb = distinctiveTokens(b)
-  if (!ta.length || !tb.length) return 0
-  let shared = 0
-  for (const x of ta) if (tb.some(y => tokensMatch(x, y))) shared++
-  if (shared === 0) return 0
-  return shared / Math.min(ta.length, tb.length)
-}
+// El emparejamiento por nombre vive en ../_shared/dealershipMatch.ts para que las pruebas
+// de Vitest corran exactamente este codigo.
 
 // Resuelve el dealership_id desde el enum_id de Kommo:
+//  0. Mapeo explicito dealerships.kommo_concesionario_enum_id → autoritativo, sin adivinar.
 //  1. Pide a Kommo el label real del enum (campo Concesionario).
-//  2. Lo matchea (fuzzy) contra dealerships existentes.
-//  3. Si no existe en Supabase → lo crea y asocia.
+//  2. Lo matchea (fuzzy) contra dealerships existentes; si hay empate NO elige.
+//  3. Si no existe en Supabase → lo crea, lo asocia y guarda el enum para no volver a adivinar.
 //  4. Fallback: mapeo hardcodeado por keyword.
 //  5. Si nada resuelve → log webhook_dealership_unresolved.
 async function resolveDealershipId(
@@ -320,6 +262,13 @@ async function resolveDealershipId(
   concEnumId: number,
   kommoLeadId: number,
 ): Promise<string | null> {
+  // 0. Mapeo explicito. Es la unica via que no depende de como este escrito el label hoy en
+  //    el CRM, asi que va primero y corta. Los 14 enums que existian al 05/08/2026 quedaron
+  //    cargados en la migracion 20260805190000; los nuevos caen a los pasos de abajo.
+  const { data: mapped } = await supabase.from('dealerships')
+    .select('id').eq('kommo_concesionario_enum_id', concEnumId).maybeSingle()
+  if (mapped) return (mapped as { id: string }).id
+
   // 1. Label humano del enum desde la metadata del campo en Kommo
   let label: string | null = null
   try {
@@ -334,16 +283,35 @@ async function resolveDealershipId(
   // 2. Match fuzzy contra dealerships existentes
   if (label) {
     const { data: dealerships } = await supabase.from('dealerships').select('id, name')
-    let best: { id: string; score: number } | null = null
-    for (const d of (dealerships as Array<{ id: string; name: string }> | null) || []) {
-      const score = nameMatchScore(label, d.name || '')
-      if (score >= 0.5 && (!best || score > best.score)) best = { id: d.id, score }
+    const result = matchDealershipByName(
+      label,
+      (dealerships as Array<{ id: string; name: string }> | null) || [],
+    )
+
+    if (result.kind === 'match') return result.id
+
+    // Empate: dos o mas concesionarios igual de parecidos al label. No se elige uno. El
+    // codigo viejo se quedaba con el primero que devolviera el SELECT — sin ORDER BY, o sea
+    // el mas antiguo de la tabla — y por eso "GAC - Maracaibo" caia en "PITS Services
+    // Maracaibo". Tampoco se auto-crea: seria un tercer concesionario duplicado.
+    if (result.kind === 'ambiguous') {
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'webhook_dealership_ambiguous',
+        kommo_lead_id: kommoLeadId, status: 'warning',
+        details: {
+          concesionario_enum_id: concEnumId, label, score: result.score,
+          candidates: result.candidates.map(c => ({ id: c.id, name: c.name })),
+        },
+      })
+      return null
     }
-    if (best) return best.id
 
     // 3. No existe → crear dealership y asociar
     const { data: created } = await supabase.from('dealerships')
-      .insert({ name: label }).select('id').single()
+      // El enum se guarda aca y solo aca: el concesionario nace de ESTE label, asi que la
+      // correspondencia es exacta por construccion. Un match fuzzy, en cambio, no se
+      // persiste nunca — congelar una adivinanza errada la volveria permanente.
+      .insert({ name: label, kommo_concesionario_enum_id: concEnumId }).select('id').single()
     if (created) {
       const newId = (created as { id: string }).id
       await supabase.from('integration_logs').insert({
@@ -359,7 +327,9 @@ async function resolveDealershipId(
   const entry = CONCESIONARIO_KOMMO.find(c => c.id === concEnumId)
   if (entry) {
     for (const kw of entry.kw) {
-      const { data } = await supabase.from('dealerships').select('id').ilike('name', `%${kw}%`).limit(1).single()
+      // order('name') hace determinista cual gana cuando la keyword toca varios nombres.
+      const { data } = await supabase.from('dealerships')
+        .select('id').ilike('name', `%${kw}%`).order('name').limit(1).maybeSingle()
       if (data) return (data as { id: string }).id
     }
   }
@@ -911,11 +881,19 @@ async function autoCreateReservationFromKommo(
   const concesionarioCita = getCFText(cfValues, CF_RES.concesionario_cita)
 
   // Resolve dealership from text CF (populated by create_reservation)
+  //
+  // kommo-api escribe en este campo el `name` literal del concesionario, asi que la igualdad
+  // exacta acierta siempre y se prueba primero. El `ilike` con comodines queda solo por si el
+  // texto fue editado a mano en el CRM, y va ordenado: sin ORDER BY, un valor como "Maracaibo"
+  // toca tres concesionarios y se quedaba con el que la tabla devolviera de casualidad.
   let dealershipId: string | null = null
   let dealershipBays: number | null = null
   if (concesionarioCita) {
-    const { data: dealer } = await supabase
-      .from('dealerships').select('id, bays').ilike('name', `%${concesionarioCita}%`).limit(1).maybeSingle()
+    const byExactName = await supabase
+      .from('dealerships').select('id, bays').eq('name', concesionarioCita).maybeSingle()
+    const dealer = byExactName.data ?? (await supabase
+      .from('dealerships').select('id, bays').ilike('name', `%${concesionarioCita}%`)
+      .order('name').limit(1).maybeSingle()).data
     if (dealer) {
       dealershipId = (dealer as { id: string; bays: number | null }).id
       dealershipBays = (dealer as { id: string; bays: number | null }).bays
