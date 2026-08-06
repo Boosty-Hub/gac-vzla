@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { X } from 'lucide-react';
-import { DashboardWidget, SOURCES, WIDGET_TYPES, ICON_OPTIONS, COLOR_OPTIONS, getSource, FieldDef } from './widgetSchema';
+import { DashboardWidget, SOURCES, WIDGET_TYPES, ICON_OPTIONS, COLOR_OPTIONS, getSource, requiresGroupBy, FieldDef, WidgetType } from './widgetSchema';
 
 interface Props {
   open: boolean;
@@ -26,7 +26,7 @@ interface Props {
 export default function WidgetEditor({ open, onOpenChange, widget, onSaved, dealerships, statuses, sources, salespersons }: Props) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [widgetType, setWidgetType] = useState<'kpi' | 'bar' | 'pie'>('kpi');
+  const [widgetType, setWidgetType] = useState<WidgetType>('kpi');
   const [sourceTable, setSourceTable] = useState<'prospects'>('prospects');
   const [groupBy, setGroupBy] = useState<string>('__none');
   const [filters, setFilters] = useState<Record<string, string[]>>({});
@@ -80,8 +80,10 @@ export default function WidgetEditor({ open, onOpenChange, widget, onSaved, deal
 
   const handleSave = async () => {
     if (!title.trim()) { toast.error('El título es requerido'); return; }
-    if (widgetType !== 'kpi' && (!groupBy || groupBy === '__none')) {
-      toast.error('Para gráficos debes seleccionar un campo de agrupación');
+    if (requiresGroupBy(widgetType) && (!groupBy || groupBy === '__none')) {
+      // Vale igual para la lista: sin campo de agrupación no hay nada que enumerar,
+      // solo un total suelto — y para eso ya está el KPI.
+      toast.error('Elegí un campo de agrupación para este tipo de widget');
       return;
     }
     setSaving(true);
@@ -104,7 +106,7 @@ export default function WidgetEditor({ open, onOpenChange, widget, onSaved, deal
       widget_type: widgetType,
       source_table: sourceTable,
       aggregation: 'count',
-      group_by: widgetType === 'kpi' ? null : (groupBy === '__none' ? null : groupBy),
+      group_by: requiresGroupBy(widgetType) ? (groupBy === '__none' ? null : groupBy) : null,
       filters: cleanFilters,
       color,
       icon,
@@ -144,7 +146,7 @@ export default function WidgetEditor({ open, onOpenChange, widget, onSaved, deal
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Tipo de visualización *</Label>
-            <Select value={widgetType} onValueChange={v => setWidgetType(v as any)}>
+            <Select value={widgetType} onValueChange={v => setWidgetType(v as WidgetType)}>
               <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {WIDGET_TYPES.map(w => <SelectItem key={w.value} value={w.value}>{w.label}</SelectItem>)}
@@ -160,7 +162,7 @@ export default function WidgetEditor({ open, onOpenChange, widget, onSaved, deal
               </SelectContent>
             </Select>
           </div>
-          {widgetType !== 'kpi' && (
+          {requiresGroupBy(widgetType) && (
             <div className="space-y-1 sm:col-span-2">
               <Label className="text-xs">Agrupar por *</Label>
               <Select value={groupBy} onValueChange={setGroupBy}>

@@ -179,6 +179,33 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
               <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">Cargando…</div>
             ) : aggregated.length === 0 ? (
               <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">Sin datos</div>
+            ) : widget.widget_type === 'list' ? (
+              // Lista de conteos: "Vendedores: Julio 3, Nacarid 2, Elsy 1". Pedida
+              // explicitamente COMO LISTA, no como grafico — por eso no lleva barra de
+              // proporcion detras: eso volveria a leerse como un grafico de barras.
+              // `aggregated` ya viene ordenado de mayor a menor.
+              <ul className="max-h-[200px] overflow-y-auto divide-y divide-border/60">
+                {aggregated.map((row, i) => (
+                  <li key={row.name} className="flex items-center justify-between gap-2 py-1.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[10px] font-mono text-muted-foreground w-4 shrink-0 text-right">
+                        {i + 1}
+                      </span>
+                      <span className="text-xs truncate" title={row.name}>{row.name}</span>
+                    </div>
+                    <div className="flex items-baseline gap-1.5 shrink-0">
+                      <span className="text-sm font-bold tabular-nums" style={{ color: colorHex }}>
+                        {row.value.toLocaleString('es-VE')}
+                      </span>
+                      {/* El porcentaje se calcula sobre el total YA filtrado, que es el
+                          mismo numero del badge de arriba: los dos tienen que cerrar. */}
+                      <span className="text-[10px] text-muted-foreground tabular-nums">
+                        {total > 0 ? `${Math.round((row.value / total) * 100)}%` : '0%'}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             ) : widget.widget_type === 'bar' ? (
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={aggregated} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>

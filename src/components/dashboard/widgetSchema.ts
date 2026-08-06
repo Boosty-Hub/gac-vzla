@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
-import { Activity, BarChart2, PieChart, Target, Users, Car, MapPin, User, CalendarDays, Tag } from 'lucide-react';
+import { Activity, BarChart2, PieChart, Target, Users, Car, MapPin, User, CalendarDays, Tag, List } from 'lucide-react';
 
-export type WidgetType = 'kpi' | 'bar' | 'pie';
+export type WidgetType = 'kpi' | 'bar' | 'pie' | 'list';
 export type SourceTable = 'prospects';
 export type Aggregation = 'count';
 
@@ -76,10 +76,16 @@ export const SOURCES: SourceDef[] = [
 ];
 
 export const WIDGET_TYPES: { value: WidgetType; label: string; icon: LucideIcon }[] = [
-  { value: 'kpi', label: 'Indicador (KPI)', icon: Target },
-  { value: 'bar', label: 'Gráfico de barras', icon: BarChart2 },
-  { value: 'pie', label: 'Gráfico de torta', icon: PieChart },
+  { value: 'kpi',  label: 'Indicador (KPI)',   icon: Target },
+  { value: 'list', label: 'Lista de conteos',  icon: List },
+  { value: 'bar',  label: 'Gráfico de barras', icon: BarChart2 },
+  { value: 'pie',  label: 'Gráfico de torta',  icon: PieChart },
 ];
+
+/** Tipos que cuentan registros por categoría y por lo tanto exigen "Agrupar por". */
+export function requiresGroupBy(type: WidgetType): boolean {
+  return type !== 'kpi';
+}
 
 export const ICON_OPTIONS: { value: string; icon: LucideIcon; label: string }[] = [
   { value: 'Users',       icon: Users,       label: 'Usuarios' },
