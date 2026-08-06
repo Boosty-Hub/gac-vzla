@@ -77,6 +77,10 @@ const AdminVehiculos = () => {
   const [busqueda, setBusqueda] = useState('');
   const [brandFilter, setBrandFilter] = useState('all');
   const [warrantyFilter, setWarrantyFilter] = useState('todos');
+  // Igual que en Clientes: los vehículos externos (de tercero) viven en la misma tabla,
+  // así que hace falta poder aislarlos. Por defecto se listan todos — a diferencia de
+  // clientes, acá nunca estuvieron ocultos.
+  const [kindFilter, setKindFilter] = useState<'todos' | 'propios' | 'externos'>('todos');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [datePreset, setDatePreset] = useState('');
@@ -156,6 +160,11 @@ const AdminVehiculos = () => {
       query = query.eq('warranty_active', warrantyFilter === 'activa');
     }
 
+    // Server-side, para que `count: 'exact'` siga cerrando con lo que se muestra.
+    if (kindFilter !== 'todos') {
+      query = query.eq('is_manual', kindFilter === 'externos');
+    }
+
     if (searchTerm) {
       const searchFilter = buildVehicleSearchFilter(searchTerm, modelIds);
       if (searchFilter) {
@@ -193,11 +202,11 @@ const AdminVehiculos = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [busqueda, brandFilter, warrantyFilter, pageSize, dateFrom, dateTo]);
+  }, [busqueda, brandFilter, warrantyFilter, kindFilter, pageSize, dateFrom, dateTo]);
 
   useEffect(() => {
     fetchVehicles();
-  }, [page, busqueda, brandFilter, warrantyFilter, pageSize, dateFrom, dateTo]);
+  }, [page, busqueda, brandFilter, warrantyFilter, kindFilter, pageSize, dateFrom, dateTo]);
 
   const openDetail = async (v: Vehicle) => {
     setDetailVehicle(v);
@@ -481,6 +490,14 @@ const AdminVehiculos = () => {
             <SelectItem value="todos">Todas las garantías</SelectItem>
             <SelectItem value="activa">Garantía activa</SelectItem>
             <SelectItem value="inactiva">Garantía inactiva</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={kindFilter} onValueChange={v => setKindFilter(v as typeof kindFilter)}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Origen" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="todos">Propios y externos</SelectItem>
+            <SelectItem value="propios">Solo propios</SelectItem>
+            <SelectItem value="externos">Solo externos</SelectItem>
           </SelectContent>
         </Select>
 

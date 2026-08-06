@@ -133,7 +133,12 @@ const AdminClientes = () => {
   // Manual (third-party/service-only) clients are excluded by default so they
   // never pollute the real customer base — this toggle brings them back into
   // the same list, visually badged. See fetchClients.
-  const [showManualClients, setShowManualClients] = useState(false);
+  // Filtro por tipo de cliente. Antes era un booleano `showManualClients` que INCLUÍA a
+  // los externos en la misma lista: al activarlo, con cero externos cargados, la vista
+  // recargaba y volvía a mostrar exactamente los mismos 1378 clientes — que es tal cual
+  // lo reportado ("no arroja ningún tipo de información"). Ahora el filtro es excluyente,
+  // así que "Externos" muestra externos o muestra vacío, pero nunca miente.
+  const [filterKind, setFilterKind] = useState<'propios' | 'externos' | 'todos'>('propios');
 
   // Client dialog
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
@@ -148,6 +153,10 @@ const AdminClientes = () => {
   const [formState, setFormState] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
   const [formIsFleet, setFormIsFleet] = useState(false);
+  // Cliente externo: un tercero al que le hacemos un servicio puntual, no alguien a quien
+  // le vendimos. Se persiste igual que cualquier otro cliente — la bandera es lo que lo
+  // mantiene fuera del conteo comercial, de Kommo y de los KPI de garantía.
+  const [formIsManual, setFormIsManual] = useState(false);
   const [formPin, setFormPin] = useState('');
 
   // Vehicles
@@ -226,13 +235,13 @@ const AdminClientes = () => {
       .from('clients')
       .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)', { count: 'exact' });
 
-    // Excluded server-side (not filtered after the fact) so `count: 'exact'`
-    // always matches what's actually displayed — filtering client-side while
-    // still counting the excluded rows would desync pagination (the last
-    // page could render empty). When the toggle is on, manual clients are
-    // included in the same list instead of a separate exclusive view.
-    if (!showManualClients) {
+    // Filtered server-side (not after the fact) so `count: 'exact'` always matches what's
+    // actually displayed — filtering client-side while still counting the excluded rows
+    // would desync pagination (the last page could render empty).
+    if (filterKind === 'propios') {
       query = query.eq('is_manual', false);
+    } else if (filterKind === 'externos') {
+      query = query.eq('is_manual', true);
     }
 
     if (busqueda.trim()) {
@@ -342,11 +351,11 @@ const AdminClientes = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [busqueda, pageSize, filterStatus, filterWarranty, filterCity, showManualClients]);
+  }, [busqueda, pageSize, filterStatus, filterWarranty, filterCity, filterKind]);
 
   useEffect(() => {
     fetchClients();
-  }, [page, busqueda, pageSize, filterStatus, filterWarranty, filterCity, showManualClients]);
+  }, [page, busqueda, pageSize, filterStatus, filterWarranty, filterCity, filterKind]);
 
   useEffect(() => {
     fetchModels();
@@ -425,11 +434,12 @@ const AdminClientes = () => {
   };
 
   // Client CRUD
-  const openCreateClient = () => {
+  const openCreateClient = (asExternal = false) => {
     setEditingClient(null);
     setFormName(''); setFormCedula(''); setFormPhone(''); setFormEmail('');
     setFormAddress(''); setFormCity(''); setFormState(''); setFormIsActive(true);
     setFormIsFleet(false);
+    setFormIsManual(asExternal);
     setFormPin('');
     setClientDialogOpen(true);
   };
@@ -445,6 +455,7 @@ const AdminClientes = () => {
     setFormState(client.state || '');
     setFormIsActive(client.is_active);
     setFormIsFleet(!!client.is_fleet);
+    setFormIsManual(!!client.is_manual);
     setFormPin(client.profiles?.pin_code || '');
     setClientDialogOpen(true);
   };
@@ -474,6 +485,8 @@ const AdminClientes = () => {
       // it is NOT what prevents duplicate surveys — `fn_claim_survey_slot` already
       // rate-limits every client to one survey per 24h regardless of this value.
       is_fleet: formIsFleet,
+      // Cliente externo (tercero de servicio puntual). Ver 20260730140000.
+      is_manual: formIsManual,
     };
 
     if (editingClient) {
@@ -500,18 +513,49 @@ const AdminClientes = () => {
       else {
         // Fire-and-forget: sync the new client into Kommo's Post Venta "En conversación"
         // stage without blocking the success toast/dialog close.
-        if (data?.id) syncClientToKommo(data.id).catch(console.error);
-        toast.success('Cliente creado'); setClientDialogOpen(false); fetchClients();
+        //
+        // NUNCA para un cliente externo. Es un tercero al que le hicimos un servicio
+        // suelto, no un cliente comercial: sincronizarlo fabricaría un lead de Post Venta
+        // falso por cada entrada de taller. Es la misma guarda que ya tiene el ingreso
+        // manual desde reservas (`clientIsManual` en src/lib/reservationAssignment.ts).
+        if (data?.id && !formIsManual) syncClientToKommo(data.id).catch(console.error);
+        setClientDialogOpen(false);
+        fetchClients();
+
+        // `clients_insert` deja crear al concesionario/vendedor, pero `clients_select` solo
+        // les muestra clientes que YA tienen una reserva en su concesionario. Sin este
+        // aviso el cliente recién creado simplemente no aparece y parece que no se guardó.
+        if (data?.id) {
+          const { data: visible } = await supabase.from('clients').select('id').eq('id', data.id).maybeSingle();
+          if (!visible) {
+            toast.info('Guardado. Todavía no lo ves en la lista: aparecerá cuando tenga una reserva en tu concesionario.');
+          }
+        }
+
+        if (data?.id && formIsManual) {
+          // Un cliente externo sin vehículo no sirve para nada: se registra justamente
+          // para poder atenderle una unidad. Se encadena el alta del vehículo en vez de
+          // dejarlo como un paso que hay que acordarse de hacer después.
+          toast.success('Cliente externo creado. Registrá su vehículo.');
+          openAddVehicle(data.id, true);
+        } else {
+          toast.success('Cliente creado');
+        }
       }
     }
     setSaving(false);
   };
 
   // Vehicle CRUD
-  const openAddVehicle = (clientId: string) => {
+  // `preferManualModel` arranca el diálogo en modo "Otro" (marca/modelo a mano). Se usa al
+  // encadenar desde el alta de un cliente externo: lo habitual ahí es un vehículo que no
+  // está en nuestro catálogo. Sigue siendo cambiable — un externo también puede traer un
+  // GAC que no le vendimos nosotros.
+  const openAddVehicle = (clientId: string, preferManualModel = false) => {
     setEditingVehicle(null);
     setVehicleClientId(clientId);
-    setVFormModelId(''); setVFormYear(new Date().getFullYear().toString());
+    setVFormModelId(preferManualModel ? MANUAL_MODEL_VALUE : '');
+    setVFormYear(new Date().getFullYear().toString());
     setVFormPlate(''); setVFormVin(''); setVFormColor('');
     setVFormMileage('0'); setVFormPurchaseDate(''); setVFormWarranty(true);
     setVFormManualBrand(''); setVFormManualModel('');
@@ -756,9 +800,14 @@ const AdminClientes = () => {
           </Badge>
         </div>
         {canCreate && (
-          <Button size="sm" onClick={openCreateClient} className="gac-gradient">
-            <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => openCreateClient(true)} title="Tercero al que le hacemos un servicio puntual">
+              <Wrench className="w-3.5 h-3.5 mr-1" /> Nuevo externo
+            </Button>
+            <Button size="sm" onClick={() => openCreateClient(false)} className="gac-gradient">
+              <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+            </Button>
+          </div>
         )}
       </div>
 
@@ -802,17 +851,14 @@ const AdminClientes = () => {
             <SelectItem value="1000">1000 filas</SelectItem>
           </SelectContent>
         </Select>
-        <Button
-          type="button"
-          variant={showManualClients ? 'default' : 'outline'}
-          size="sm"
-          className="h-8 text-xs gap-1.5"
-          onClick={() => setShowManualClients(v => !v)}
-          title="Clientes de tercero, registrados solo para un servicio puntual"
-        >
-          <Wrench className="w-3.5 h-3.5" />
-          {showManualClients ? 'Ocultar externos' : 'Mostrar externos'}
-        </Button>
+        <Select value={filterKind} onValueChange={v => setFilterKind(v as typeof filterKind)}>
+          <SelectTrigger className="h-8 text-xs sm:w-[150px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="propios">Clientes propios</SelectItem>
+            <SelectItem value="externos">Solo externos</SelectItem>
+            <SelectItem value="todos">Propios y externos</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {loading ? (
@@ -825,8 +871,31 @@ const AdminClientes = () => {
       ) : clients.length === 0 ? (
         <Card className="gac-shadow">
           <CardContent className="p-8 text-center">
-            <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-            <p className="text-sm text-muted-foreground">No se encontraron clientes</p>
+            {filterKind === 'externos' && !busqueda.trim() ? (
+              // Estado vacío explícito. Antes, con cero externos cargados, el filtro
+              // recargaba y devolvía la misma lista completa: parecía que el filtro no
+              // hacía nada. Decir que no hay ninguno todavía es información; repetir los
+              // 1378 de siempre, no.
+              <>
+                <Wrench className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm font-medium">Todavía no hay clientes externos</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
+                  Un cliente externo es un tercero al que le hacés un servicio puntual sobre un
+                  vehículo que no le vendimos nosotros. Se crean desde "Nuevo externo", o solos
+                  cuando en una reserva usás "Ingresar manualmente" con una marca fuera del catálogo.
+                </p>
+                {canCreate && (
+                  <Button size="sm" variant="outline" className="mt-3" onClick={() => openCreateClient(true)}>
+                    <Wrench className="w-3.5 h-3.5 mr-1" /> Registrar cliente externo
+                  </Button>
+                )}
+              </>
+            ) : (
+              <>
+                <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No se encontraron clientes</p>
+              </>
+            )}
           </CardContent>
         </Card>
       ) : isMobile ? (
@@ -1229,6 +1298,18 @@ const AdminClientes = () => {
                 </p>
               </div>
               <Switch checked={formIsFleet} onCheckedChange={setFormIsFleet} />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="pr-3">
+                <Label>Cliente externo</Label>
+                <p className="text-xs text-muted-foreground">
+                  Tercero al que le hacemos un servicio puntual: no le vendimos el vehículo.
+                  Queda guardado en la base, pero fuera del conteo comercial, de la sincronización
+                  con Kommo y de los indicadores de garantía.
+                </p>
+              </div>
+              <Switch checked={formIsManual} onCheckedChange={setFormIsManual} />
             </div>
 
             {editingClient && (
