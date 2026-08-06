@@ -34,38 +34,46 @@ const PIE_COLORS = [
 export default function DynamicWidget({ widget, globalFilters, canEdit, dealershipNames, statusLabels, sourceLabels, onEdit, onDelete }: Props) {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const sourceDef = getSource(widget.source_table);
+  // Memoizado para que la identidad sea estable y el efecto de carga pueda depender de él
+  // sin volver a consultar en cada render.
+  const sourceDef = useMemo(() => getSource(widget.source_table), [widget.source_table]);
   const groupField = widget.group_by ? getField(widget.source_table, widget.group_by) : null;
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
-      // Always fetch only needed columns. For brand_extract group_by, we need model_interest.
-      const cols: string[] = ['id', 'created_at', 'dealership_id'];
-      if (widget.group_by) {
-        if (widget.group_by === 'brand') cols.push('model_interest');
-        else cols.push(`"${widget.group_by}"`);
-      }
-      // Add filter columns
-      Object.keys(widget.filters || {}).forEach(k => {
-        if (k === 'brand') { if (!cols.includes('model_interest')) cols.push('model_interest'); }
-        else if (!cols.includes(`"${k}"`)) cols.push(`"${k}"`);
-      });
+      // Solo las columnas necesarias. Cuáles son depende de la fuente: `created_at` y
+      // `dealership_id` estaban clavados, y `dealership_id` no existe en clients ni en
+      // vehicles — pedirlo ahí devuelve error y el widget queda en cero sin explicación.
+      const cols: string[] = ['id', sourceDef.dateColumn];
+      if (sourceDef.dealershipColumn) cols.push(sourceDef.dealershipColumn);
+      (sourceDef.relations || []).forEach(rel => cols.push(rel));
+
+      const addFieldCols = (key: string) => {
+        const def = getField(widget.source_table, key);
+        // Estos dos no son columnas: uno se deduce de un texto libre, el otro viaja en la
+        // relación que ya se agregó arriba.
+        if (def?.type === 'brand_extract') { if (!cols.includes('model_interest')) cols.push('model_interest'); return; }
+        if (def?.type === 'model_brand') return;
+        if (!cols.includes(`"${key}"`)) cols.push(`"${key}"`);
+      };
+      if (widget.group_by) addFieldCols(widget.group_by);
+      Object.keys(widget.filters || {}).forEach(addFieldCols);
 
       let q: any = supabase.from(widget.source_table).select(cols.join(','));
 
       // Global filters
-      if (globalFilters.fechaDesde) q = q.gte('created_at', globalFilters.fechaDesde);
-      if (globalFilters.fechaHasta) q = q.lte('created_at', globalFilters.fechaHasta + 'T23:59:59');
-      if (globalFilters.dealershipId && globalFilters.dealershipId !== 'todos') {
-        q = q.eq('dealership_id', globalFilters.dealershipId);
+      if (globalFilters.fechaDesde) q = q.gte(sourceDef.dateColumn, globalFilters.fechaDesde);
+      if (globalFilters.fechaHasta) q = q.lte(sourceDef.dateColumn, globalFilters.fechaHasta + 'T23:59:59');
+      if (sourceDef.dealershipColumn && globalFilters.dealershipId && globalFilters.dealershipId !== 'todos') {
+        q = q.eq(sourceDef.dealershipColumn, globalFilters.dealershipId);
       }
 
       // Widget-specific filters
       Object.entries(widget.filters || {}).forEach(([k, v]) => {
         if (v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) return;
-        if (k === 'brand') return; // handled client-side
+        if (getField(widget.source_table, k)?.type === 'brand_extract') return; // handled client-side
         if (Array.isArray(v)) q = q.in(k, v);
         else q = q.eq(k, v);
       });
@@ -82,17 +90,24 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
     };
     load();
     return () => { cancelled = true; };
-  }, [widget, globalFilters.fechaDesde, globalFilters.fechaHasta, globalFilters.dealershipId]);
+  }, [widget, sourceDef, globalFilters.fechaDesde, globalFilters.fechaHasta, globalFilters.dealershipId]);
 
-  const labelForGroup = (key: string, value: unknown): string => {
+  // La etiqueta se resuelve por TIPO de campo, no por nombre de columna. `status` existe
+  // en prospectos y en reservas con valores distintos: mapear por nombre etiquetaba una
+  // reserva "completada" con el catálogo de estados de prospecto.
+  const labelForGroup = (value: unknown): string => {
     if (value === null || value === undefined || value === '') return 'Sin valor';
     const v = String(value);
-    if (key === 'dealership_id') return dealershipNames.get(v) || v;
-    if (key === 'status') return statusLabels.get(v) || v;
-    if (key === 'source') return sourceLabels.get(v) || v;
-    if (key === 'test_drive') return v === 'true' || v === 't' || v === '1' ? 'Sí' : 'No';
-    const opt = groupField?.options?.find(o => o.value === v);
-    return opt ? opt.label : v;
+    switch (groupField?.type) {
+      case 'fk_dealership': return dealershipNames.get(v) || v;
+      case 'fk_status':     return statusLabels.get(v) || v;
+      case 'fk_source':     return sourceLabels.get(v) || v;
+      case 'boolean':       return v === 'true' || v === 't' || v === '1' ? 'Sí' : 'No';
+      default: {
+        const opt = groupField?.options?.find(o => o.value === v);
+        return opt ? opt.label : v;
+      }
+    }
   };
 
   const extractBrand = (modelInterest: unknown): string | null => {
@@ -104,7 +119,8 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
   // Apply client-side brand filter & brand-aware grouping
   const processedRows = useMemo(() => {
     let r = rows;
-    const brandFilter = (widget.filters || {})['brand'] as string | string[] | undefined;
+    const brandKey = getSource(widget.source_table).fields.find(f => f.type === 'brand_extract')?.key;
+    const brandFilter = brandKey ? ((widget.filters || {})[brandKey] as string | string[] | undefined) : undefined;
     if (brandFilter && (Array.isArray(brandFilter) ? brandFilter.length > 0 : brandFilter)) {
       const allowed = Array.isArray(brandFilter) ? brandFilter : [brandFilter];
       r = r.filter(row => {
@@ -113,7 +129,7 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
       });
     }
     return r;
-  }, [rows, widget.filters]);
+  }, [rows, widget.filters, widget.source_table]);
 
   const aggregated = useMemo(() => {
     if (!widget.group_by) {
@@ -122,18 +138,20 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
     const map = new Map<string, number>();
     processedRows.forEach(row => {
       let key: unknown;
-      if (widget.group_by === 'brand') key = extractBrand(row.model_interest) || 'Sin marca';
+      if (groupField?.type === 'brand_extract') key = extractBrand(row.model_interest) || 'Sin marca';
+      // La marca real viaja en la relación, no en una columna de la tabla.
+      else if (groupField?.type === 'model_brand') key = row.vehicle_models?.brand;
       else key = (row as any)[widget.group_by!];
       const k = key === null || key === undefined || key === '' ? '__empty__' : String(key);
       map.set(k, (map.get(k) || 0) + 1);
     });
     return Array.from(map.entries())
       .map(([k, v]) => ({
-        name: k === '__empty__' ? 'Sin valor' : labelForGroup(widget.group_by!, k),
+        name: k === '__empty__' ? 'Sin valor' : labelForGroup(k),
         value: v,
       }))
       .sort((a, b) => b.value - a.value);
-  }, [processedRows, widget.group_by]);
+  }, [processedRows, widget.group_by, groupField]);
 
   const total = processedRows.length;
   const colorHex = getColorHex(widget.color);

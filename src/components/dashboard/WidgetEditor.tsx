@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { X } from 'lucide-react';
-import { DashboardWidget, SOURCES, WIDGET_TYPES, ICON_OPTIONS, COLOR_OPTIONS, getSource, requiresGroupBy, FieldDef, WidgetType } from './widgetSchema';
+import { DashboardWidget, SOURCES, WIDGET_TYPES, ICON_OPTIONS, COLOR_OPTIONS, getSource, requiresGroupBy, FieldDef, WidgetType, SourceTable } from './widgetSchema';
 
 interface Props {
   open: boolean;
@@ -27,7 +27,7 @@ export default function WidgetEditor({ open, onOpenChange, widget, onSaved, deal
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [widgetType, setWidgetType] = useState<WidgetType>('kpi');
-  const [sourceTable, setSourceTable] = useState<'prospects'>('prospects');
+  const [sourceTable, setSourceTable] = useState<SourceTable>('prospects');
   const [groupBy, setGroupBy] = useState<string>('__none');
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [color, setColor] = useState('primary');
@@ -155,7 +155,17 @@ export default function WidgetEditor({ open, onOpenChange, widget, onSaved, deal
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Fuente de datos *</Label>
-            <Select value={sourceTable} onValueChange={v => setSourceTable(v as any)}>
+            <Select
+              value={sourceTable}
+              onValueChange={v => {
+                // Agrupación y filtros son columnas de la fuente anterior: al cambiarla
+                // quedarían apuntando a campos que la nueva tabla no tiene, y el widget
+                // se guardaría roto. Se limpian.
+                setSourceTable(v as SourceTable);
+                setGroupBy('__none');
+                setFilters({});
+              }}
+            >
               <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {SOURCES.map(s => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}
