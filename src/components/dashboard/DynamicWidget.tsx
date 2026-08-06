@@ -3,11 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Pencil, Trash2, GripVertical } from 'lucide-react';
+import { Pencil, Trash2, List, BarChart2, PieChart as PieIcon, Target, ChevronUp, ChevronDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import * as Icons from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { DashboardWidget, getField, getSource, getColorHex } from './widgetSchema';
+import { DashboardWidget, WidgetType, getField, getSource, getColorHex } from './widgetSchema';
+import { widgetPrefKey, type DashboardLayoutApi } from '@/hooks/useDashboardLayout';
 
 interface Props {
   widget: DashboardWidget;
@@ -18,7 +19,23 @@ interface Props {
   sourceLabels: Map<string, string>;
   onEdit: () => void;
   onDelete: () => void;
+  /**
+   * Preferencias del usuario. El tipo guardado en `dashboard_widgets` lo define el admin y
+   * es el que ven todos; esto lo pisa SOLO para quien lo haya cambiado. Así uno puede
+   * mirar el mismo widget como lista sin cambiárselo al resto.
+   */
+  layout: DashboardLayoutApi;
+  /** Claves de todos los widgets, en su orden por defecto — para poder moverlos. */
+  allKeys: string[];
 }
+
+/** Clave con la que este widget guarda su preferencia, distinta de los gráficos fijos. */
+const VIEW_BUTTONS: { value: WidgetType; icon: typeof List; title: string }[] = [
+  { value: 'kpi',  icon: Target,    title: 'Indicador' },
+  { value: 'list', icon: List,      title: 'Lista de conteos' },
+  { value: 'bar',  icon: BarChart2, title: 'Gráfico de barras' },
+  { value: 'pie',  icon: PieIcon,   title: 'Gráfico de torta' },
+];
 
 const PIE_COLORS = [
   'hsl(var(--primary))',
@@ -31,7 +48,7 @@ const PIE_COLORS = [
   'hsl(30, 80%, 55%)',
 ];
 
-export default function DynamicWidget({ widget, globalFilters, canEdit, dealershipNames, statusLabels, sourceLabels, onEdit, onDelete }: Props) {
+export default function DynamicWidget({ widget, globalFilters, canEdit, dealershipNames, statusLabels, sourceLabels, onEdit, onDelete, layout, allKeys }: Props) {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   // Memoizado para que la identidad sea estable y el efecto de carga pueda depender de él
@@ -155,6 +172,19 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
 
   const total = processedRows.length;
   const colorHex = getColorHex(widget.color);
+
+  // Tipo efectivo: lo que el usuario eligió, o el que dejó el admin si nunca lo tocó.
+  // Sin `group_by` no hay categorías que listar ni repartir, así que ese widget se queda
+  // como KPI y solo se puede mover.
+  const prefKey = widgetPrefKey(widget.id);
+  const pref = layout.viewOf(prefKey);
+  const canSwitch = !!widget.group_by;
+  const viewType: WidgetType = !canSwitch
+    ? widget.widget_type
+    : pref === 'default' ? widget.widget_type : (pref as WidgetType);
+
+  const ordered = layout.order(allKeys);
+  const pos = ordered.indexOf(prefKey);
   const IconCmp = (widget.icon && (Icons as any)[widget.icon]) || Icons.Activity;
 
   const colSpan =
@@ -164,14 +194,40 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
 
   return (
     <Card className={cn('gac-shadow group relative', colSpan)}>
-      {canEdit && (
-        <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-          <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={onEdit} title="Editar widget"><Pencil className="w-3 h-3" /></Button>
-          <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={onDelete} title="Eliminar widget"><Trash2 className="w-3 h-3" /></Button>
-        </div>
-      )}
+      {/* La barra de vista/orden NO está detrás de `canEdit`: cambiar cómo mirás un widget
+          y dónde lo tenés es tuyo y no altera el widget para nadie más. Editarlo y
+          borrarlo sí siguen siendo del admin. */}
+      <div className="absolute top-2 right-2 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity z-10 bg-background/90 rounded-md px-0.5">
+        {canSwitch && VIEW_BUTTONS.map(b => {
+          const B = b.icon;
+          return (
+            <Button
+              key={b.value} size="sm" variant="ghost"
+              className={cn('h-6 w-6 p-0', viewType === b.value && 'bg-primary/10 text-primary')}
+              title={b.title}
+              onClick={() => layout.setView(prefKey, b.value === widget.widget_type ? 'default' : b.value as never)}
+            >
+              <B className="w-3 h-3" />
+            </Button>
+          );
+        })}
+        <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Mover a la izquierda"
+          disabled={pos <= 0} onClick={() => layout.move(prefKey, -1, allKeys)}>
+          <ChevronUp className="w-3 h-3 -rotate-90" />
+        </Button>
+        <Button size="sm" variant="ghost" className="h-6 w-6 p-0" title="Mover a la derecha"
+          disabled={pos < 0 || pos >= ordered.length - 1} onClick={() => layout.move(prefKey, 1, allKeys)}>
+          <ChevronDown className="w-3 h-3 -rotate-90" />
+        </Button>
+        {canEdit && (
+          <>
+            <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={onEdit} title="Editar widget"><Pencil className="w-3 h-3" /></Button>
+            <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive" onClick={onDelete} title="Eliminar widget"><Trash2 className="w-3 h-3" /></Button>
+          </>
+        )}
+      </div>
       <CardContent className="p-3 sm:p-4">
-        {widget.widget_type === 'kpi' ? (
+        {viewType === 'kpi' ? (
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: colorHex + '22' }}>
               <IconCmp className="w-5 h-5" style={{ color: colorHex }} />
@@ -197,7 +253,7 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
               <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">Cargando…</div>
             ) : aggregated.length === 0 ? (
               <div className="h-48 flex items-center justify-center text-xs text-muted-foreground">Sin datos</div>
-            ) : widget.widget_type === 'list' ? (
+            ) : viewType === 'list' ? (
               // Lista de conteos: "Vendedores: Julio 3, Nacarid 2, Elsy 1". Pedida
               // explicitamente COMO LISTA, no como grafico — por eso no lleva barra de
               // proporcion detras: eso volveria a leerse como un grafico de barras.
@@ -224,7 +280,7 @@ export default function DynamicWidget({ widget, globalFilters, canEdit, dealersh
                   </li>
                 ))}
               </ul>
-            ) : widget.widget_type === 'bar' ? (
+            ) : viewType === 'bar' ? (
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={aggregated} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.3} />

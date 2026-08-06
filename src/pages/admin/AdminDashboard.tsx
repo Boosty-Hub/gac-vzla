@@ -6,8 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
   MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
-  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles, Smile,
+  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles, Smile, RotateCcw,
 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
@@ -18,8 +19,30 @@ import {
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useIsMobile } from '@/hooks/use-mobile';
 import CustomWidgetsSection from '@/components/dashboard/CustomWidgetsSection';
+import ChartCard from '@/components/dashboard/ChartCard';
+import { useDashboardLayout } from '@/hooks/useDashboardLayout';
 import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
 import SatisfactionDashboard from '@/components/satisfaction/SatisfactionDashboard';
+
+/**
+ * Orden POR DEFECTO de los reportes estándar. Solo se usa cuando el usuario nunca movió
+ * nada; a partir de ahí manda `dashboard_layout_prefs`.
+ *
+ * Las claves son contrato con la base: cambiar una equivale a un gráfico nuevo y el
+ * usuario pierde dónde lo había puesto. Agregar al final es seguro.
+ */
+const DASHBOARD_CHART_KEYS = [
+  'citas_concesionario',
+  'tipos_servicio',
+  'satisfaccion_concesionario',
+  'prospectos_conversion',
+  'ranking_vendedores',
+  'prospectos_canal',
+  'prospectos_estado',
+  'contacto_vendedor',
+  'tendencia_diaria',
+  'eventos',
+];
 
 interface Prospect {
   id: string;
@@ -62,6 +85,8 @@ const AdminDashboard = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  // Cómo se ve y dónde está cada gráfico, guardado por usuario.
+  const layout = useDashboardLayout();
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
@@ -292,58 +317,24 @@ const AdminDashboard = () => {
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
-          <p className="text-xs sm:text-sm text-muted-foreground">
-            <span className="font-medium text-foreground/80">{rangeDescription(fechaDesde, fechaHasta)}</span> — Resumen general del sistema
-          </p>
-        </div>
-        <DashboardDateRange
-          desde={fechaDesde}
-          hasta={fechaHasta}
-          onChange={(d, h) => { setFechaDesde(d); setFechaHasta(h); }}
-        />
-      </div>
-
-      <Tabs defaultValue="resumen" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="resumen" className="gap-1.5"><LayoutGrid className="w-3.5 h-3.5" /> Resumen</TabsTrigger>
-          <TabsTrigger value="satisfaccion" className="gap-1.5"><Smile className="w-3.5 h-3.5" /> Satisfacción</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="resumen" className="space-y-6">
-      {/* ╔════ SECCIÓN: VISTA GENERAL ════╗ */}
-      <div className="flex items-center gap-2 pb-1 border-b border-border/60">
-        <LayoutGrid className="w-4 h-4 text-primary" />
-        <h2 className="text-sm font-display font-semibold">Vista general</h2>
-        <span className="text-[10px] text-muted-foreground">indicadores y reportes estándar</span>
-      </div>
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCard icon={CalendarDays} label="Citas Reservadas" value={totalReservations} color="text-primary" sub={`${reservasCompletadas} completadas · ${reservasPendientes} pendientes`} />
-        <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
-        <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600" sub={`${ganados} ganados de ${totalProspects}`} />
-        <KpiCard icon={Star} label="Satisfacción Gral." value={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.avgAll}/5` : 'N/A'} color="text-amber-500" sub={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.ratedAll} respuestas` : 'Sin calificaciones'} />
-      </div>
-
-      {/* ── 1. Citas por concesionario / centro de servicio ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-muted-foreground" /> Citas por Concesionario / Centro de Servicio
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+  // Cada tarjeta del tablero, con la clave con la que se guarda su preferencia. `span`
+  // conserva la grilla actual: las dos de prospectos siguen lado a lado, el resto a lo
+  // ancho. La vista original va como `children` — varias muestran más que un conteo
+  // (conversión, satisfacción, tendencia) y reducirlas a nombre+número perdería datos.
+  const chartBlocks: Record<string, { span: 'full' | 'half'; node: React.ReactNode }> = {
+    citas_concesionario: {
+      span: 'full',
+      node: (
+        <ChartCard
+          chartKey="citas_concesionario" title="Citas por Concesionario / Centro de Servicio"
+          icon={Building2} layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={reservasByDealership.map(d => ({ name: d.name, value: d.value }))}
+        >
           {reservasByDealership.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
           ) : (
             <div className="space-y-2">
-              {reservasByDealership.map((d, i) => (
+              {reservasByDealership.map(d => (
                 <div key={d.name} className="flex items-center gap-3">
                   <div className="w-28 sm:w-40 text-xs truncate text-right text-muted-foreground shrink-0">{d.name}</div>
                   <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
@@ -364,17 +355,18 @@ const AdminDashboard = () => {
               </div>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </ChartCard>
+      ),
+    },
 
-      {/* ── 2. Tipos de servicios ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <Wrench className="w-4 h-4 text-muted-foreground" /> Tipos de Servicio
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+    tipos_servicio: {
+      span: 'full',
+      node: (
+        <ChartCard
+          chartKey="tipos_servicio" title="Tipos de Servicio"
+          icon={Wrench} layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={serviceTypeData}
+        >
           {serviceTypeData.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
           ) : (
@@ -388,17 +380,20 @@ const AdminDashboard = () => {
               </BarChart>
             </ResponsiveContainer>
           )}
-        </CardContent>
-      </Card>
+        </ChartCard>
+      ),
+    },
 
-      {/* ── 3. Satisfacción del cliente por concesionario ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <Star className="w-4 h-4 text-amber-500" /> Satisfacción del Cliente por Concesionario
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+    satisfaccion_concesionario: {
+      span: 'full',
+      node: (
+        <ChartCard
+          chartKey="satisfaccion_concesionario" title="Satisfacción del Cliente por Concesionario"
+          icon={Star} iconClass="text-amber-500" layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={satisfactionByDealership.byDealer.map(d => ({ name: d.name, value: d.avg }))}
+          showPercent={false} unit="/5" color="hsl(45, 90%, 45%)"
+          emptyText="Sin calificaciones registradas"
+        >
           {satisfactionByDealership.byDealer.length === 0 ? (
             <div className="text-center py-8 space-y-1">
               <p className="text-xs text-muted-foreground">Sin calificaciones registradas</p>
@@ -423,23 +418,25 @@ const AdminDashboard = () => {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </ChartCard>
+      ),
+    },
 
-      {/* ── 4 & 5. Prospectos y % conversión por concesionario ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <Users className="w-4 h-4 text-blue-500" /> Prospectos y Conversión por Concesionario
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
+    prospectos_conversion: {
+      span: 'full',
+      node: (
+        <ChartCard
+          chartKey="prospectos_conversion" title="Prospectos y Conversión por Concesionario"
+          icon={Users} iconClass="text-blue-500" layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={prospectsByDealership.map(d => ({ name: d.name, value: d.total }))}
+          color="hsl(220, 70%, 55%)"
+        >
           {prospectsByDealership.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
           ) : (
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-border -mx-6">
               {prospectsByDealership.map(d => (
-                <div key={d.name} className="flex items-center gap-3 px-4 py-2.5">
+                <div key={d.name} className="flex items-center gap-3 px-6 py-2.5">
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold truncate">{d.name}</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
@@ -461,16 +458,18 @@ const AdminDashboard = () => {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </ChartCard>
+      ),
+    },
 
-      {/* ── 6, 7 & 8. Leads por asesor / Rendimiento / % conversión ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <CardTitle className="text-sm font-display flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-amber-500" /> Leads · Rendimiento · Conversión por Vendedor
-            </CardTitle>
+    ranking_vendedores: {
+      span: 'full',
+      node: (
+        <ChartCard
+          chartKey="ranking_vendedores" title="Leads · Rendimiento · Conversión por Vendedor"
+          icon={Trophy} iconClass="text-amber-500" layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={salespersonRanking.map(sp => ({ name: sp.name, value: sp.total }))}
+          headerExtra={
             <div className="flex items-center gap-2 flex-wrap">
               <select value={rankingSource} onChange={e => setRankingSource(e.target.value)}
                 className="text-[10px] border rounded-md px-2 py-1 bg-background text-foreground h-7">
@@ -483,21 +482,20 @@ const AdminDashboard = () => {
                 {dealerships.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
+          }
+        >
           {salespersonRanking.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
           ) : (
-            <>
-              <div className="grid grid-cols-4 text-[10px] font-semibold text-muted-foreground px-4 py-1.5 border-b">
+            <div className="-mx-6">
+              <div className="grid grid-cols-4 text-[10px] font-semibold text-muted-foreground px-6 py-1.5 border-b">
                 <span>Vendedor</span><span className="text-center">Leads</span><span className="text-center">Ganados</span><span className="text-right">Conversión</span>
               </div>
               <div className="divide-y divide-border">
                 {salespersonRanking.map((sp, i) => (
                   <div
                     key={sp.name}
-                    className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
+                    className="flex items-center gap-3 px-6 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
                     onClick={() => navigate(`/admin/prospectos?salesperson=${encodeURIComponent(sp.name)}${rankingSource !== 'todos' ? `&source=${rankingSource}` : ''}${rankingDealership !== 'todos' ? `&dealership=${rankingDealership}` : ''}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
                     title={`Ver ${sp.total} prospectos de ${sp.name}`}
                   >
@@ -529,79 +527,86 @@ const AdminDashboard = () => {
                   </div>
                 ))}
               </div>
-            </>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </ChartCard>
+      ),
+    },
 
-      {/* ── 9. Prospectos por canal ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card className="gac-shadow">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-display flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-muted-foreground" /> Prospectos por Canal
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {prospectsBySource.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
-            ) : (
-              <ResponsiveContainer width="100%" height={Math.max(160, prospectsBySource.length * 36)}>
-                <BarChart data={prospectsBySource} layout="vertical" margin={{ top: 4, right: 12, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100} />
-                  <Tooltip contentStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="value" name="Prospectos" fill="hsl(220, 70%, 55%)" radius={[0, 4, 4, 0]} />
-                </BarChart>
+    prospectos_canal: {
+      span: 'half',
+      node: (
+        <ChartCard
+          chartKey="prospectos_canal" title="Prospectos por Canal"
+          icon={MapPin} layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={prospectsBySource} color="hsl(220, 70%, 55%)"
+        >
+          {prospectsBySource.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={Math.max(160, prospectsBySource.length * 36)}>
+              <BarChart data={prospectsBySource} layout="vertical" margin={{ top: 4, right: 12, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100} />
+                <Tooltip contentStyle={{ fontSize: 12 }} />
+                <Bar dataKey="value" name="Prospectos" fill="hsl(220, 70%, 55%)" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+      ),
+    },
+
+    prospectos_estado: {
+      span: 'half',
+      node: (
+        <ChartCard
+          chartKey="prospectos_estado" title="Prospectos por Estado"
+          icon={BarChart2} layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={prospectStatusPie}
+        >
+          {prospectStatusPie.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
+          ) : (
+            <div className="flex flex-col sm:flex-row items-center gap-4">
+              <ResponsiveContainer width={isMobile ? 160 : 180} height={160}>
+                <PieChart>
+                  <Pie data={prospectStatusPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={65} innerRadius={35} paddingAngle={2}>
+                    {prospectStatusPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v: number) => [v, 'Prospectos']} />
+                </PieChart>
               </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Prospectos por estado (pie) */}
-        <Card className="gac-shadow">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-display flex items-center gap-2">
-              <BarChart2 className="w-4 h-4 text-muted-foreground" /> Prospectos por Estado
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {prospectStatusPie.length === 0 ? (
-              <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
-            ) : (
-              <div className="flex flex-col sm:flex-row items-center gap-4">
-                <ResponsiveContainer width={isMobile ? 160 : 180} height={160}>
-                  <PieChart>
-                    <Pie data={prospectStatusPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={65} innerRadius={35} paddingAngle={2}>
-                      {prospectStatusPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => [v, 'Prospectos']} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex flex-wrap gap-2 justify-center sm:flex-col sm:gap-1">
-                  {prospectStatusPie.map((s, i) => (
-                    <div key={s.name} className="flex items-center gap-2 text-xs">
-                      <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                      <span className="text-muted-foreground">{s.name}</span>
-                      <span className="font-semibold">{s.value}</span>
-                    </div>
-                  ))}
-                </div>
+              <div className="flex flex-wrap gap-2 justify-center sm:flex-col sm:gap-1">
+                {prospectStatusPie.map((s, i) => (
+                  <div key={s.name} className="flex items-center gap-2 text-xs">
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                    <span className="text-muted-foreground">{s.name}</span>
+                    <span className="font-semibold">{s.value}</span>
+                  </div>
+                ))}
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </div>
+          )}
+        </ChartCard>
+      ),
+    },
 
-      {/* ── Tipo de contacto por vendedor (stacked) ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <UserCheck className="w-4 h-4 text-muted-foreground" /> Tipo de Contacto por Vendedor
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+    contacto_vendedor: {
+      span: 'full',
+      node: (
+        <ChartCard
+          chartKey="contacto_vendedor" title="Tipo de Contacto por Vendedor"
+          icon={UserCheck} layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={contactTypeBySalesperson.data.map(row => ({
+            name: String(row.name),
+            // Lista y torta necesitan UN número por vendedor, así que se suman sus canales.
+            // La vista original sigue mostrando el desglose apilado.
+            value: contactTypeBySalesperson.sources.reduce(
+              (acc, src) => acc + (Number((row as Record<string, unknown>)[src]) || 0), 0),
+          }))}
+        >
           {contactTypeBySalesperson.data.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">Sin datos</p>
           ) : (
@@ -619,17 +624,19 @@ const AdminDashboard = () => {
               </BarChart>
             </ResponsiveContainer>
           )}
-        </CardContent>
-      </Card>
+        </ChartCard>
+      ),
+    },
 
-      {/* ── Tendencia diaria ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-muted-foreground" /> Tendencia Diaria (30 días)
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+    tendencia_diaria: {
+      span: 'full',
+      // Sin `series`: es una serie de tiempo con DOS métricas. Aplanarla a nombre+número
+      // perdería la mitad, así que esta tarjeta se mueve pero no cambia de vista.
+      node: (
+        <ChartCard
+          chartKey="tendencia_diaria" title="Tendencia Diaria (30 días)"
+          icon={TrendingUp} layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+        >
           <ResponsiveContainer width="100%" height={isMobile ? 200 : 260}>
             <LineChart data={dailyTrend} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
@@ -641,16 +648,20 @@ const AdminDashboard = () => {
               <Line type="monotone" dataKey="reservas" name="Reservas" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
-        </CardContent>
-      </Card>
+        </ChartCard>
+      ),
+    },
 
-      {/* ── 10. Captación por evento ── */}
-      <Card className="gac-shadow">
-        <CardHeader className="pb-2 space-y-2">
-          <CardTitle className="text-sm font-display flex items-center gap-2">
-            <CalendarDays className="w-4 h-4 text-violet-500" /> Eventos — Captación de Leads
-          </CardTitle>
-          {eventBreakdown.length > 0 && (
+    eventos: {
+      span: 'full',
+      node: (
+        <ChartCard
+          chartKey="eventos" title="Eventos — Captación de Leads"
+          icon={CalendarDays} iconClass="text-violet-500" layout={layout} allKeys={DASHBOARD_CHART_KEYS}
+          series={eventBreakdown.map(ev => ({ name: ev.name, value: ev.total }))}
+          color="hsl(280, 60%, 55%)"
+          emptyText="No hay prospectos registrados desde eventos"
+          headerExtra={eventBreakdown.length > 0 ? (
             <Select value={eventFilter} onValueChange={setEventFilter}>
               <SelectTrigger className="h-8 text-xs w-full">
                 <SelectValue placeholder="Todos los eventos" />
@@ -662,17 +673,16 @@ const AdminDashboard = () => {
                 ))}
               </SelectContent>
             </Select>
-          )}
-        </CardHeader>
-        <CardContent className="p-0">
+          ) : undefined}
+        >
           {eventBreakdown.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-8">No hay prospectos registrados desde eventos</p>
           ) : (
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-border -mx-6">
               {(eventFilter === 'todos' ? eventBreakdown : eventBreakdown.filter(ev => ev.name === eventFilter)).map(ev => (
                 <div
                   key={ev.name}
-                  className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
+                  className="flex items-center justify-between px-6 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
                   onClick={() => navigate(`/admin/prospectos?event_name=${encodeURIComponent(ev.name)}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
                   title={`Ver ${ev.total} prospectos del evento`}
                 >
@@ -700,8 +710,76 @@ const AdminDashboard = () => {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </ChartCard>
+      ),
+    },
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-display font-bold">Dashboard</h1>
+          <p className="text-xs sm:text-sm text-muted-foreground">
+            <span className="font-medium text-foreground/80">{rangeDescription(fechaDesde, fechaHasta)}</span> — Resumen general del sistema
+          </p>
+        </div>
+        <DashboardDateRange
+          desde={fechaDesde}
+          hasta={fechaHasta}
+          onChange={(d, h) => { setFechaDesde(d); setFechaHasta(h); }}
+        />
+      </div>
+
+      <Tabs defaultValue="resumen" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="resumen" className="gap-1.5"><LayoutGrid className="w-3.5 h-3.5" /> Resumen</TabsTrigger>
+          <TabsTrigger value="satisfaccion" className="gap-1.5"><Smile className="w-3.5 h-3.5" /> Satisfacción</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="resumen" className="space-y-6">
+      {/* ╔════ SECCIÓN: VISTA GENERAL ════╗ */}
+      <div className="flex items-center gap-2 pb-1 border-b border-border/60">
+        <LayoutGrid className="w-4 h-4 text-primary" />
+        <h2 className="text-sm font-display font-semibold">Vista general</h2>
+        {layout.hasCustomLayout && (
+          <Button
+            variant="ghost" size="sm"
+            className="h-6 text-[10px] text-muted-foreground gap-1 ml-auto"
+            onClick={layout.reset}
+            title="Vuelve al orden y las vistas de fábrica"
+          >
+            <RotateCcw className="w-3 h-3" /> Restablecer tablero
+          </Button>
+        )}
+        <span className="text-[10px] text-muted-foreground">indicadores y reportes estándar</span>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard icon={CalendarDays} label="Citas Reservadas" value={totalReservations} color="text-primary" sub={`${reservasCompletadas} completadas · ${reservasPendientes} pendientes`} />
+        <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
+        <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600" sub={`${ganados} ganados de ${totalProspects}`} />
+        <KpiCard icon={Star} label="Satisfacción Gral." value={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.avgAll}/5` : 'N/A'} color="text-amber-500" sub={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.ratedAll} respuestas` : 'Sin calificaciones'} />
+      </div>
+
+      {/* ── Reportes estándar ──────────────────────────────────────────────────
+          Cada tarjeta se puede reordenar y cambiar de vista; la elección se guarda
+          por usuario en `dashboard_layout_prefs`. Se arman como un diccionario y se
+          renderizan en el orden que devuelve el hook: sin eso, "moverlo" implicaría
+          reescribir el JSX. La vista original de cada una va como `children`. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {layout.order(DASHBOARD_CHART_KEYS).map(key => {
+          const block = chartBlocks[key];
+          if (!block) return null;
+          return (
+            <div key={key} className={block.span === 'full' ? 'md:col-span-2' : ''}>
+              {block.node}
+            </div>
+          );
+        })}
+      </div>
 
       {/* ╔════ SECCIÓN: WIDGETS PERSONALIZADOS ════╗ */}
       <div className="pt-4 mt-4 border-t-2 border-dashed border-primary/30 space-y-4">

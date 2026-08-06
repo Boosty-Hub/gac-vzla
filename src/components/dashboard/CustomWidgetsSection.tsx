@@ -16,6 +16,7 @@ import { useSalespersons } from '@/hooks/useSalespersons';
 import DynamicWidget from './DynamicWidget';
 import WidgetEditor from './WidgetEditor';
 import { DashboardWidget } from './widgetSchema';
+import { useDashboardLayout, widgetPrefKey } from '@/hooks/useDashboardLayout';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -33,6 +34,10 @@ export default function CustomWidgetsSection({ dealerships }: Props) {
 
   const [widgets, setWidgets] = useState<DashboardWidget[]>([]);
   const [loading, setLoading] = useState(true);
+  // Mismo almacén que los gráficos fijos, con claves "widget:<uuid>". El `sort_order` de
+  // `dashboard_widgets` sigue siendo el orden que define el admin para todos; esto lo pisa
+  // solo para quien haya movido algo.
+  const layout = useDashboardLayout();
 
   // Global filters
   const [fechaDesde, setFechaDesde] = useState('');
@@ -87,6 +92,14 @@ export default function CustomWidgetsSection({ dealerships }: Props) {
   };
 
   const globalFilters = { fechaDesde, fechaHasta, dealershipId };
+
+  // Los widgets se ordenan por la preferencia del usuario, cayendo al `sort_order` del
+  // admin (que es el orden en que ya vienen de la consulta) para los que nunca movió.
+  const widgetKeys = useMemo(() => widgets.map(w => widgetPrefKey(w.id)), [widgets]);
+  const orderedWidgets = useMemo(() => {
+    const byKey = new Map(widgets.map(w => [widgetPrefKey(w.id), w]));
+    return layout.order(widgetKeys).map(k => byKey.get(k)).filter(Boolean) as DashboardWidget[];
+  }, [widgets, widgetKeys, layout]);
 
   return (
     <div className="space-y-3">
@@ -159,7 +172,7 @@ export default function CustomWidgetsSection({ dealerships }: Props) {
         </Card>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {widgets.map(w => (
+          {orderedWidgets.map(w => (
             <DynamicWidget
               key={w.id}
               widget={w}
@@ -170,6 +183,8 @@ export default function CustomWidgetsSection({ dealerships }: Props) {
               sourceLabels={sourceLabels}
               onEdit={() => { setEditingWidget(w); setEditorOpen(true); }}
               onDelete={() => setDeletingId(w.id)}
+              layout={layout}
+              allKeys={widgetKeys}
             />
           ))}
         </div>
