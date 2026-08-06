@@ -73,6 +73,13 @@ function setClientExternal(clientId: string, value: boolean) {
   });
 }
 
+function setClientsExternal(clientIds: string[], value: boolean) {
+  return (supabase.rpc as unknown as UntypedRpc)('set_clients_external', {
+    p_client_ids: clientIds,
+    p_value: value,
+  });
+}
+
 
 
 interface ClientUser {
@@ -217,12 +224,13 @@ const AdminClientes = () => {
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  type BulkActionType = 'city' | 'state' | 'email' | 'isActive' | null;
+  type BulkActionType = 'city' | 'state' | 'email' | 'isActive' | 'isManual' | null;
   const [bulkAction, setBulkAction] = useState<BulkActionType>(null);
   const [bulkCity, setBulkCity] = useState('');
   const [bulkState, setBulkState] = useState('');
   const [bulkEmail, setBulkEmail] = useState('');
   const [bulkIsActive, setBulkIsActive] = useState(true);
+  const [bulkIsManual, setBulkIsManual] = useState(true);
   const [bulkConfirmDeleteOpen, setBulkConfirmDeleteOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
 
@@ -825,6 +833,28 @@ const AdminClientes = () => {
 
   const handleBulkApply = async () => {
     if (!bulkAction) return;
+
+    // Externo no es un UPDATE plano: tiene que arrastrar los vehículos de cada cliente,
+    // y eso vive en la RPC. Ver 20260806170000_set_clients_external_bulk.sql.
+    if (bulkAction === 'isManual') {
+      setBulkLoading(true);
+      const ids = [...selectedIds];
+      const { error } = await setClientsExternal(ids, bulkIsManual);
+      if (error) {
+        toast.error('No se pudo cambiar el tipo de los clientes');
+        console.error(error);
+      } else {
+        toast.success(bulkIsManual
+          ? `${ids.length} cliente(s) marcados como externos, junto con sus vehículos`
+          : `${ids.length} cliente(s) ya no son externos`);
+        setSelectedIds(new Set());
+        setBulkAction(null);
+        fetchClients();
+      }
+      setBulkLoading(false);
+      return;
+    }
+
     let payload: Record<string, any> = {};
     switch (bulkAction) {
       case 'city': payload = { city: bulkCity.trim() || null }; break;
@@ -1610,6 +1640,10 @@ const AdminClientes = () => {
               onClick={() => { setBulkAction('isActive'); setBulkIsActive(true); }}>
               <Power className="w-3 h-3" /> Estado
             </Button>
+            <Button size="sm" variant="ghost" className="text-white hover:bg-white/10 h-7 text-xs gap-1 shrink-0 whitespace-nowrap px-2"
+              onClick={() => { setBulkAction('isManual'); setBulkIsManual(true); }}>
+              <Wrench className="w-3 h-3" /> Externo
+            </Button>
             {canDelete && (
               <>
                 <div className="w-px h-4 bg-gray-700 shrink-0 mx-1" />
@@ -1637,6 +1671,7 @@ const AdminClientes = () => {
               {bulkAction === 'state' && 'Cambiar estado (Venezuela)'}
               {bulkAction === 'email' && 'Cambiar correo electrónico'}
               {bulkAction === 'isActive' && 'Cambiar estado activo'}
+              {bulkAction === 'isManual' && 'Marcar como clientes externos'}
             </DialogTitle>
           </DialogHeader>
           <div className="py-1 space-y-3">
@@ -1665,6 +1700,18 @@ const AdminClientes = () => {
                   <p className="text-xs text-muted-foreground">Estado del cliente en el sistema</p>
                 </div>
                 <Switch checked={bulkIsActive} onCheckedChange={setBulkIsActive} />
+              </div>
+            )}
+            {bulkAction === 'isManual' && (
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div className="pr-3">
+                  <p className="text-sm font-medium">{bulkIsManual ? 'Cliente externo' : 'Cliente propio'}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Externo = cargado a mano. Sus vehículos se marcan junto con él. La garantía
+                    no se toca.
+                  </p>
+                </div>
+                <Switch checked={bulkIsManual} onCheckedChange={setBulkIsManual} />
               </div>
             )}
           </div>
