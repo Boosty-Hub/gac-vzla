@@ -239,10 +239,6 @@ export async function createOrReuseManualEntities(
   // Track whether WE created the client this call, so we can roll it back if the
   // vehicle insert fails (avoids leaving orphan clients behind).
   let clientWasCreated = false;
-  // Tracks the `is_manual` value actually persisted on a NEWLY created client, so
-  // the Kommo-sync guard below reads the real stored flag instead of re-deriving
-  // it. Stays false for every reuse branch — reusing a client never flags them.
-  let clientIsManual = false;
 
   // One RPC instead of two direct selects. It applies the same precedence (cedula, then
   // phone) but SECURITY DEFINER, so it actually sees the row — which the direct selects
@@ -261,9 +257,12 @@ export async function createOrReuseManualEntities(
         cedula: cedula || null,
         phone: phone || null,
         is_active: true,
-        // A manual-model reservation means this person is only being invoiced for
-        // a one-off, third-party service — not a real GAC/DFSK/SHINERAY customer.
-        is_manual: Boolean(manualModel),
+        // Externo = lo cargamos nosotros a mano, no vino de una venta ni del CRM. Vale
+        // para TODO el ingreso manual, no solo cuando la marca está fuera del catálogo:
+        // un tercero puede traer un GAC que no le vendimos. Antes esto era
+        // `Boolean(manualModel)` y por eso no había un solo cliente externo en la base
+        // pese a que sí se cargaban a mano.
+        is_manual: true,
       })
       .select('id')
       .single();
@@ -284,7 +283,6 @@ export async function createOrReuseManualEntities(
     } else {
       clientId = data.id;
       clientWasCreated = true;
-      clientIsManual = Boolean(manualModel);
     }
   }
 
@@ -313,7 +311,11 @@ export async function createOrReuseManualEntities(
       model_id: modelId,
       year,
       plate: plate || null,
-      is_manual: Boolean(manualModel),
+      // Mismo criterio que el cliente: entró a mano, así que es externo aunque el modelo
+      // salga del catálogo. NO afecta la garantía — esa la decide `vehicle_models.
+      // is_manual` (src/lib/warranty.ts), que solo se marca cuando la marca se escribe
+      // a mano. Un externo con un GAC conserva su garantía.
+      is_manual: true,
     })
     .select('id, client_id')
     .single();
@@ -332,16 +334,19 @@ export async function createOrReuseManualEntities(
 
   // Fire-and-forget: sync into Kommo's Post Venta "En conversación" stage only when
   // a genuinely NEW client was inserted above (not on the cedula/phone reuse branches),
-  // only after the vehicle insert succeeded so a rolled-back client is never synced,
-  // and NEVER when the client is manual (`clientIsManual`).
+  // and only after the vehicle insert succeeded so a rolled-back client is never synced.
   //
-  // DO NOT REMOVE the `!clientIsManual` guard. A manual client is a third party we
-  // serviced once for a vehicle we don't sell (`is_manual: true` on `clients`) — they
-  // are explicitly NOT a commercial customer. Syncing them would manufacture a bogus
-  // Post-Venta lead in Kommo for every walk-in third-party service, which is exactly
-  // what the reported requirement forbids: "ojo, no puede quedar con nuestros clientes."
-  // See supabase/migrations/20260730140000_manual_vehicles_and_clients.sql.
-  if (clientWasCreated && clientId && !clientIsManual) {
+  // DO NOT REMOVE the third-party guard. Un tercero al que le hicimos un mantenimiento
+  // sobre un vehículo que no vendemos NO es un cliente comercial: sincronizarlo
+  // fabricaría un lead de Post Venta falso por cada entrada de taller, que es justo lo
+  // que el requerimiento prohíbe ("ojo, no puede quedar con nuestros clientes").
+  // Ver supabase/migrations/20260730140000_manual_vehicles_and_clients.sql.
+  //
+  // La guarda mira el MODELO, no `is_manual` del cliente. Desde que "externo" pasó a
+  // significar "cargado a mano", esa bandera es true para todo este camino, y atar el
+  // sync a ella dejaría sin sincronizar a clientes reales que solo faltaba cargar.
+  const isThirdPartyVehicle = Boolean(manualModel);
+  if (clientWasCreated && clientId && !isThirdPartyVehicle) {
     syncClientToKommo(clientId).catch(() => {});
   }
 

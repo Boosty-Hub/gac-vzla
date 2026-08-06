@@ -460,6 +460,21 @@ describe('createOrReuseManualEntities — manual model (typed brand/model)', () 
     expect(fake.insertedVehicles[0].is_manual).toBe(true);
   });
 
+  // "Externo" quiere decir "lo cargamos a mano", no "la marca no es nuestra": un tercero
+  // puede traer un GAC que no le vendimos. Con el criterio viejo (`Boolean(manualModel)`)
+  // este caso quedaba como cliente normal, y por eso no había NI UN externo en la base
+  // pese a que sí se cargaban a mano.
+  it('marca como externos al cliente y al vehículo aunque el modelo salga del catálogo', async () => {
+    const fake = makeFakeClient();
+    await createOrReuseManualEntities(fake as never, baseInput);
+    expect(fake.insertedClients[0].is_manual).toBe(true);
+    expect(fake.insertedVehicles[0].is_manual).toBe(true);
+    // El modelo del catálogo se usa tal cual: no se crea un vehicle_models manual, que es
+    // lo que cortaría la garantía de un GAC legítimo.
+    expect(fake.insertedVehicleModels).toHaveLength(0);
+    expect(fake.insertedVehicles[0].model_id).toBe('model-1');
+  });
+
   it('does NOT flag a REUSED client (matched by cedula) as manual', async () => {
     const fake = makeFakeClient({ clientsByCedula: { 'V-12345678': { id: 'cli-ced' } } });
     const result = await createOrReuseManualEntities(fake as never, {
@@ -503,9 +518,13 @@ describe('createOrReuseManualEntities — Kommo sync guard', () => {
     vi.mocked(syncClientToKommo).mockClear();
   });
 
-  it('syncs a genuinely new, non-manual client to Kommo', async () => {
+  // La guarda mira el MODELO, no la bandera de externo del cliente: este cliente se marca
+  // externo (entró a mano) pero el vehículo es del catálogo, así que es un cliente real
+  // que solo faltaba cargar y sí tiene que ir a Kommo.
+  it('sincroniza a un cliente nuevo cuyo vehículo sale del catálogo, aunque quede como externo', async () => {
     const fake = makeFakeClient();
     await createOrReuseManualEntities(fake as never, baseInput);
+    expect(fake.insertedClients[0].is_manual).toBe(true);
     expect(syncClientToKommo).toHaveBeenCalledTimes(1);
     expect(syncClientToKommo).toHaveBeenCalledWith(fake.insertedClients[0].id);
   });

@@ -164,6 +164,10 @@ const AdminClientes = () => {
   const [clientVehicles, setClientVehicles] = useState<Record<string, Vehicle[]>>({});
   const [vehicleDialogOpen, setVehicleDialogOpen] = useState(false);
   const [vehicleClientId, setVehicleClientId] = useState<string>('');
+  // Si el dueño es un cliente externo, su vehículo también lo es — sea del catálogo o
+  // escrito a mano. "Externo" quiere decir "lo cargamos nosotros a mano", no "la marca no
+  // es nuestra"; por eso se marca por el cliente y no solo por el modelo.
+  const [vehicleClientIsExternal, setVehicleClientIsExternal] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
   const [vFormModelId, setVFormModelId] = useState('');
   const [vFormYear, setVFormYear] = useState('');
@@ -537,7 +541,7 @@ const AdminClientes = () => {
           // para poder atenderle una unidad. Se encadena el alta del vehículo en vez de
           // dejarlo como un paso que hay que acordarse de hacer después.
           toast.success('Cliente externo creado. Registrá su vehículo.');
-          openAddVehicle(data.id, true);
+          openAddVehicle(data.id, true, true);
         } else {
           toast.success('Cliente creado');
         }
@@ -551,9 +555,10 @@ const AdminClientes = () => {
   // encadenar desde el alta de un cliente externo: lo habitual ahí es un vehículo que no
   // está en nuestro catálogo. Sigue siendo cambiable — un externo también puede traer un
   // GAC que no le vendimos nosotros.
-  const openAddVehicle = (clientId: string, preferManualModel = false) => {
+  const openAddVehicle = (clientId: string, clientIsExternal = false, preferManualModel = false) => {
     setEditingVehicle(null);
     setVehicleClientId(clientId);
+    setVehicleClientIsExternal(clientIsExternal);
     setVFormModelId(preferManualModel ? MANUAL_MODEL_VALUE : '');
     setVFormYear(new Date().getFullYear().toString());
     setVFormPlate(''); setVFormVin(''); setVFormColor('');
@@ -565,6 +570,9 @@ const AdminClientes = () => {
   const openEditVehicle = (vehicle: Vehicle) => {
     setEditingVehicle(vehicle);
     setVehicleClientId(vehicle.client_id);
+    // Al editar se conserva la marca de externo que ya tenía la ficha. Recalcularla desde
+    // el cliente cargado en pantalla la borraría cuando se edita desde otra vista.
+    setVehicleClientIsExternal(vehicle.is_manual);
     if (vehicle.is_manual && vehicle.vehicle_models) {
       // Manual models are excluded from `models` (the picker's options), so
       // there is no matching SelectItem for vehicle.model_id — reopen in
@@ -632,9 +640,10 @@ const AdminClientes = () => {
       mileage: parseInt(vFormMileage) || 0,
       purchase_date: vFormPurchaseDate || null,
       // A third-party vehicle never carries our warranty, regardless of the
-      // switch's last value.
+      // switch's last value. Ojo: depende del MODELO, no de `is_manual` del vehículo —
+      // un cliente externo puede traer un GAC que sí tiene garantía vigente.
       warranty_active: isManualModel ? false : vFormWarranty,
-      is_manual: isManualModel,
+      is_manual: isManualModel || vehicleClientIsExternal,
     };
 
     if (editingVehicle) {
@@ -999,7 +1008,7 @@ const AdminClientes = () => {
                     <div className="mt-2 pt-2 border-t space-y-2" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-between">
                         <p className="text-xs font-semibold flex items-center gap-1"><Car className="w-3.5 h-3.5" /> Vehículos</p>
-                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddVehicle(c.id)}>
+                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddVehicle(c.id, c.is_manual)}>
                           <Plus className="w-3 h-3 mr-1" /> Agregar
                         </Button>
                       </div>
@@ -1161,7 +1170,7 @@ const AdminClientes = () => {
                           <h4 className="text-sm font-semibold flex items-center gap-2">
                             <Car className="w-4 h-4" /> Vehículos del cliente
                           </h4>
-                          <Button size="sm" variant="outline" onClick={() => openAddVehicle(c.id)}>
+                          <Button size="sm" variant="outline" onClick={() => openAddVehicle(c.id, c.is_manual)}>
                             <Plus className="w-3 h-3 mr-1" /> Agregar Vehículo
                           </Button>
                         </div>
