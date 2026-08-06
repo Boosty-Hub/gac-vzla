@@ -132,6 +132,16 @@ interface ManualEntitiesQuery {
 interface ManualEntitiesClient {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   from: (table: string) => any;
+  /**
+   * Needed for the reuse lookups below. A plain `from('clients').select()` is BLIND for
+   * a dealership user: `clients_select` only exposes clients that already have a
+   * reservation at their own dealership, so an existing client shows up as "not found",
+   * gets re-inserted, and dies on the `clients_cedula_key` unique index. The
+   * SECURITY DEFINER RPCs see the whole table and are gated to staff roles.
+   * See supabase/migrations/20260806120000_staff_client_search_cedula_phone.sql.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rpc: (fn: string, params: Record<string, unknown>) => Promise<QueryResult<any>>;
 }
 
 /**
@@ -153,6 +163,15 @@ interface ManualEntitiesClient {
  * UNIQUE in the DB, normalized before lookup), otherwise when its phone matches;
  * only when neither matches is a new client inserted. A UNIQUE-violation (23505)
  * on cedula insert is recovered by re-reading and reusing the existing client.
+ *
+ * BOTH reuse lookups go through SECURITY DEFINER RPCs (`staff_resolve_client`,
+ * `staff_resolve_vehicle_by_plate`), never a direct select. RLS only exposes to a
+ * dealership user the clients and vehicles that already have a reservation at their own
+ * dealership, so the direct reads answered "does not exist" for rows that did exist —
+ * the insert then hit the unique index and the reservation failed outright. That is the
+ * reported "el cliente existe pero no se puede vincular". Do not swap these back for
+ * `from('clients')` / `from('vehicles')`: it works for an admin and silently breaks for
+ * everyone else. See 20260806120000_staff_client_search_cedula_phone.sql.
  *
  * Manual model (`input.manualModel`): when the caller supplies a hand-typed
  * brand/model instead of `modelId` (a third-party vehicle we don't sell), the
@@ -202,14 +221,16 @@ export async function createOrReuseManualEntities(
 
   // Plate is UNIQUE in the DB: if a vehicle already exists with this plate, reuse it
   // (and its client) instead of inserting a duplicate that would violate the constraint.
+  //
+  // Via RPC, not a direct select: `vehicles_select` hides from a dealership user every
+  // vehicle without a reservation at their own dealership, so the direct read reported
+  // "no existe" for a plate that did exist, and the insert then died on the unique index
+  // with no recovery path at all.
   if (plate) {
-    const { data: existingVehicle } = await client
-      .from('vehicles')
-      .select('id, client_id')
-      .eq('plate', plate)
-      .maybeSingle();
-    if (existingVehicle?.id && existingVehicle.client_id) {
-      return { vehicle: { id: existingVehicle.id, client_id: existingVehicle.client_id } };
+    const { data: plateRows } = await client.rpc('staff_resolve_vehicle_by_plate', { p_plate: plate });
+    const existingVehicle = (plateRows as Array<{ vehicle_id: string; client_id: string | null }> | null)?.[0];
+    if (existingVehicle?.vehicle_id && existingVehicle.client_id) {
+      return { vehicle: { id: existingVehicle.vehicle_id, client_id: existingVehicle.client_id } };
     }
   }
 
@@ -223,13 +244,14 @@ export async function createOrReuseManualEntities(
   // it. Stays false for every reuse branch — reusing a client never flags them.
   let clientIsManual = false;
 
-  if (cedula) {
-    const { data } = await client.from('clients').select('id').eq('cedula', cedula).maybeSingle();
-    if (data?.id) clientId = data.id;
-  }
-  if (!clientId && phone) {
-    const { data } = await client.from('clients').select('id').eq('phone', phone).limit(1).maybeSingle();
-    if (data?.id) clientId = data.id;
+  // One RPC instead of two direct selects. It applies the same precedence (cedula, then
+  // phone) but SECURITY DEFINER, so it actually sees the row — which the direct selects
+  // did not for a dealership user, and that is the whole reported bug: the client existed
+  // and could not be linked.
+  if (cedula || phone) {
+    const { data } = await client.rpc('staff_resolve_client', { p_cedula: cedula, p_phone: phone });
+    const resolved = typeof data === 'string' ? data : null;
+    if (resolved) clientId = resolved;
   }
   if (!clientId) {
     const { data, error } = await client
@@ -250,13 +272,12 @@ export async function createOrReuseManualEntities(
       // constraint (Postgres 23505). Re-query by cedula and reuse instead of aborting.
       const code = (error as { code?: string } | null)?.code;
       if (code === '23505' && cedula) {
-        const { data: existing } = await client
-          .from('clients')
-          .select('id')
-          .eq('cedula', cedula)
-          .maybeSingle();
-        if (existing?.id) {
-          clientId = existing.id;
+        // Through the RPC as well. With the direct select this recovery was useless for a
+        // dealership user: the same RLS that hid the client in the first place hid it
+        // again here, so the 23505 always ended in a thrown error.
+        const { data: existing } = await client.rpc('staff_resolve_client', { p_cedula: cedula, p_phone: '' });
+        if (typeof existing === 'string' && existing) {
+          clientId = existing;
         }
       }
       if (!clientId) throw error || new Error('No se pudo crear el cliente');

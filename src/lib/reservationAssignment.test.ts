@@ -43,6 +43,32 @@ function makeFakeClient(opts: FakeOptions = {}) {
     insertedClients,
     insertedVehicles,
     insertedVehicleModels,
+    /**
+     * The reuse lookups go through SECURITY DEFINER RPCs, not direct selects, because
+     * RLS makes the direct read blind for a dealership user (see the module docblock).
+     * The fake answers them from the same `clientsByCedula` / `clientsByPhone` /
+     * `vehiclesByPlate` maps, so every reuse test keeps asserting the same behaviour.
+     */
+    async rpc(fn: string, params: Record<string, unknown>) {
+      if (fn === 'staff_resolve_vehicle_by_plate') {
+        const plate = String(params.p_plate ?? '');
+        const found = opts.vehiclesByPlate?.[plate];
+        return {
+          data: found ? [{ vehicle_id: found.id, client_id: found.client_id }] : [],
+          error: null,
+        };
+      }
+      if (fn === 'staff_resolve_client') {
+        const cedula = String(params.p_cedula ?? '');
+        const phone = String(params.p_phone ?? '');
+        // Cedula wins over phone, mirroring the RPC's ORDER BY.
+        const found = (cedula && opts.clientsByCedula?.[cedula])
+          || (phone && opts.clientsByPhone?.[phone])
+          || null;
+        return { data: found ? found.id : null, error: null };
+      }
+      throw new Error(`unexpected rpc: ${fn}`);
+    },
     from(table: string) {
       const state: {
         op: 'select' | 'insert' | 'delete' | null;
@@ -315,6 +341,15 @@ describe('createOrReuseManualEntities', () => {
     let cedulaLookups = 0;
     const fake = {
       insertedVehicles: [] as Row[],
+      async rpc(fn: string) {
+        if (fn === 'staff_resolve_vehicle_by_plate') return { data: [], error: null };
+        if (fn === 'staff_resolve_client') {
+          cedulaLookups++;
+          // First lookup: miss. After the conflicting insert: hit.
+          return { data: cedulaLookups > 1 ? recovered.id : null, error: null };
+        }
+        throw new Error(`unexpected rpc: ${fn}`);
+      },
       from(table: string) {
         const state: { op: string | null; values: Row | null; eqs: Array<[string, unknown]> } = {
           op: null, values: null, eqs: [],
@@ -326,12 +361,6 @@ describe('createOrReuseManualEntities', () => {
           eq(c: string, v: unknown) { state.eqs.push([c, v]); return builder; },
           limit() { return builder; },
           async maybeSingle() {
-            if (table === 'vehicles') return { data: null, error: null };
-            if (table === 'clients' && state.eqs.some(([c]) => c === 'cedula')) {
-              cedulaLookups++;
-              // First lookup: miss. After the conflicting insert: hit.
-              return { data: cedulaLookups > 1 ? recovered : null, error: null };
-            }
             return { data: null, error: null };
           },
           async single() {
@@ -350,6 +379,41 @@ describe('createOrReuseManualEntities', () => {
     const result = await createOrReuseManualEntities(fake as never, baseInput);
     expect(result.vehicle.client_id).toBe('cli-race');
     expect(fake.insertedVehicles).toHaveLength(1);
+  });
+
+  // Regresión reportada: "hay clientes que existen en nuestra base de datos interna, pero
+  // no están en el sistema de gestión, por lo que no se puede realizar la vinculación".
+  // Bajo RLS, un `from('clients').select()` no ve al cliente si no tiene una reserva en el
+  // concesionario del usuario, así que el reuso fallaba, se insertaba de nuevo y moría en
+  // clients_cedula_key. Estas dos pruebas fijan que el reuso ocurre por RPC.
+  it('busca el cliente existente por RPC y no por un select directo (ciego bajo RLS)', async () => {
+    const seenTables: string[] = [];
+    const rpcCalls: string[] = [];
+    const fake = makeFakeClient({ clientsByCedula: { 'V-12345678': { id: 'cli-ced' } } });
+    const wrapped = {
+      ...fake,
+      rpc(fn: string, params: Record<string, unknown>) { rpcCalls.push(fn); return fake.rpc(fn, params); },
+      from(table: string) { seenTables.push(table); return fake.from(table); },
+    };
+    const result = await createOrReuseManualEntities(wrapped as never, baseInput);
+    expect(result.vehicle.client_id).toBe('cli-ced');
+    expect(rpcCalls).toContain('staff_resolve_client');
+    // `clients` solo puede aparecer para INSERT/DELETE, nunca para resolver el reuso.
+    expect(rpcCalls).toContain('staff_resolve_vehicle_by_plate');
+    expect(seenTables).not.toContain('clients');
+  });
+
+  it('reusa el vehículo existente por placa vía RPC, sin tocar la tabla vehicles', async () => {
+    const seenTables: string[] = [];
+    const fake = makeFakeClient({ vehiclesByPlate: { ABC123: { id: 'veh-x', client_id: 'cli-x' } } });
+    const wrapped = {
+      ...fake,
+      rpc: fake.rpc,
+      from(table: string) { seenTables.push(table); return fake.from(table); },
+    };
+    const result = await createOrReuseManualEntities(wrapped as never, baseInput);
+    expect(result.vehicle).toEqual({ id: 'veh-x', client_id: 'cli-x' });
+    expect(seenTables).not.toContain('vehicles');
   });
 });
 

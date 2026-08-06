@@ -75,6 +75,15 @@ interface PlateResult {
   clients: { id: string; full_name: string; phone: string | null; cedula: string | null } | null;
 }
 
+/**
+ * Una fila del buscador unificado: o un vehículo resuelto por placa, o un cliente.
+ * El cliente arrastra cédula y teléfono porque la búsqueda ahora también matchea por
+ * esos campos — sin mostrarlos, dos homónimos son indistinguibles en el desplegable.
+ */
+type UnifiedResult =
+  | { kind: 'vehicle'; data: PlateResult }
+  | { kind: 'client'; id: string; full_name: string; cedula: string | null; phone: string | null; is_manual: boolean };
+
 interface ServiceType {
   id: number;
   name: string;
@@ -218,7 +227,7 @@ const DealershipReservas = () => {
   const [unifiedSearch, setUnifiedSearch] = useState<string>(() => getDrLS().unifiedSearch || '');
   const [plateResult, setPlateResult] = useState<PlateResult | null>(() => getDrLS().plateResult || null);
   const [plateSearched, setPlateSearched] = useState<boolean>(() => getDrLS().plateSearched === true);
-  const [unifiedResults, setUnifiedResults] = useState<Array<{kind: 'vehicle'; data: PlateResult} | {kind: 'client'; id: string; full_name: string}>>([]);
+  const [unifiedResults, setUnifiedResults] = useState<UnifiedResult[]>([]);
   const [unifiedDropdown, setUnifiedDropdown] = useState(false);
   const [unifiedSearching, setUnifiedSearching] = useState(false);
   const [unifiedSearched, setUnifiedSearched] = useState(false);
@@ -371,10 +380,15 @@ const DealershipReservas = () => {
         supabase.rpc('staff_lookup_vehicle_by_plate', { p_plate: q }),
         // RLS: el SELECT directo de clients solo devuelve clientes con reserva en
         // el concesionario (oculta ~83% de la base, sobre todo flotas). La RPC
-        // staff_search_clients_by_name (gateada a rol staff) busca en toda la base.
-        supabase.rpc('staff_search_clients_by_name', { p_query: q }),
+        // staff_search_clients (gateada a rol staff) busca en toda la base.
+        //
+        // Antes era staff_search_clients_by_name, que miraba SOLO full_name: buscar por
+        // cedula o telefono no devolvia nada aunque el cliente existiera, y de ahi salia
+        // el "el cliente esta en nuestra base pero no se puede vincular". Ver
+        // 20260806120000_staff_client_search_cedula_phone.sql.
+        supabase.rpc('staff_search_clients', { p_query: q }),
       ]);
-      const results: Array<{kind: 'vehicle'; data: PlateResult} | {kind: 'client'; id: string; full_name: string}> = [];
+      const results: UnifiedResult[] = [];
       const vehicleRow = ((vehicleRes.data || []) as any[])[0];
       if (vehicleRow) {
         const pr: PlateResult = {
@@ -395,7 +409,15 @@ const DealershipReservas = () => {
         };
         results.push({ kind: 'vehicle', data: pr });
       }
-      (clientRes.data || []).forEach((c: { client_id: string; full_name: string }) => results.push({ kind: 'client', id: c.client_id, full_name: c.full_name }));
+      (clientRes.data || []).forEach((c: { client_id: string; full_name: string; cedula: string | null; phone: string | null; is_manual: boolean }) =>
+        results.push({
+          kind: 'client',
+          id: c.client_id,
+          full_name: c.full_name,
+          cedula: c.cedula ?? null,
+          phone: c.phone ?? null,
+          is_manual: !!c.is_manual,
+        }));
       setUnifiedResults(results);
       setUnifiedDropdown(results.length > 0);
       setUnifiedSearched(true);
@@ -1651,7 +1673,19 @@ const DealershipReservas = () => {
                             }}
                           >
                             <User className="w-3 h-3 shrink-0 text-muted-foreground" />
-                            <span>{r.full_name}</span>
+                            <div className="min-w-0">
+                              <span>{r.full_name}</span>
+                              {r.is_manual && (
+                                <Badge className="ml-1 text-[9px] px-1 py-0 bg-amber-100 text-amber-800" title="Cliente externo">
+                                  Externo
+                                </Badge>
+                              )}
+                              {(r.cedula || r.phone) && (
+                                <span className="block text-muted-foreground text-[10px] truncate">
+                                  {[r.cedula, r.phone].filter(Boolean).join(' · ')}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         )
                       )}
