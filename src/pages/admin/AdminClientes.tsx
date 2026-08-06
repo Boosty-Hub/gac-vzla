@@ -58,6 +58,21 @@ interface Vehicle {
 // never a real vehicle_models.id (those are UUIDs).
 const MANUAL_MODEL_VALUE = '__manual__';
 
+/**
+ * `set_client_external` todavía no está en los tipos generados (RPC nueva, sin regenerar
+ * types.ts). Se declara su firma real acá una sola vez, en vez de castear a `any` en cada
+ * llamada: así los dos call sites siguen tipados.
+ * Ver supabase/migrations/20260806160000_set_client_external.sql.
+ */
+type UntypedRpc = (fn: string, params: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
+
+function setClientExternal(clientId: string, value: boolean) {
+  return (supabase.rpc as unknown as UntypedRpc)('set_client_external', {
+    p_client_id: clientId,
+    p_value: value,
+  });
+}
+
 
 
 interface ClientUser {
@@ -153,9 +168,9 @@ const AdminClientes = () => {
   const [formState, setFormState] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
   const [formIsFleet, setFormIsFleet] = useState(false);
-  // Cliente externo: un tercero al que le hacemos un servicio puntual, no alguien a quien
-  // le vendimos. Se persiste igual que cualquier otro cliente — la bandera es lo que lo
-  // mantiene fuera del conteo comercial, de Kommo y de los KPI de garantía.
+  // Cliente externo: lo cargamos a mano, no vino de una venta ni del CRM. Se persiste
+  // igual que cualquier otro; la bandera es de origen y de filtrado. NO toca la garantía
+  // — eso lo decide `vehicle_models.is_manual`. Ver 20260806150000.
   const [formIsManual, setFormIsManual] = useState(false);
   const [formPin, setFormPin] = useState('');
 
@@ -448,6 +463,23 @@ const AdminClientes = () => {
     setClientDialogOpen(true);
   };
 
+  // Marca/desmarca un cliente ya cargado como externo. Va por RPC y no por dos updates
+  // sueltos porque el cliente y sus vehículos tienen que quedar coherentes: marcar al
+  // cliente sin arrastrar sus vehículos deja la vista de externos a medias.
+  const toggleClientExternal = async (client: Client) => {
+    const next = !client.is_manual;
+    const { error } = await setClientExternal(client.id, next);
+    if (error) {
+      toast.error('No se pudo cambiar el tipo de cliente');
+      console.error(error);
+      return;
+    }
+    toast.success(next
+      ? `${client.full_name} quedó como cliente externo, junto con sus vehículos`
+      : `${client.full_name} ya no es cliente externo`);
+    fetchClients();
+  };
+
   const openEditClient = (client: Client) => {
     setEditingClient(client);
     setFormName(client.full_name);
@@ -489,13 +521,24 @@ const AdminClientes = () => {
       // it is NOT what prevents duplicate surveys — `fn_claim_survey_slot` already
       // rate-limits every client to one survey per 24h regardless of this value.
       is_fleet: formIsFleet,
-      // Cliente externo (tercero de servicio puntual). Ver 20260730140000.
+      // Cliente externo = cargado a mano. Ver 20260806150000.
       is_manual: formIsManual,
     };
 
     if (editingClient) {
       const { error } = await supabase.from('clients').update(payload).eq('id', editingClient.id);
       if (error) { toast.error('Error al actualizar cliente'); console.error(error); setSaving(false); return; }
+
+      // Si acá se cambió la marca de externo hay que arrastrar los vehículos, y eso lo
+      // resuelve la misma RPC que usa el botón rápido de la lista. El update de arriba ya
+      // dejó la bandera del cliente; esto la reafirma y sincroniza sus vehículos.
+      if (formIsManual !== editingClient.is_manual) {
+        const { error: extErr } = await setClientExternal(editingClient.id, formIsManual);
+        if (extErr) {
+          toast.error('Cliente guardado, pero no se pudieron sincronizar sus vehículos');
+          console.error(extErr);
+        }
+      }
 
       // PIN de acceso: vive en profiles, solo si el cliente tiene cuenta (profile_id)
       if (editingClient.profile_id && newPin !== (editingClient.profiles?.pin_code || '')) {
@@ -810,7 +853,7 @@ const AdminClientes = () => {
         </div>
         {canCreate && (
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => openCreateClient(true)} title="Tercero al que le hacemos un servicio puntual">
+            <Button size="sm" variant="outline" onClick={() => openCreateClient(true)} title="Cliente cargado a mano, no proveniente de una venta ni del CRM">
               <Wrench className="w-3.5 h-3.5 mr-1" /> Nuevo externo
             </Button>
             <Button size="sm" onClick={() => openCreateClient(false)} className="gac-gradient">
@@ -888,10 +931,15 @@ const AdminClientes = () => {
               <>
                 <Wrench className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm font-medium">Todavía no hay clientes externos</p>
-                <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
-                  Un cliente externo es un tercero al que le hacés un servicio puntual sobre un
-                  vehículo que no le vendimos nosotros. Se crean desde "Nuevo externo", o solos
-                  cuando en una reserva usás "Ingresar manualmente" con una marca fuera del catálogo.
+                <p className="text-xs text-muted-foreground mt-1 max-w-lg mx-auto">
+                  Externo quiere decir que lo cargaste vos a mano, no que vino de una venta o del
+                  CRM. Su vehículo puede ser nuestro igual. Se marcan solos al crearlos desde
+                  "Nuevo externo" o al usar "Ingresar manualmente" en una reserva.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2 max-w-lg mx-auto">
+                  Los que ya tenías cargados no se marcaron solos: en la base no queda rastro de
+                  cuáles entraron a mano. Marcalos vos con el ícono de llave <Wrench className="w-3 h-3 inline mx-0.5" />
+                  en la lista de clientes — sus vehículos se marcan junto con ellos.
                 </p>
                 {canCreate && (
                   <Button size="sm" variant="outline" className="mt-3" onClick={() => openCreateClient(true)}>
@@ -932,7 +980,7 @@ const AdminClientes = () => {
                             {c.is_active ? 'Activo' : 'Inactivo'}
                           </Badge>
                           {c.is_manual && (
-                            <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 gap-0.5" title="Cliente de tercero, registrado solo para un servicio puntual">
+                            <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 gap-0.5" title="Cliente cargado a mano, no proveniente de una venta ni del CRM">
                               <Wrench className="w-2.5 h-2.5" /> Externo
                             </Badge>
                           )}
@@ -994,6 +1042,17 @@ const AdminClientes = () => {
                           <a href={waUrl} target="_blank" rel="noopener noreferrer">
                             <MessageCircle className="w-3.5 h-3.5" />
                           </a>
+                        </Button>
+                      )}
+                      {canEdit && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn('h-7 w-7', c.is_manual && 'text-amber-700')}
+                          onClick={() => toggleClientExternal(c)}
+                          title={c.is_manual ? 'Quitar la marca de externo' : 'Marcar como cliente externo'}
+                        >
+                          <Wrench className="w-3.5 h-3.5" />
                         </Button>
                       )}
                       {canEdit && (
@@ -1090,7 +1149,7 @@ const AdminClientes = () => {
                       <div className="flex items-center gap-1.5">
                         <span>{c.full_name}</span>
                         {c.is_manual && (
-                          <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800 gap-0.5" title="Cliente de tercero, registrado solo para un servicio puntual">
+                          <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800 gap-0.5" title="Cliente cargado a mano, no proveniente de una venta ni del CRM">
                             <Wrench className="w-2.5 h-2.5" /> Externo
                           </Badge>
                         )}
@@ -1155,6 +1214,17 @@ const AdminClientes = () => {
                             </Button>
                           ) : null;
                         })()}
+                        {canEdit && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn('h-6 w-6', c.is_manual && 'text-amber-700')}
+                            onClick={() => toggleClientExternal(c)}
+                            title={c.is_manual ? 'Quitar la marca de externo' : 'Marcar como cliente externo'}
+                          >
+                            <Wrench className="w-3 h-3" />
+                          </Button>
+                        )}
                         {canEdit && (
                           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditClient(c)}>
                             <Pencil className="w-3 h-3" />
@@ -1313,9 +1383,9 @@ const AdminClientes = () => {
               <div className="pr-3">
                 <Label>Cliente externo</Label>
                 <p className="text-xs text-muted-foreground">
-                  Tercero al que le hacemos un servicio puntual: no le vendimos el vehículo.
-                  Queda guardado en la base, pero fuera del conteo comercial, de la sincronización
-                  con Kommo y de los indicadores de garantía.
+                  Cargado a mano, no vino de una venta ni del CRM. Su vehículo puede ser nuestro
+                  igual — la garantía no se toca. Al activarlo, sus vehículos también quedan
+                  marcados como externos.
                 </p>
               </div>
               <Switch checked={formIsManual} onCheckedChange={setFormIsManual} />

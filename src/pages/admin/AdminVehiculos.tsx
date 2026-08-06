@@ -584,7 +584,7 @@ const AdminVehiculos = () => {
                         <span className="font-semibold text-sm truncate">{v.vehicle_models?.name || '-'}</span>
                         <span className="text-xs text-muted-foreground shrink-0">{v.year}</span>
                         {v.is_manual && (
-                          <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800" title="Vehículo de tercero, no vendido por nosotros">
+                          <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800" title="Vehículo cargado a mano o de un cliente externo">
                             Externo
                           </Badge>
                         )}
@@ -659,7 +659,7 @@ const AdminVehiculos = () => {
                     <div className="flex items-center gap-1.5">
                       <span>{v.vehicle_models?.name || '-'}</span>
                       {v.is_manual && (
-                        <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800" title="Vehículo de tercero, no vendido por nosotros">
+                        <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800" title="Vehículo cargado a mano o de un cliente externo">
                           Externo
                         </Badge>
                       )}
@@ -928,7 +928,7 @@ const AdminVehiculos = () => {
                     <h3 className="font-display font-bold text-sm flex items-center gap-1.5 flex-wrap">
                       {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}
                       {v.is_manual && (
-                        <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800" title="Vehículo de tercero, no vendido por nosotros">
+                        <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800" title="Vehículo cargado a mano o de un cliente externo">
                           Externo
                         </Badge>
                       )}
