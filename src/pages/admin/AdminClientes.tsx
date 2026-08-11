@@ -25,7 +25,6 @@ import { extractEdgeError } from '@/lib/edgeError';
 import { isRecurrentClient } from '@/lib/recompra';
 import { syncClientToKommo } from '@/lib/kommo';
 import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
-import { sanitizeSearchTerm } from '@/lib/vehicleSearch';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 
@@ -144,6 +143,10 @@ const AdminClientes = () => {
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
+  // Lo que realmente se consulta. Sin esto la búsqueda corre una vez por tecla y escribir
+  // "Sanchez" son 7 consultas, de las que 6 se descartan. El input sigue respondiendo al
+  // instante; sólo se retrasa el viaje a la base.
+  const [busquedaDebounced, setBusquedaDebounced] = useState('');
   const [pageSize, setPageSize] = useState(100);
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
@@ -258,94 +261,68 @@ const AdminClientes = () => {
 
   const fetchClients = async () => {
     setLoading(true);
-    let query = (supabase as any)
-      .from('clients')
-      .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)', { count: 'exact' });
 
-    // Filtered server-side (not after the fact) so `count: 'exact'` always matches what's
-    // actually displayed — filtering client-side while still counting the excluded rows
-    // would desync pagination (the last page could render empty).
-    if (filterKind === 'propios') {
-      query = query.eq('is_manual', false);
-    } else if (filterKind === 'externos') {
-      query = query.eq('is_manual', true);
+    // Búsqueda, filtros y paginación se resuelven ENTEROS en SQL; sólo vuelven los ids de
+    // esta página. Antes las coincidencias por placa/VIN, modelo y chofer se resolvían acá
+    // con tres consultas extra y después TODOS los ids encontrados viajaban dentro de la URL
+    // como `id.in.(uuid,...)`. Con un término común eso pasaba los ~24 KiB que acepta el
+    // gateway de Supabase, que respondía `400 Bad Request` en texto plano: ese era el
+    // "Error al cargar clientes" que aparecía al teclear un nombre (medido: "s" → 748 ids →
+    // 28.036 chars → 400). Ver supabase/migrations/20260811120000_search_clients_page.sql.
+    //
+    // No volver a armar filtros con listas de ids en la URL: crece con los datos y vuelve a
+    // romper sola cuando la base crece, sin que nadie toque este archivo.
+    const { data: pageRows, error: pageError } = await (supabase as any).rpc('search_clients_page', {
+      p_query: busquedaDebounced.trim(),
+      p_kind: filterKind,
+      p_status: filterStatus,
+      p_city: filterCity,
+      p_warranty: filterWarranty,
+      p_limit: pageSize,
+      p_offset: page * pageSize,
+    });
+
+    if (pageError) {
+      toast.error('Error al cargar clientes');
+      console.error(pageError);
+      setLoading(false);
+      return;
     }
 
-    if (busqueda.trim()) {
-      // Patterns are double-quoted, following `src/lib/vehicleSearch.ts`: PostgREST's
-      // `or()` grammar is comma/parenthesis delimited, and quoting is what lets those
-      // characters survive inside a term. The previous unquoted version silently produced
-      // a malformed filter for a search like "Perez, Juan".
-      const q = sanitizeSearchTerm(busqueda);
-      if (q) {
-        const clauses = [
-          `full_name.ilike."%${q}%"`,
-          `cedula.ilike."%${q}%"`,
-          `email.ilike."%${q}%"`,
-          `phone.ilike."%${q}%"`,
-        ];
+    // `total_count` viene repetido en cada fila (window function). Con cero filas no hay de
+    // dónde leerlo, y cero filas significa que esta página no tiene nada: total 0.
+    const rows = (pageRows || []) as { client_id: string; total_count: number }[];
+    const total = rows.length > 0 ? Number(rows[0].total_count) : 0;
+    const ids = rows.map(r => r.client_id);
 
-        // R9 — plate/model and driver live on other tables. Resolve them to client ids
-        // first and fold the result into the SAME `or()`, so filtering, `count: 'exact'`
-        // and pagination all stay server-side and consistent. Doing it client-side would
-        // desync the page count exactly like the warranty filter already does.
-        const MAX_RELATED = 1000;
-        const [modelHits, vehicleHits, driverHits] = await Promise.all([
-          (supabase as any).from('vehicle_models').select('id').or(`name.ilike."%${q}%",brand.ilike."%${q}%"`).limit(MAX_RELATED),
-          (supabase as any).from('vehicles').select('client_id').or(`plate.ilike."%${q}%",vin.ilike."%${q}%"`).limit(MAX_RELATED),
-          (supabase as any).from('drivers').select('client_id').eq('is_active', true).or(`full_name.ilike."%${q}%",cedula.ilike."%${q}%"`).limit(MAX_RELATED),
-        ]);
-
-        const relatedClientIds = new Set<string>();
-        for (const row of (vehicleHits.data || []) as { client_id: string | null }[]) {
-          if (row.client_id) relatedClientIds.add(row.client_id);
-        }
-        for (const row of (driverHits.data || []) as { client_id: string | null }[]) {
-          if (row.client_id) relatedClientIds.add(row.client_id);
-        }
-
-        // Model-name matches need one more hop: models -> vehicles -> clients.
-        const modelIds = ((modelHits.data || []) as { id: string }[]).map(m => m.id);
-        if (modelIds.length > 0) {
-          const { data: byModel } = await (supabase as any)
-            .from('vehicles').select('client_id').in('model_id', modelIds).limit(MAX_RELATED);
-          for (const row of (byModel || []) as { client_id: string | null }[]) {
-            if (row.client_id) relatedClientIds.add(row.client_id);
-          }
-        }
-
-        if (relatedClientIds.size > 0) {
-          clauses.push(`id.in.(${Array.from(relatedClientIds).join(',')})`);
-        }
-        query = query.or(clauses.join(','));
+    if (ids.length === 0) {
+      // Pasa al borrar estando en la última página: esa página se quedó sin filas pero la
+      // lista no está vacía. Volver a la primera en vez de mostrar un tablero en blanco que
+      // parece un error. `loading` queda en true a propósito: el fetch que dispara setPage
+      // lo apaga, y así no parpadea un "sin resultados" entre medio.
+      if (page > 0) {
+        setPage(0);
+        return;
       }
+      setClients([]);
+      setTotalCount(total);
+      setLoading(false);
+      return;
     }
 
-    if (filterStatus !== 'todos') {
-      query = query.eq('is_active', filterStatus === 'activo');
-    }
-    if (filterCity !== 'todos') {
-      query = query.eq('city', filterCity);
-    }
-
-    const { data, error, count } = await query
-      .order('full_name')
-      .range(page * pageSize, (page + 1) * pageSize - 1);
+    // Segundo viaje sólo por las filas de la página: como máximo `pageSize` ids en la URL.
+    const { data, error } = await (supabase as any)
+      .from('clients')
+      .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
+      .in('id', ids)
+      .order('full_name');
 
     if (error) {
       toast.error('Error al cargar clientes');
       console.error(error);
     } else {
-      let filtered = data || [];
-      // Client-side warranty filter since it depends on nested vehicles
-      if (filterWarranty !== 'todos') {
-        filtered = filtered.filter(c => {
-          const hasActiveWarranty = c.vehicles?.some((v: any) => v.warranty_active);
-          return filterWarranty === 'activa' ? hasActiveWarranty : !hasActiveWarranty;
-        });
-      }
-      setClients(filtered as Client[]);
-      setTotalCount(filterWarranty !== 'todos' ? filtered.length : (count || 0));
+      setClients((data || []) as Client[]);
+      setTotalCount(total);
     }
     setLoading(false);
   };
@@ -377,12 +354,17 @@ const AdminClientes = () => {
   };
 
   useEffect(() => {
+    const t = setTimeout(() => setBusquedaDebounced(busqueda), 300);
+    return () => clearTimeout(t);
+  }, [busqueda]);
+
+  useEffect(() => {
     setPage(0);
-  }, [busqueda, pageSize, filterStatus, filterWarranty, filterCity, filterKind]);
+  }, [busquedaDebounced, pageSize, filterStatus, filterWarranty, filterCity, filterKind]);
 
   useEffect(() => {
     fetchClients();
-  }, [page, busqueda, pageSize, filterStatus, filterWarranty, filterCity, filterKind]);
+  }, [page, busquedaDebounced, pageSize, filterStatus, filterWarranty, filterCity, filterKind]);
 
   useEffect(() => {
     fetchModels();
