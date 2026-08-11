@@ -59,8 +59,11 @@ const PublicReserva = () => {
   // Step management
   const [step, setStep] = useState<'plate' | 'form' | 'confirm' | 'success'>('plate');
 
-  // Plate search
-  const [plate, setPlate] = useState('');
+  // Plate search. Se acepta `?placa=` para que "Pedir cita" desde /mi-flota llegue con la
+  // placa puesta: el cliente ya la eligió ahí, volver a pedírsela es pedirle lo mismo dos veces.
+  const [plate, setPlate] = useState(
+    () => new URLSearchParams(window.location.search).get('placa')?.toUpperCase() || '',
+  );
   const [confirmedPlate, setConfirmedPlate] = useState('');
   const [searching, setSearching] = useState(false);
   const [plateError, setPlateError] = useState('');

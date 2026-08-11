@@ -35,6 +35,7 @@ import AdminSoporte from './pages/admin/config/AdminSoporte';
 import ConfigLayout from "./components/layouts/ConfigLayout";
 import BoostySupport from "./components/BoostySupport";
 import PublicReserva from "./pages/PublicReserva";
+import PublicMiFlota from "./pages/PublicMiFlota";
 import PublicProspectos from "./pages/PublicProspectos";
 import PublicEncuesta from "./pages/PublicEncuesta";
 import NotFound from "./pages/NotFound";
@@ -67,6 +68,7 @@ const App = () => (
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/" element={<RedirectByRole />} />
             <Route path="/reservar" element={<PublicReserva />} />
+            <Route path="/mi-flota" element={<PublicMiFlota />} />
             <Route path="/prospectos" element={<PublicProspectos />} />
             <Route path="/encuesta/:token" element={<PublicEncuesta />} />
 
