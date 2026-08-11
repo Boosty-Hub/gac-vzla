@@ -108,7 +108,25 @@ interface ClientVehicleInfo {
   id: string;
   warranty_active: boolean;
   is_manual: boolean;
+  // Hace falta para saber si el cliente externo ya puede entrar a /mi-flota: sin placa no
+  // tiene con qué identificarse. Ver 20260811150000_external_portal.sql.
+  plate: string | null;
   vehicle_models: { brand: string } | null;
+}
+
+/**
+ * Qué le falta a un cliente externo para poder entrar al portal (/mi-flota).
+ *
+ * El acceso NO se provisiona: no hay usuario ni contraseña que crear. Se entra con la placa
+ * y el teléfono, así que alcanza con que esos dos datos existan. Pero justamente por eso hay
+ * que decirlo: un externo cargado sin teléfono, o sin vehículo con placa, queda afuera sin
+ * que nada avise.
+ */
+function portalAccessGap(client: { phone: string | null; vehicles?: ClientVehicleInfo[] }): string | null {
+  const faltantes: string[] = [];
+  if (!client.phone?.trim()) faltantes.push('teléfono');
+  if (!client.vehicles?.some(v => v.plate?.trim())) faltantes.push('un vehículo con placa');
+  return faltantes.length ? faltantes.join(' y ') : null;
 }
 
 interface Client {
@@ -167,7 +185,12 @@ const AdminClientes = () => {
   // recargaba y volvía a mostrar exactamente los mismos 1378 clientes — que es tal cual
   // lo reportado ("no arroja ningún tipo de información"). Ahora el filtro es excluyente,
   // así que "Externos" muestra externos o muestra vacío, pero nunca miente.
-  const [filterKind, setFilterKind] = useState<'propios' | 'externos' | 'todos'>('propios');
+  // La pestaña ES el filtro. Antes era un desplegable aparte: dos fuentes de verdad para lo
+  // mismo, y los externos quedaban escondidos detrás de un combo que había que saber abrir.
+  const [tab, setTab] = useState<'clientes' | 'externos' | 'satisfaccion'>('clientes');
+  const filterKind: 'propios' | 'externos' = tab === 'externos' ? 'externos' : 'propios';
+  // Cuántos hay de cada tipo, para el número al lado de cada pestaña.
+  const [kindCounts, setKindCounts] = useState<{ propios: number; externos: number } | null>(null);
 
   // Client dialog
   const [clientDialogOpen, setClientDialogOpen] = useState(false);
@@ -323,7 +346,7 @@ const AdminClientes = () => {
     // Segundo viaje sólo por las filas de la página: como máximo `pageSize` ids en la URL.
     const { data, error } = await (supabase as any)
       .from('clients')
-      .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
+      .select('*, vehicles(id, warranty_active, is_manual, plate, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
       .in('id', ids)
       .order('full_name');
 
@@ -382,9 +405,30 @@ const AdminClientes = () => {
     setExternalSources(await listExternalSources());
   };
 
+  /**
+   * Totales de cada pestaña. Son GLOBALES a propósito: no los tocan la búsqueda ni los
+   * filtros, así que sólo hace falta recalcularlos cuando se crea, borra o re-marca un
+   * cliente — no en cada tecla. Por eso no vive dentro de `fetchClients`.
+   */
+  const fetchKindCounts = async () => {
+    const one = (kind: 'propios' | 'externos') => (supabase as any).rpc('search_clients_page', {
+      p_query: '', p_kind: kind, p_status: 'todos', p_city: 'todos',
+      p_warranty: 'todos', p_source: 'todos', p_limit: 1, p_offset: 0,
+    });
+    const [p, e] = await Promise.all([one('propios'), one('externos')]);
+    const total = (res: { data: { total_count: number }[] | null }) => Number(res.data?.[0]?.total_count ?? 0);
+    setKindCounts({ propios: total(p), externos: total(e) });
+  };
+
+  /** Lo que hay que refrescar cuando cambia el CONJUNTO de clientes, no la vista. */
+  const refreshCounters = () => { fetchKindCounts(); fetchExternalSources(); };
+
   useEffect(() => {
     fetchModels();
-    fetchExternalSources();
+    refreshCounters();
+    // Sólo al montar: son catálogos, no dependen de los filtros. Las mutaciones que sí los
+    // cambian llaman a refreshCounters() explícitamente.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Deep link from the Satisfacción dashboard: `?client=<id>&tab=encuestas`. Works
@@ -405,7 +449,7 @@ const AdminClientes = () => {
     const openFromDeepLink = async () => {
       const { data, error } = await (supabase as any)
         .from('clients')
-        .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
+        .select('*, vehicles(id, warranty_active, is_manual, plate, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
         .eq('id', clientParam)
         .maybeSingle();
       if (cancelled) return;
@@ -435,7 +479,7 @@ const AdminClientes = () => {
     setOpeningSurveyClient(true);
     const { data, error } = await (supabase as any)
       .from('clients')
-      .select('*, vehicles(id, warranty_active, is_manual, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
+      .select('*, vehicles(id, warranty_active, is_manual, plate, vehicle_models(brand)), client_users(count), profiles!clients_profile_id_fkey(pin_code)')
       .eq('id', clientId)
       .maybeSingle();
     setOpeningSurveyClient(false);
@@ -486,6 +530,7 @@ const AdminClientes = () => {
       ? `${client.full_name} quedó como cliente externo, junto con sus vehículos`
       : `${client.full_name} ya no es cliente externo`);
     fetchClients();
+    refreshCounters();
   };
 
   const openEditClient = (client: Client) => {
@@ -565,7 +610,7 @@ const AdminClientes = () => {
         }
       }
 
-      toast.success('Cliente actualizado'); setClientDialogOpen(false); fetchClients(); fetchExternalSources();
+      toast.success('Cliente actualizado'); setClientDialogOpen(false); fetchClients(); refreshCounters();
     } else {
       const { data, error } = await supabase.from('clients').insert(payload).select('id').single();
       if (error) { toast.error('Error al crear cliente'); console.error(error); }
@@ -580,7 +625,7 @@ const AdminClientes = () => {
         if (data?.id && !formIsManual) syncClientToKommo(data.id).catch(console.error);
         setClientDialogOpen(false);
         fetchClients();
-        fetchExternalSources();
+        refreshCounters();
 
         // `clients_insert` deja crear al concesionario/vendedor, pero `clients_select` solo
         // les muestra clientes que YA tienen una reserva en su concesionario. Sin este
@@ -823,7 +868,7 @@ const AdminClientes = () => {
     const ids = [...selectedIds];
     const { error } = await supabase.from('clients').update(payload).in('id', ids);
     if (error) toast.error('Error al actualizar clientes');
-    else { toast.success(`${ids.length} cliente(s) actualizados`); setSelectedIds(new Set()); setBulkAction(null); fetchClients(); }
+    else { toast.success(`${ids.length} cliente(s) actualizados`); setSelectedIds(new Set()); setBulkAction(null); fetchClients(); refreshCounters(); }
     setBulkLoading(false);
   };
 
@@ -832,7 +877,7 @@ const AdminClientes = () => {
     const ids = [...selectedIds];
     const { error } = await supabase.from('clients').delete().in('id', ids);
     if (error) toast.error('Error al eliminar clientes');
-    else { toast.success(`${ids.length} cliente(s) eliminados`); setSelectedIds(new Set()); setBulkConfirmDeleteOpen(false); fetchClients(); }
+    else { toast.success(`${ids.length} cliente(s) eliminados`); setSelectedIds(new Set()); setBulkConfirmDeleteOpen(false); fetchClients(); refreshCounters(); }
     setBulkLoading(false);
   };
 
@@ -855,6 +900,7 @@ const AdminClientes = () => {
         setSelectedIds(new Set());
         setBulkAction(null);
         fetchClients();
+        refreshCounters();
       }
       setBulkLoading(false);
       return;
@@ -872,28 +918,54 @@ const AdminClientes = () => {
   };
 
   return (
-    <Tabs defaultValue="clientes" className="space-y-3">
+    <Tabs value={tab} onValueChange={v => setTab(v as typeof tab)} className="space-y-3">
       <TabsList>
-        <TabsTrigger value="clientes">Clientes</TabsTrigger>
+        <TabsTrigger value="clientes" className="gap-1.5">
+          Clientes
+          {kindCounts && <span className="text-[10px] opacity-70 tabular-nums">{kindCounts.propios}</span>}
+        </TabsTrigger>
+        <TabsTrigger value="externos" className="gap-1.5">
+          <Wrench className="w-3 h-3" />
+          Clientes externos
+          {kindCounts && <span className="text-[10px] opacity-70 tabular-nums">{kindCounts.externos}</span>}
+        </TabsTrigger>
         <TabsTrigger value="satisfaccion">Satisfacción</TabsTrigger>
       </TabsList>
 
-      <TabsContent value="clientes" className="space-y-3">
+      {/* La lista se renderiza UNA vez para las dos pestañas de clientes, fuera de
+          <TabsContent>: es el mismo módulo con otro filtro, y duplicar mil líneas de JSX
+          para cambiar un booleano es la forma segura de que las dos copias se despeguen.
+          Radix además desmonta el panel inactivo, así que dos TabsContent recargarían la
+          tabla entera en cada cambio de pestaña. */}
+      {tab !== 'satisfaccion' && (
+      <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-display font-bold">Clientes</h1>
+          <h1 className="text-lg font-display font-bold">
+            {tab === 'externos' ? 'Clientes externos' : 'Clientes'}
+          </h1>
           <Badge variant="outline" className="gap-1 text-xs">
             <Users className="w-3 h-3" /> {totalCount}
           </Badge>
         </div>
         {canCreate && (
+          // En la pestaña de externos, "Nuevo externo" es LA acción: ofrecer ahí un botón
+          // que crea un cliente propio sólo lleva a cargarlo en el lugar equivocado.
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => openCreateClient(true)} title="Cliente cargado a mano, no proveniente de una venta ni del CRM">
-              <Wrench className="w-3.5 h-3.5 mr-1" /> Nuevo externo
-            </Button>
-            <Button size="sm" onClick={() => openCreateClient(false)} className="gac-gradient">
-              <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
-            </Button>
+            {tab === 'externos' ? (
+              <Button size="sm" onClick={() => openCreateClient(true)} className="gac-gradient">
+                <Wrench className="w-3.5 h-3.5 mr-1" /> Nuevo externo
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" variant="outline" onClick={() => openCreateClient(true)} title="Cliente cargado a mano, no proveniente de una venta ni del CRM">
+                  <Wrench className="w-3.5 h-3.5 mr-1" /> Nuevo externo
+                </Button>
+                <Button size="sm" onClick={() => openCreateClient(false)} className="gac-gradient">
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -938,14 +1010,6 @@ const AdminClientes = () => {
             <SelectItem value="1000">1000 filas</SelectItem>
           </SelectContent>
         </Select>
-        <Select value={filterKind} onValueChange={v => setFilterKind(v as typeof filterKind)}>
-          <SelectTrigger className="h-8 text-xs sm:w-[150px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="propios">Clientes propios</SelectItem>
-            <SelectItem value="externos">Solo externos</SelectItem>
-            <SelectItem value="todos">Propios y externos</SelectItem>
-          </SelectContent>
-        </Select>
         {/* Sólo aparece si hay convenios cargados: un filtro con una única opción es ruido. */}
         {externalSources.length > 0 && (
           <Select value={filterSource} onValueChange={setFilterSource}>
@@ -986,7 +1050,12 @@ const AdminClientes = () => {
                 <p className="text-xs text-muted-foreground mt-2 max-w-lg mx-auto">
                   Los que ya tenías cargados no se marcaron solos: en la base no queda rastro de
                   cuáles entraron a mano. Marcalos vos con el ícono de llave <Wrench className="w-3 h-3 inline mx-0.5" />
-                  en la lista de clientes — sus vehículos se marcan junto con ellos.
+                  desde la pestaña <span className="font-medium">Clientes</span> — sus vehículos
+                  se marcan junto con ellos, y podés hacerlo en lote seleccionando varios.
+                </p>
+                <p className="text-xs text-muted-foreground mt-2 max-w-lg mx-auto">
+                  Con teléfono y una placa cargados, entran solos a <span className="font-mono">/mi-flota</span>:
+                  no hay usuario ni contraseña que dar de alta.
                 </p>
                 {canCreate && (
                   <Button size="sm" variant="outline" className="mt-3" onClick={() => openCreateClient(true)}>
@@ -1036,6 +1105,18 @@ const AdminClientes = () => {
                               <Wrench className="w-2.5 h-2.5" /> Externo{c.external_source ? ` · ${c.external_source}` : ''}
                             </Badge>
                           )}
+                          {c.is_manual && (() => {
+                            const falta = portalAccessGap(c);
+                            return falta ? (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-amber-300 text-amber-700" title={`No puede entrar al portal: falta ${falta}`}>
+                                <KeyRound className="w-2.5 h-2.5" /> Falta {falta}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5 border-green-300 text-green-700" title="Puede entrar a /mi-flota con su placa y su teléfono">
+                                <KeyRound className="w-2.5 h-2.5" /> Portal
+                              </Badge>
+                            );
+                          })()}
                           {isRecurrent && (
                             <Badge className="text-[10px] px-1.5 py-0 bg-green-100 text-green-700 gap-0.5">
                               <Repeat className="w-2.5 h-2.5" /> Recurrente
@@ -1210,6 +1291,18 @@ const AdminClientes = () => {
                             <Wrench className="w-2.5 h-2.5" /> Externo{c.external_source ? ` · ${c.external_source}` : ''}
                           </Badge>
                         )}
+                        {c.is_manual && (() => {
+                          const falta = portalAccessGap(c);
+                          return falta ? (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 gap-0.5 border-amber-300 text-amber-700" title={`No puede entrar al portal: falta ${falta}`}>
+                              <KeyRound className="w-2.5 h-2.5" /> Falta {falta}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 gap-0.5 border-green-300 text-green-700" title="Puede entrar a /mi-flota con su placa y su teléfono">
+                              <KeyRound className="w-2.5 h-2.5" /> Portal
+                            </Badge>
+                          );
+                        })()}
                       </div>
                     </TableCell>
                     <TableCell>{c.cedula || '-'}</TableCell>
@@ -1465,6 +1558,26 @@ const AdminClientes = () => {
                   Con qué empresa o alianza llegó. Sirve para filtrarlos después y saber
                   cuántos trae cada convenio. Podés dejarlo vacío.
                 </p>
+
+                {/* El acceso al portal no se activa ni se provisiona: se entra con la placa
+                    y el teléfono. Por eso lo único que puede fallar es que falte uno de los
+                    dos, y eso hay que decirlo acá y no descubrirlo cuando el cliente llame. */}
+                <div className="border-t pt-2 mt-2 space-y-1">
+                  <p className="text-xs font-medium flex items-center gap-1">
+                    <KeyRound className="w-3 h-3" /> Acceso al portal
+                  </p>
+                  {formPhone.trim() ? (
+                    <p className="text-xs text-muted-foreground">
+                      Entra en <span className="font-mono">/mi-flota</span> con la placa de su
+                      vehículo y este teléfono. No hay usuario ni contraseña que crear.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-amber-700">
+                      Sin teléfono no va a poder entrar: el teléfono es lo que confirma que es
+                      él, porque la placa está a la vista de cualquiera. Cargalo arriba.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1876,7 +1989,8 @@ const AdminClientes = () => {
         </DialogContent>
       </Dialog>
 
-      </TabsContent>
+      </div>
+      )}
 
       <TabsContent value="satisfaccion">
         <SatisfactionOverview onSelectClient={openClientFromSurvey} />
