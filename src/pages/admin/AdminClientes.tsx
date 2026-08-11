@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
+import { listExternalSources, type ExternalSource } from '@/lib/externalSources';
 import { findOrCreateManualModel, type ManualModelClient } from '@/lib/manualVehicleModel';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -123,6 +124,9 @@ interface Client {
   // true = person registered only to invoice a one-off service — not a real
   // customer. Excluded from the list/count by default (see fetchClients).
   is_manual: boolean;
+  // Convenio/alianza por la que llegó este externo. NULL cuando no aplica. Un trigger lo
+  // normaliza y lo limpia si el cliente deja de ser externo. Ver 20260811130000.
+  external_source: string | null;
   // true = fleet account (R8). Unlocks driver management for this client's vehicles.
   is_fleet: boolean;
   created_at: string;
@@ -182,6 +186,11 @@ const AdminClientes = () => {
   // igual que cualquier otro; la bandera es de origen y de filtrado. NO toca la garantía
   // — eso lo decide `vehicle_models.is_manual`. Ver 20260806150000.
   const [formIsManual, setFormIsManual] = useState(false);
+  // De qué convenio vino. Se ofrecen las etiquetas ya usadas para que no se multipliquen
+  // ("Seguros Caracas" y "seguros caracas" romperían el filtro).
+  const [formExternalSource, setFormExternalSource] = useState('');
+  const [externalSources, setExternalSources] = useState<ExternalSource[]>([]);
+  const [filterSource, setFilterSource] = useState('todos');
   const [formPin, setFormPin] = useState('');
 
   // Vehicles
@@ -278,6 +287,7 @@ const AdminClientes = () => {
       p_status: filterStatus,
       p_city: filterCity,
       p_warranty: filterWarranty,
+      p_source: filterSource,
       p_limit: pageSize,
       p_offset: page * pageSize,
     });
@@ -360,14 +370,21 @@ const AdminClientes = () => {
 
   useEffect(() => {
     setPage(0);
-  }, [busquedaDebounced, pageSize, filterStatus, filterWarranty, filterCity, filterKind]);
+  }, [busquedaDebounced, pageSize, filterStatus, filterWarranty, filterCity, filterKind, filterSource]);
 
   useEffect(() => {
     fetchClients();
-  }, [page, busquedaDebounced, pageSize, filterStatus, filterWarranty, filterCity, filterKind]);
+  }, [page, busquedaDebounced, pageSize, filterStatus, filterWarranty, filterCity, filterKind, filterSource]);
+
+  // Etiquetas de convenio ya usadas, para el datalist del formulario y el filtro. Se
+  // recarga al guardar un cliente para que un convenio nuevo aparezca sin refrescar.
+  const fetchExternalSources = async () => {
+    setExternalSources(await listExternalSources());
+  };
 
   useEffect(() => {
     fetchModels();
+    fetchExternalSources();
   }, []);
 
   // Deep link from the Satisfacción dashboard: `?client=<id>&tab=encuestas`. Works
@@ -449,6 +466,7 @@ const AdminClientes = () => {
     setFormAddress(''); setFormCity(''); setFormState(''); setFormIsActive(true);
     setFormIsFleet(false);
     setFormIsManual(asExternal);
+    setFormExternalSource('');
     setFormPin('');
     setClientDialogOpen(true);
   };
@@ -482,6 +500,7 @@ const AdminClientes = () => {
     setFormIsActive(client.is_active);
     setFormIsFleet(!!client.is_fleet);
     setFormIsManual(!!client.is_manual);
+    setFormExternalSource(client.external_source || '');
     setFormPin(client.profiles?.pin_code || '');
     setClientDialogOpen(true);
   };
@@ -513,6 +532,9 @@ const AdminClientes = () => {
       is_fleet: formIsFleet,
       // Cliente externo = cargado a mano. Ver 20260806150000.
       is_manual: formIsManual,
+      // El trigger normaliza espacios y lo pone en NULL si is_manual queda en false, así que
+      // no hace falta limpiarlo acá. Ver 20260811130000.
+      external_source: formIsManual ? (formExternalSource.trim() || null) : null,
     };
 
     if (editingClient) {
@@ -543,7 +565,7 @@ const AdminClientes = () => {
         }
       }
 
-      toast.success('Cliente actualizado'); setClientDialogOpen(false); fetchClients();
+      toast.success('Cliente actualizado'); setClientDialogOpen(false); fetchClients(); fetchExternalSources();
     } else {
       const { data, error } = await supabase.from('clients').insert(payload).select('id').single();
       if (error) { toast.error('Error al crear cliente'); console.error(error); }
@@ -558,6 +580,7 @@ const AdminClientes = () => {
         if (data?.id && !formIsManual) syncClientToKommo(data.id).catch(console.error);
         setClientDialogOpen(false);
         fetchClients();
+        fetchExternalSources();
 
         // `clients_insert` deja crear al concesionario/vendedor, pero `clients_select` solo
         // les muestra clientes que YA tienen una reserva en su concesionario. Sin este
@@ -923,6 +946,18 @@ const AdminClientes = () => {
             <SelectItem value="todos">Propios y externos</SelectItem>
           </SelectContent>
         </Select>
+        {/* Sólo aparece si hay convenios cargados: un filtro con una única opción es ruido. */}
+        {externalSources.length > 0 && (
+          <Select value={filterSource} onValueChange={setFilterSource}>
+            <SelectTrigger className="h-8 text-xs sm:w-[170px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los convenios</SelectItem>
+              {externalSources.map(s => (
+                <SelectItem key={s.source} value={s.source}>{s.source} ({s.clientes})</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {loading ? (
@@ -992,8 +1027,13 @@ const AdminClientes = () => {
                             {c.is_active ? 'Activo' : 'Inactivo'}
                           </Badge>
                           {c.is_manual && (
-                            <Badge className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 gap-0.5" title="Cliente cargado a mano, no proveniente de una venta ni del CRM">
-                              <Wrench className="w-2.5 h-2.5" /> Externo
+                            <Badge
+                              className="text-[10px] px-1.5 py-0 bg-amber-100 text-amber-800 gap-0.5"
+                              title={c.external_source
+                                ? `Cliente externo — llegó por ${c.external_source}`
+                                : 'Cliente cargado a mano, no proveniente de una venta ni del CRM'}
+                            >
+                              <Wrench className="w-2.5 h-2.5" /> Externo{c.external_source ? ` · ${c.external_source}` : ''}
                             </Badge>
                           )}
                           {isRecurrent && (
@@ -1161,8 +1201,13 @@ const AdminClientes = () => {
                       <div className="flex items-center gap-1.5">
                         <span>{c.full_name}</span>
                         {c.is_manual && (
-                          <Badge className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800 gap-0.5" title="Cliente cargado a mano, no proveniente de una venta ni del CRM">
-                            <Wrench className="w-2.5 h-2.5" /> Externo
+                          <Badge
+                            className="text-[10px] px-1.5 py-0 shrink-0 bg-amber-100 text-amber-800 gap-0.5"
+                            title={c.external_source
+                              ? `Cliente externo — llegó por ${c.external_source}`
+                              : 'Cliente cargado a mano, no proveniente de una venta ni del CRM'}
+                          >
+                            <Wrench className="w-2.5 h-2.5" /> Externo{c.external_source ? ` · ${c.external_source}` : ''}
                           </Badge>
                         )}
                       </div>
@@ -1402,6 +1447,26 @@ const AdminClientes = () => {
               </div>
               <Switch checked={formIsManual} onCheckedChange={setFormIsManual} />
             </div>
+
+            {formIsManual && (
+              <div className="space-y-1.5 rounded-lg border p-3 bg-muted/30">
+                <Label htmlFor="external-source">Convenio de origen</Label>
+                <Input
+                  id="external-source"
+                  list="external-sources-list"
+                  placeholder="Ej: Seguros Caracas, Flota Polar…"
+                  value={formExternalSource}
+                  onChange={e => setFormExternalSource(e.target.value)}
+                />
+                <datalist id="external-sources-list">
+                  {externalSources.map(s => <option key={s.source} value={s.source} />)}
+                </datalist>
+                <p className="text-xs text-muted-foreground">
+                  Con qué empresa o alianza llegó. Sirve para filtrarlos después y saber
+                  cuántos trae cada convenio. Podés dejarlo vacío.
+                </p>
+              </div>
+            )}
 
             {editingClient && (
               <div className="space-y-2 rounded-lg border p-3">

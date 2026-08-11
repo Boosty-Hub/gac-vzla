@@ -12,9 +12,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, Star, X, Clock } from 'lucide-react';
+import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, Star, X, Clock, UserPlus } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
+import ExternalClientBadge from '@/components/ExternalClientBadge';
+import { listExternalSources } from '@/lib/externalSources';
 import ModelCombobox, { MANUAL_MODEL_VALUE } from '@/components/vehicles/ModelCombobox';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -90,7 +92,12 @@ interface Reservation {
   kommo_lead_id: number | null;
   state: string | null;
   dealerships: { id: string; name: string; city: string | null; state: string | null } | null;
-  clients: { full_name: string; cedula: string | null; phone: string | null; state: string | null } | null;
+  // `is_manual` / `external_source`: cliente externo y de qué convenio vino. Se muestran acá
+  // para que el mostrador sepa a quién está atendiendo sin abrir la ficha. Ver 20260811130000.
+  clients: {
+    full_name: string; cedula: string | null; phone: string | null; state: string | null;
+    is_manual: boolean | null; external_source: string | null;
+  } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
 }
 
@@ -245,12 +252,20 @@ const AdminReservas = () => {
   const [mManualModelName, setMManualModelName] = useState<string>(() => getArLS().mManualModelName || '');
   const [mPlate, setMPlate] = useState<string>(() => getArLS().mPlate || '');
   const [mYear, setMYear] = useState<string>(() => getArLS().mYear || '');
+  // Convenio del cliente externo + las etiquetas ya usadas, para sugerirlas y que no se
+  // multipliquen escritas de diez formas. Ver 20260811130000_external_source.sql.
+  const [mExternalSource, setMExternalSource] = useState<string>(() => getArLS().mExternalSource || '');
+  const [externalSources, setExternalSources] = useState<string[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModelOption[]>([]);
 
   // Client/vehicle lookup
   const [clientResults, setClientResults] = useState<ClientOption[]>([]);
   const [clientVehicles, setClientVehicles] = useState<VehicleOption[]>([]);
   const [searchingClients, setSearchingClients] = useState(false);
+  // Si YA corrió una búsqueda. Sin esto no se puede distinguir "todavía no buscaste" de
+  // "buscamos y no está", y ofrecer el cliente de un solo uso antes de buscar empuja a
+  // duplicar gente que sí existe en la base.
+  const [clientSearched, setClientSearched] = useState(false);
   // Carries the raw search term typed before selectClient overwrites fClientSearch,
   // so the vehicle-fetch effect can use it to auto-select the matching vehicle.
   const plateHintRef = useRef<string>('');
@@ -288,11 +303,16 @@ const AdminReservas = () => {
     if (data) setVehicleModels(data as VehicleModelOption[]);
   };
 
+  // Convenios ya usados, para sugerirlos al cargar un cliente de un solo uso.
+  const fetchExternalSources = async () => {
+    setExternalSources((await listExternalSources()).map(s => s.source));
+  };
+
   const fetchReservations = async () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, kommo_lead_id, dealerships(id, name, city, state), clients(full_name, cedula, phone, state), vehicles(plate, year, vehicle_models(name, brand)), created_by_name, created_by_role');
+      .select('*, kommo_lead_id, dealerships(id, name, city, state), clients(full_name, cedula, phone, state, is_manual, external_source), vehicles(plate, year, vehicle_models(name, brand)), created_by_name, created_by_role');
 
     if (view === 'matrix') {
       // Fetch reservations within the calendar month range
@@ -321,6 +341,7 @@ const AdminReservas = () => {
     fetchDealerships();
     fetchServiceTypes();
     fetchVehicleModels();
+    fetchExternalSources();
   }, []);
 
   useEffect(() => {
@@ -339,13 +360,13 @@ const AdminReservas = () => {
       return;
     }
     try {
-      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mUseManualModel, mManualBrand, mManualModelName, mPlate, mYear }));
+      localStorage.setItem(AR_LS_KEY, JSON.stringify({ dialogOpen: true, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mUseManualModel, mManualBrand, mManualModelName, mPlate, mYear, mExternalSource }));
     } catch {}
-  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mUseManualModel, mManualBrand, mManualModelName, mPlate, mYear]);
+  }, [dialogOpen, editingRes, fDealership, fClientSearch, fClientId, fVehicleId, fDate, fTime, fService, fMileage, fStatus, fNotes, fState, manualMode, mName, mPhone, mCedula, mModelId, mUseManualModel, mManualBrand, mManualModelName, mPlate, mYear, mExternalSource]);
 
   // Client search with debounce (by name, cedula, or vehicle plate)
   useEffect(() => {
-    if (fClientSearch.trim().length < 2) { setClientResults([]); return; }
+    if (fClientSearch.trim().length < 2) { setClientResults([]); setClientSearched(false); return; }
     const timer = setTimeout(async () => {
       setSearchingClients(true);
       const fullTerm = fClientSearch.trim();
@@ -379,6 +400,7 @@ const AdminReservas = () => {
       };
       setClientResults(Array.from(results.values()).sort((a, b) => rank(a.full_name) - rank(b.full_name)));
       setSearchingClients(false);
+      setClientSearched(true);
     }, 300);
     return () => clearTimeout(timer);
   }, [fClientSearch]);
@@ -492,6 +514,7 @@ const AdminReservas = () => {
     setEditingLegacyWalkin(false);
     setMName(''); setMPhone(''); setMCedula(''); setMModelId(''); setMPlate(''); setMYear('');
     setMUseManualModel(false); setMManualBrand(''); setMManualModelName('');
+    setMExternalSource('');
   };
 
   const openCreate = () => {
@@ -755,6 +778,7 @@ const AdminReservas = () => {
           manualModel: mUseManualModel ? { brand: mManualBrand, modelName: mManualModelName } : null,
           plate: mPlate,
           year: mYear,
+          externalSource: mExternalSource,
         });
         const assign = resolveReservationAssignment({
           vehicle, clientId: null, walkinName: '', walkinPhone: '', walkinPlate: '',
@@ -1120,6 +1144,7 @@ const AdminReservas = () => {
                     <div className="flex items-center gap-1 text-muted-foreground min-w-0">
                       <User className="w-3 h-3 shrink-0" />
                       <span className="truncate font-medium text-foreground">{r.clients?.full_name || r.walkin_client_name || '-'}</span>
+                      <ExternalClientBadge isExternal={r.clients?.is_manual} source={r.clients?.external_source} />
                     </div>
                     <div className="flex items-center gap-1 text-muted-foreground min-w-0">
                       <Car className="w-3 h-3 shrink-0" />
@@ -1202,7 +1227,12 @@ const AdminReservas = () => {
                       <br />
                       <span className="text-muted-foreground">{formatTime(r.reservation_time)}</span>
                     </TableCell>
-                    <TableCell>{r.clients?.full_name || r.walkin_client_name || '-'}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5">
+                        <span>{r.clients?.full_name || r.walkin_client_name || '-'}</span>
+                        <ExternalClientBadge isExternal={r.clients?.is_manual} source={r.clients?.external_source} />
+                      </div>
+                    </TableCell>
                     <TableCell>{INCIDENCIA_TYPES.has(r.service_type) ? (r.dealerships?.state || '-') : (r.clients?.state || '-')}</TableCell>
                     <TableCell>
                       {r.vehicles
@@ -1554,6 +1584,33 @@ const AdminReservas = () => {
                   )}
                   {searchingClients && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">Buscando...</span>}
                 </div>
+
+                {/* Buscamos y no está: ahí recién se ofrece cargarlo como cliente de un solo
+                    uso. Antes esto vivía sólo detrás del botón "Ingresar manualmente", que
+                    hay que saber que existe; el pedido fue que la opción aparezca sola al
+                    escribir un nombre que no está registrado. */}
+                {clientSearched && !searchingClients && clientResults.length === 0 && !fClientId && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 space-y-2">
+                    <p className="text-xs text-amber-900">
+                      No encontramos a <span className="font-semibold">«{fClientSearch.trim()}»</span> en la base.
+                      Si viene de un convenio o es una atención suelta, cargalo como cliente de un solo uso:
+                      queda registrado con su vehículo y su historial, sin mezclarse con la cartera propia.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => {
+                        setManualMode(true);
+                        setMName(fClientSearch.trim());
+                        setFClientId(''); setFVehicleId(''); setClientResults([]); setClientVehicles([]);
+                      }}
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      Usar cliente de un solo uso
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -1638,6 +1695,22 @@ const AdminReservas = () => {
                   <div className="space-y-1"><Label>Placa</Label><Input value={mPlate} onChange={e => setMPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="uppercase" /></div>
                   {!editingLegacyWalkin && (
                     <div className="space-y-1"><Label>Año</Label><Input type="number" value={mYear} onChange={e => setMYear(e.target.value)} placeholder={String(new Date().getFullYear())} /></div>
+                  )}
+                  {/* Etiqueta del convenio. Sólo se guarda si el cliente se crea acá: si ya
+                      existía, su origen es el que tenga cargado y no se pisa. */}
+                  {!editingLegacyWalkin && (
+                    <div className="space-y-1 col-span-2">
+                      <Label>Convenio de origen</Label>
+                      <Input
+                        list="ar-external-sources"
+                        value={mExternalSource}
+                        onChange={e => setMExternalSource(e.target.value)}
+                        placeholder="Ej: Seguros Caracas — opcional"
+                      />
+                      <datalist id="ar-external-sources">
+                        {externalSources.map(s => <option key={s} value={s} />)}
+                      </datalist>
+                    </div>
                   )}
                 </div>
               </div>
@@ -1958,6 +2031,7 @@ const AdminReservas = () => {
                   <div className="flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                     <span className="font-medium">{detailRes.clients?.full_name || detailRes.walkin_client_name || '-'}</span>
+                    <ExternalClientBadge isExternal={detailRes.clients?.is_manual} source={detailRes.clients?.external_source} size="md" />
                   </div>
                   {detailRes.clients?.cedula && <p className="text-xs text-muted-foreground pl-5">CI: {detailRes.clients.cedula}</p>}
                   {(detailRes.clients?.phone || detailRes.walkin_client_phone) && <p className="text-xs text-muted-foreground pl-5">{detailRes.clients?.phone || detailRes.walkin_client_phone}</p>}

@@ -15,6 +15,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CalendarDays, Plus, Search, CheckCircle, Car, User, AlertCircle, ClipboardCheck, Clock, MapPin, Wrench, FileText, Shield, Hash, Palette, MessageCircle, AlertTriangle, X, Pencil, Trash2 } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
+import ExternalClientBadge from '@/components/ExternalClientBadge';
+import { listExternalSources } from '@/lib/externalSources';
 import ModelCombobox, { MANUAL_MODEL_VALUE } from '@/components/vehicles/ModelCombobox';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -60,7 +62,12 @@ interface Reservation {
   state: string | null;
   /** Client-visible follow-up recommendation, filled when the service is completed. Not in generated Supabase types yet. */
   recommendation: string | null;
-  clients: { full_name: string; cedula: string | null; phone: string | null } | null;
+  // `is_manual` / `external_source`: cliente externo y de qué convenio vino. Se muestran acá
+  // para que el mostrador sepa a quién está atendiendo sin abrir la ficha. Ver 20260811130000.
+  clients: {
+    full_name: string; cedula: string | null; phone: string | null;
+    is_manual: boolean | null; external_source: string | null;
+  } | null;
   vehicles: { plate: string | null; year: number; vehicle_models: { name: string; brand: string } | null } | null;
   dealerships: { name: string; state: string | null } | null;
 }
@@ -265,6 +272,9 @@ const DealershipReservas = () => {
   const [fWalkinManualBrand, setFWalkinManualBrand] = useState<string>(() => getDrLS().fWalkinManualBrand || '');
   const [fWalkinManualModelName, setFWalkinManualModelName] = useState<string>(() => getDrLS().fWalkinManualModelName || '');
   const [fWalkinYear, setFWalkinYear] = useState<string>(() => getDrLS().fWalkinYear || '');
+  // Convenio del cliente externo + las etiquetas ya usadas. Ver 20260811130000_external_source.sql.
+  const [fWalkinExternalSource, setFWalkinExternalSource] = useState<string>(() => getDrLS().fWalkinExternalSource || '');
+  const [externalSources, setExternalSources] = useState<string[]>([]);
   const [vehicleModels, setVehicleModels] = useState<VehicleModelOption[]>([]);
   // True while prefilling an edit, to suppress implicit single-vehicle auto-select.
   const prefillingEditRef = useRef(false);
@@ -296,7 +306,7 @@ const DealershipReservas = () => {
     setLoading(true);
     let query = supabase
       .from('reservations')
-      .select('*, kommo_lead_id, clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand)), dealerships(name, state)')
+      .select('*, kommo_lead_id, clients(full_name, cedula, phone, is_manual, external_source), vehicles(plate, year, vehicle_models(name, brand)), dealerships(name, state)')
       .order('created_at', { ascending: false })
       .limit(view === 'matrix' ? 1000 : 300);
     // "__all" → no dealership filter, traer de todos
@@ -334,6 +344,13 @@ const DealershipReservas = () => {
         .eq('is_active', true)
         .order('name');
       if (data) setServiceTypes(data as unknown as ServiceType[]);
+    })();
+  }, []);
+
+  // Convenios ya usados, para sugerirlos al cargar un cliente de un solo uso.
+  useEffect(() => {
+    (async () => {
+      setExternalSources((await listExternalSources()).map(s => s.source));
     })();
   }, []);
 
@@ -513,9 +530,9 @@ const DealershipReservas = () => {
       return;
     }
     try {
-      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinUseManualModel, fWalkinManualBrand, fWalkinManualModelName, fWalkinYear }));
+      localStorage.setItem(DR_LS_KEY, JSON.stringify({ createOpen: true, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinUseManualModel, fWalkinManualBrand, fWalkinManualModelName, fWalkinYear, fWalkinExternalSource }));
     } catch {}
-  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinUseManualModel, fWalkinManualBrand, fWalkinManualModelName, fWalkinYear]);
+  }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinUseManualModel, fWalkinManualBrand, fWalkinManualModelName, fWalkinYear, fWalkinExternalSource]);
 
   const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
   const filteredReservations = reservations.filter(r => {
@@ -588,6 +605,7 @@ const DealershipReservas = () => {
     setManualMode(false); setEditingLegacyWalkin(false);
     setFWalkinCedula(''); setFWalkinModelId(''); setFWalkinYear('');
     setFWalkinUseManualModel(false); setFWalkinManualBrand(''); setFWalkinManualModelName('');
+    setFWalkinExternalSource('');
     prefillingEditRef.current = false;
   };
 
@@ -606,6 +624,7 @@ const DealershipReservas = () => {
     setFWalkinName(''); setFWalkinPhone(''); setFWalkinPlate('');
     setFWalkinCedula(''); setFWalkinModelId(''); setFWalkinYear('');
     setFWalkinUseManualModel(false); setFWalkinManualBrand(''); setFWalkinManualModelName('');
+    setFWalkinExternalSource('');
     setUnifiedSearched(false);
   };
 
@@ -648,6 +667,7 @@ const DealershipReservas = () => {
           : null,
         plate: fWalkinPlate,
         year: fWalkinYear,
+        externalSource: fWalkinExternalSource,
       });
       return vehicle;
     } catch (err) {
@@ -1181,7 +1201,10 @@ const DealershipReservas = () => {
                       </TableCell>
                     )}
                     <TableCell>
-                      <div>{clientName}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span>{clientName}</span>
+                        <ExternalClientBadge isExternal={r.clients?.is_manual} source={r.clients?.external_source} />
+                      </div>
                       {!r.clients && r.walkin_client_phone && <span className="text-[10px] text-muted-foreground">{r.walkin_client_phone}</span>}
                     </TableCell>
                     <TableCell>
@@ -1316,7 +1339,8 @@ const DealershipReservas = () => {
                     <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'Cliente'}</span>{` · ${detailRes.created_by_role || 'Portal'}`}</p>
                   )}
                   <div className="space-y-2 text-xs">
-                    <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
+                    <div className="flex items-center gap-2 flex-wrap"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
+                      <ExternalClientBadge isExternal={detailRes.clients?.is_manual} source={detailRes.clients?.external_source} />
                       {detailRes.clients?.cedula && <span className="text-muted-foreground">· {detailRes.clients.cedula}</span>}
                       {detailRes.clients?.phone && <span className="text-muted-foreground">· {detailRes.clients.phone}</span>}
                     </div>
@@ -1790,6 +1814,23 @@ const DealershipReservas = () => {
                       <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Placa</Label><Input value={fWalkinPlate} onChange={e => setFWalkinPlate(e.target.value.toUpperCase())} placeholder="Ej: ABC123" className="h-9 text-sm sm:h-8 sm:text-xs uppercase" /></div>
                       {!editingLegacyWalkin && (
                         <div className="space-y-1"><Label className="text-[13px] sm:text-xs">Año</Label><Input type="number" value={fWalkinYear} onChange={e => setFWalkinYear(e.target.value)} placeholder={String(new Date().getFullYear())} className="h-9 text-sm sm:h-8 sm:text-xs" /></div>
+                      )}
+                      {/* Etiqueta del convenio. Sólo se guarda si el cliente se crea acá: si
+                          ya existía, su origen es el que tenga cargado y no se pisa. */}
+                      {!editingLegacyWalkin && (
+                        <div className="space-y-1 col-span-2">
+                          <Label className="text-[13px] sm:text-xs">Convenio de origen</Label>
+                          <Input
+                            list="dr-external-sources"
+                            value={fWalkinExternalSource}
+                            onChange={e => setFWalkinExternalSource(e.target.value)}
+                            placeholder="Ej: Seguros Caracas — opcional"
+                            className="h-9 text-sm sm:h-8 sm:text-xs"
+                          />
+                          <datalist id="dr-external-sources">
+                            {externalSources.map(s => <option key={s} value={s} />)}
+                          </datalist>
+                        </div>
                       )}
                     </div>
                   </div>

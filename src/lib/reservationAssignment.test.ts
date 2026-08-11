@@ -294,6 +294,33 @@ describe('createOrReuseManualEntities', () => {
     expect(result.vehicle.client_id).toMatch(/^cli-new-/);
   });
 
+  it('tags a newly created client with the convenio it came from', async () => {
+    const fake = makeFakeClient();
+    await createOrReuseManualEntities(fake as never, { ...baseInput, externalSource: 'Seguros Caracas' });
+    expect(fake.insertedClients[0]).toMatchObject({
+      is_manual: true,
+      external_source: 'Seguros Caracas',
+    });
+  });
+
+  it('leaves external_source null when no convenio was given', async () => {
+    const fake = makeFakeClient();
+    await createOrReuseManualEntities(fake as never, baseInput);
+    expect(fake.insertedClients[0]).toMatchObject({ is_manual: true, external_source: null });
+  });
+
+  it('never re-tags a REUSED client with the convenio typed today', async () => {
+    // Un cliente que ya existe tiene su propio origen cargado. Pisarlo desde el mostrador
+    // con lo que alguien tecleó hoy borraría el dato bueno — y encima lo haría en silencio.
+    const fake = makeFakeClient({ clientsByCedula: { 'V-12345678': { id: 'cli-ced' } } });
+    const result = await createOrReuseManualEntities(fake as never, {
+      ...baseInput,
+      externalSource: 'Convenio Nuevo',
+    });
+    expect(result.vehicle.client_id).toBe('cli-ced');
+    expect(fake.insertedClients).toHaveLength(0);
+  });
+
   it('throws when the model id is missing', async () => {
     const fake = makeFakeClient();
     await expect(

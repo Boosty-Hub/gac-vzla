@@ -85,6 +85,15 @@ export interface ManualReservationInput {
   plate: string;
   /** Vehicle year; falls back to the current year when empty/invalid. */
   year: string;
+  /**
+   * Convenio/alianza por la que llega este cliente externo, cuando corresponde.
+   *
+   * Sólo se escribe si el cliente se CREA en esta llamada. Un cliente reusado (por cédula,
+   * teléfono o placa) no se re-etiqueta: ya existía y su origen es el que tenga cargado.
+   * Pisarlo desde el mostrador borraría el dato bueno con lo que teclearon hoy.
+   * Ver supabase/migrations/20260811130000_external_source.sql.
+   */
+  externalSource?: string | null;
 }
 
 export interface ManualEntitiesResult {
@@ -263,6 +272,9 @@ export async function createOrReuseManualEntities(
         // `Boolean(manualModel)` y por eso no había un solo cliente externo en la base
         // pese a que sí se cargaban a mano.
         is_manual: true,
+        // De qué convenio vino. El trigger de la DB normaliza espacios y lo limpia si el
+        // cliente dejara de ser externo, así que acá sólo hace falta no mandar vacío.
+        external_source: input.externalSource?.trim() || null,
       })
       .select('id')
       .single();
