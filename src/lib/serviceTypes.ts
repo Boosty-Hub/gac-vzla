@@ -27,3 +27,20 @@ export const isPartsRequest = (serviceType: string | null | undefined): boolean 
  */
 export const isInternalServiceType = (serviceType: string | null | undefined): boolean =>
   serviceType === PARTS_REQUEST_TYPE;
+
+/** Service types whose `notes` field describes a reported fault rather than a request. */
+const FAULT_TYPES = new Set(['Incidencia', 'Falla o Desperfecto']);
+
+/**
+ * Título para `reservations.notes` — lo que el cliente vino a resolver.
+ *
+ * Existe porque las vistas de detalle sólo mostraban ese campo cuando el tipo era incidencia
+ * o repuestos. Para un mantenimiento normal — 558 de 621 citas — el motivo del ingreso
+ * quedaba invisible salvo que alguien abriera Editar, así que el historial registraba el
+ * egreso ("Trabajo realizado") sin el ingreso que lo justificaba.
+ */
+export const serviceNotesLabel = (serviceType: string | null | undefined): string => {
+  if (isPartsRequest(serviceType)) return 'Descripción de la solicitud';
+  if (FAULT_TYPES.has(serviceType ?? '')) return 'Descripción de la falla';
+  return 'Motivo del ingreso';
+};

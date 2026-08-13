@@ -27,7 +27,7 @@ import { createKommoReservation, updateKommoReservationStage, updateKommoReserva
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 import { computeSlotOccupancy, formatMinuteLabel, type CapacityReservation } from '@/lib/reservationCapacity';
-import { isPartsRequest, PLANT_DEALERSHIP_ID } from '@/lib/serviceTypes';
+import { isPartsRequest, PLANT_DEALERSHIP_ID, serviceNotesLabel } from '@/lib/serviceTypes';
 import {
   RESERVATION_STATUS_LABELS as STATUS_LABELS,
   RESERVATION_STATUS_COLORS as STATUS_COLORS,
@@ -2065,11 +2065,13 @@ const AdminReservas = () => {
                 )}
               </div>
 
-              {/* Descripción de la incidencia o de la solicitud de repuestos */}
-              {detailRes.notes && (INCIDENCIA_TYPES.has(detailRes.service_type) || isPartsRequest(detailRes.service_type)) && (
+              {/* Motivo del ingreso. Se muestra para CUALQUIER tipo de servicio: antes sólo
+                  aparecía en incidencias y repuestos, así que en un mantenimiento normal el
+                  por qué de la visita sólo era visible entrando a Editar. */}
+              {detailRes.notes && (
                 <div className="space-y-1">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">
-                    {isPartsRequest(detailRes.service_type) ? 'Descripción de la solicitud' : 'Descripción de la falla'}
+                    {serviceNotesLabel(detailRes.service_type)}
                   </p>
                   <div className="flex gap-1.5">
                     <StickyNote className="w-3.5 h-3.5 text-muted-foreground mt-0.5 shrink-0" />

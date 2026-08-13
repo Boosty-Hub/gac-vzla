@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { ARCHIVED_RESERVATION_STATUSES, reservationStatusStyle } from '@/lib/reservationStatus';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
+import { serviceNotesLabel } from '@/lib/serviceTypes';
 
 interface ServiceEntry {
   id: string;
@@ -514,11 +515,20 @@ const AdminHistorial = () => {
                   </div>
                 )}
 
+                {/* `notes` es POR QUÉ entró el vehículo, no una nota interna: lo escribe quien
+                    crea la cita ("Describa la falla, desperfecto o tipo de servicio
+                    solicitado"). Las notas internas del equipo son otra columna,
+                    `internal_notes`, que esta pantalla ni siquiera consulta. El rótulo
+                    anterior decía "Notas Internas" y hacía leer el ingreso como si fuera un
+                    comentario privado. Junto al bloque "Trabajo realizado" de abajo, esto
+                    cierra la trazabilidad: por qué entró y qué se le hizo. */}
                 {e.notes && (
                   <>
                     <Separator />
                     <div className="text-xs">
-                      <p className="font-semibold mb-1 flex items-center gap-1"><Wrench className="w-3 h-3" /> Notas Internas</p>
+                      <p className="font-semibold mb-1 flex items-center gap-1">
+                        <Wrench className="w-3 h-3" /> {serviceNotesLabel(e.service_type)}
+                      </p>
                       <p className="text-muted-foreground whitespace-pre-wrap bg-muted/30 rounded-md p-2">{e.notes}</p>
                     </div>
                   </>

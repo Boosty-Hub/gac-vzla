@@ -29,7 +29,7 @@ import { createKommoReservation, updateKommoReservationStage, updateKommoReserva
 import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
-import { isPartsRequest, PLANT_DEALERSHIP_ID } from '@/lib/serviceTypes';
+import { isPartsRequest, PLANT_DEALERSHIP_ID, serviceNotesLabel } from '@/lib/serviceTypes';
 import {
   RESERVATION_STATUS_CONFIG,
   ARCHIVED_RESERVATION_STATUSES,
@@ -1344,9 +1344,10 @@ const DealershipReservas = () => {
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
                     {detailRes.current_mileage > 0 && <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>}
                   </div>
-                  {detailRes.notes && (isInc || isPartsRequest(detailRes.service_type)) && (
+                  {/* Motivo del ingreso, para cualquier tipo de servicio. Ver serviceTypes.ts. */}
+                  {detailRes.notes && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
-                      <p className="font-semibold mb-1">{isPartsRequest(detailRes.service_type) ? 'Descripción de la solicitud' : 'Descripción de la falla'}</p>
+                      <p className="font-semibold mb-1">{serviceNotesLabel(detailRes.service_type)}</p>
                       <p className="text-muted-foreground min-w-0 break-words whitespace-pre-wrap">{detailRes.notes}</p>
                     </div>
                   )}
