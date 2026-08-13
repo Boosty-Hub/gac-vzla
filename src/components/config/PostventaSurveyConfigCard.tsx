@@ -11,18 +11,27 @@ import { toast } from 'sonner';
 /**
  * Configuración de entrega de la encuesta de POSTVENTA.
  *
- * Existe porque estos dos ids vivían únicamente dentro del JSON de `integration_configs` y
- * sólo podían cambiarse por SQL. No es un detalle cosmético: mientras faltaban, kommo-api
- * caía al par campo/etapa de VENTAS a propósito, y el 2026-08-03 eso mandó tres encuestas de
- * postventa al SalesBot de ventas — dos clientes que habían ido a un servicio recibieron una
- * felicitación por la compra de un vehículo nuevo.
+ * Existe porque esta configuración vivía únicamente dentro del JSON de
+ * `integration_configs` y sólo podía cambiarse por SQL.
  *
- * Ahora el barrido de despacho se niega a enviar postventa mientras estos dos estén vacíos
- * (20260813130000_postventa_survey_dispatch.sql), y esta tarjeta es donde se cargan.
+ * RUTEO: GAC confirmó que en Kommo sólo se reemplaza el campo del enlace — no hay objetos
+ * dedicados a la encuesta de servicio. Se verificó contra la API de Kommo: la etapa
+ * configurada, 109744268 "ENCUESTA ENVIADA", ya pertenece al pipeline de POST VENTA
+ * (13151339) y no al de Ventas (13148719). Por eso la postventa sale por la misma etapa y el
+ * mismo campo que la encuesta de compra.
+ *
+ * Lo que sí provocó el incidente del 2026-08-03 no era la etapa: el barrido mandaba
+ * `reason: 'won'` fijo para toda encuesta, de modo que la postventa recorría el camino de
+ * ventas. Corregido en 20260813130000; el origen real viaja en cada despacho.
+ *
+ * Los campos `*_service` quedan como override opcional por si algún día se crean objetos
+ * dedicados: kommo-api ya los prefiere cuando están cargados.
  */
 
 interface DeliveryConfig {
   delivery_enabled: boolean;
+  survey_stage_id: string | null;
+  survey_link_field_id: string | null;
   survey_stage_id_service: string | null;
   survey_link_field_id_service: string | null;
   service_ready: boolean;
@@ -113,54 +122,61 @@ const PostventaSurveyConfigCard = () => {
             {!ready && (
               <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs space-y-1">
                 <p className="font-semibold text-amber-900">
-                  Las encuestas de postventa se están generando, pero todavía no se envían.
+                  Las encuestas se están generando, pero no se envían.
                 </p>
                 <p className="text-amber-800">
-                  Faltan la etapa y el campo de Kommo propios de postventa. Sin ellos el envío
-                  usaría el bot de <strong>ventas</strong>, que felicita al cliente por la compra
-                  de un vehículo nuevo — ya pasó el 3 de agosto con tres encuestas. Quedan en
-                  espera, sin perderse, hasta que cargues los dos datos.
+                  Falta la etapa de encuesta, el campo del enlace, o el envío está apagado.
+                  Las encuestas quedan en cola sin perderse.
                 </p>
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="pv-stage">ID de etapa (Post Venta)</Label>
-                <Input
-                  id="pv-stage"
-                  value={stageId}
-                  onChange={e => setStageId(e.target.value)}
-                  placeholder="Ej: 109744268"
-                  inputMode="numeric"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Etapa del pipeline Post Venta que dispara el bot de la encuesta.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="pv-field">ID del campo del enlace</Label>
-                <Input
-                  id="pv-field"
-                  value={fieldId}
-                  onChange={e => setFieldId(e.target.value)}
-                  placeholder="Ej: 3456839"
-                  inputMode="numeric"
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Campo personalizado del lead donde se escribe el enlace de la encuesta.
-                </p>
-              </div>
+            <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-1">
+              <p className="font-medium">Ruteo actual</p>
+              <p className="text-muted-foreground">
+                La postventa usa la misma etapa y el mismo campo de enlace que la encuesta de
+                compra — sólo cambia el enlace que se escribe. Etapa{' '}
+                <code className="font-mono">{config?.survey_stage_id || '—'}</code>, campo{' '}
+                <code className="font-mono">{config?.survey_link_field_id || '—'}</code>.
+              </p>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button size="sm" onClick={handleSave} disabled={saving}>
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar'}
-              </Button>
-              <span className="text-xs text-muted-foreground">
-                Vaciar ambos campos vuelve a poner el envío en espera.
-              </span>
-            </div>
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                Usar una etapa y un campo distintos para postventa (opcional)
+              </summary>
+              <div className="pt-3 space-y-3">
+                <p className="text-[11px] text-muted-foreground">
+                  Sólo si en Kommo se crean objetos dedicados a la encuesta de servicio. Vacíos,
+                  la postventa sigue el ruteo de arriba.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="pv-stage">ID de etapa de postventa</Label>
+                    <Input
+                      id="pv-stage"
+                      value={stageId}
+                      onChange={e => setStageId(e.target.value)}
+                      placeholder="Vacío = usa la etapa de arriba"
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="pv-field">ID del campo del enlace</Label>
+                    <Input
+                      id="pv-field"
+                      value={fieldId}
+                      onChange={e => setFieldId(e.target.value)}
+                      placeholder="Vacío = usa el campo de arriba"
+                      inputMode="numeric"
+                    />
+                  </div>
+                </div>
+                <Button size="sm" onClick={handleSave} disabled={saving}>
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar override'}
+                </Button>
+              </div>
+            </details>
           </>
         )}
       </CardContent>
