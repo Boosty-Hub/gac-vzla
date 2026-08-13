@@ -30,6 +30,8 @@ import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isPartsRequest, PLANT_DEALERSHIP_ID, serviceNotesLabel } from '@/lib/serviceTypes';
+import { useServiceSurveys } from '@/hooks/useServiceSurveys';
+import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 import {
   RESERVATION_STATUS_CONFIG,
   ARCHIVED_RESERVATION_STATUSES,
@@ -196,6 +198,8 @@ const DealershipReservas = () => {
   const [detailRes, setDetailRes] = useState<Reservation | null>(null);
   const [vehicleDetail, setVehicleDetail] = useState<VehicleDetail | null>(null);
   const [vehicleHistory, setVehicleHistory] = useState<HistoryRecord[]>([]);
+  // Encuestas de postventa del historial abierto, en una sola consulta para toda la lista.
+  const { surveys: historySurveys } = useServiceSurveys(vehicleHistory.map(h => h.id));
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Edit incidencia
@@ -1467,7 +1471,8 @@ const DealershipReservas = () => {
                               <span className="flex items-center gap-1"><Hash className="w-3 h-3" />{h.current_mileage.toLocaleString()} km</span>
                             </div>
                             {h.dealerships && <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>}
-                            {hIsInc && h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Falla:</span> {h.notes}</p>}
+                            {/* El motivo del ingreso, para cualquier tipo — antes sólo salía en incidencias. */}
+                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">{serviceNotesLabel(h.service_type)}:</span> {h.notes}</p>}
                             {h.internal_notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Notas Internas:</span> {h.internal_notes}</p>}
                             {h.service_notes && (
                               <div className="bg-green-50 border border-green-200 rounded p-1.5">
@@ -1476,6 +1481,7 @@ const DealershipReservas = () => {
                               </div>
                             )}
                             {h.technical_report_url && <TechnicalReportUploader reservationId={h.id} value={h.technical_report_url} onChange={() => {}} readonly />}
+                            <ServiceSurveyInline survey={historySurveys.get(h.id)} />
                           </div>
                         );
                       })}

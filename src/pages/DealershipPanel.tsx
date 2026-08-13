@@ -22,6 +22,9 @@ import { toast } from 'sonner';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { getSignedFileUrl } from '@/lib/storage';
 import { RESERVATION_STATUS_CONFIG } from '@/lib/reservationStatus';
+import { serviceNotesLabel } from '@/lib/serviceTypes';
+import { useServiceSurveys } from '@/hooks/useServiceSurveys';
+import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 
 interface Dealership {
   id: string;
@@ -155,6 +158,8 @@ const DealershipPanel = () => {
   const [detailRes, setDetailRes] = useState<Reservation | null>(null);
   const [vehicleDetail, setVehicleDetail] = useState<VehicleDetail | null>(null);
   const [vehicleHistory, setVehicleHistory] = useState<HistoryRecord[]>([]);
+  // Encuestas de postventa del historial abierto, en una sola consulta para toda la lista.
+  const { surveys: historySurveys } = useServiceSurveys(vehicleHistory.map(h => h.id));
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   // Complete dialog
@@ -1275,7 +1280,9 @@ const DealershipPanel = () => {
                             {h.dealerships && (
                               <div className="flex items-center gap-1 text-muted-foreground"><MapPin className="w-3 h-3" />{h.dealerships.name}</div>
                             )}
-                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">Notas Internas:</span> {h.notes}</p>}
+                            {/* `notes` es el motivo del ingreso, no una nota interna del equipo:
+                                lo escribe quien crea la cita. Las internas son otra columna. */}
+                            {h.notes && <p className="text-muted-foreground bg-muted/40 rounded p-1.5"><span className="font-medium text-foreground">{serviceNotesLabel(h.service_type)}:</span> {h.notes}</p>}
                             {h.service_notes && (
                               <div className="bg-green-50 border border-green-200 rounded p-1.5">
                                 <p className="font-medium text-green-800 flex items-center gap-1"><ClipboardCheck className="w-3 h-3" /> Trabajo realizado:</p>
@@ -1283,6 +1290,7 @@ const DealershipPanel = () => {
                                 {h.completed_at && <p className="text-green-600 text-[10px] mt-1">Completado: {new Date(h.completed_at).toLocaleString('es-VE')}</p>}
                               </div>
                             )}
+                            <ServiceSurveyInline survey={historySurveys.get(h.id)} />
                           </div>
                         );
                       })}
