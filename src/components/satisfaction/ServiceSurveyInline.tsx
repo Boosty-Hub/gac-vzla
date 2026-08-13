@@ -1,15 +1,23 @@
-import { MessageSquare, Star, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { MessageSquare, Star, Archive } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { SERVICE_SATISFACTION_ASPECTS, getSatisfactionLevel } from '@/lib/satisfaction';
+import {
+  SERVICE_SURVEY_QUESTIONS,
+  getServiceSurveyOption,
+  getSatisfactionLevel,
+} from '@/lib/satisfaction';
 import type { ServiceSurveySummary } from '@/hooks/useServiceSurveys';
 
 /**
- * Compact postventa survey result, rendered inside a vehicle's service history (R7).
+ * Compact postventa survey result, rendered inside a vehicle's service history.
  *
- * Three states, all meaningful to a service manager reading the history:
- *   - no survey at all  -> renders nothing (the visit predates the feature, or had no phone)
+ * Four states, all meaningful to a service manager reading the history:
+ *   - no survey at all        -> renders nothing (visit predates the feature, or had no phone)
  *   - survey not answered yet -> says so, so silence is not mistaken for a bad score
- *   - answered -> per-aspect breakdown, because a 4.0 average hides a 1 on "tiempo de entrega"
+ *   - answered                -> per-question answer, because an average of 4.0 hides a
+ *                                "No fue lavado/aspirado"
+ *   - answered on the OLD 1..5 questionnaire -> labelled as such instead of rendering eight
+ *                                empty rows, which is what reading the new columns off an
+ *                                old row would produce
  */
 
 interface ServiceSurveyInlineProps {
@@ -32,7 +40,23 @@ const ServiceSurveyInline = ({ survey }: ServiceSurveyInlineProps) => {
     );
   }
 
-  const overall = Number(response.overall_score);
+  // Una respuesta del cuestionario viejo no tiene ninguna de las columnas nuevas.
+  const answeredNewForm = SERVICE_SURVEY_QUESTIONS.some(
+    q => response[`q_${q.column}` as keyof typeof response],
+  );
+
+  if (!answeredNewForm) {
+    return (
+      <div className="rounded border border-dashed p-1.5">
+        <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+          <Archive className="w-3 h-3" />
+          Respondida con el cuestionario anterior a agosto 2026.
+        </p>
+      </div>
+    );
+  }
+
+  const overall = Number(response.overall_score ?? 0);
   const level = getSatisfactionLevel(Math.round(overall));
 
   return (
@@ -50,28 +74,22 @@ const ServiceSurveyInline = ({ survey }: ServiceSurveyInlineProps) => {
       </div>
 
       <div className="grid grid-cols-1 gap-0.5">
-        {SERVICE_SATISFACTION_ASPECTS.map(aspect => {
-          const score = Number(response[`q_${aspect.column}` as keyof typeof response]);
-          const aspectLevel = getSatisfactionLevel(score);
+        {SERVICE_SURVEY_QUESTIONS.map(question => {
+          const raw = response[`q_${question.column}` as keyof typeof response] as string | null;
+          const option = getServiceSurveyOption(question.column, raw);
+          const optionLevel = getSatisfactionLevel(option?.score ?? 3);
           return (
-            <div key={aspect.key} className="flex items-center justify-between gap-2 text-[10px]">
-              <span className="text-muted-foreground truncate">{aspect.title}</span>
-              <span className="font-semibold shrink-0" style={{ color: `hsl(${aspectLevel.color})` }}>
-                {score}/5
+            <div key={question.column} className="flex items-start justify-between gap-2 text-[10px]">
+              <span className="text-muted-foreground truncate">{question.title}</span>
+              <span
+                className="font-semibold shrink-0 text-right"
+                style={{ color: `hsl(${optionLevel.color})` }}
+              >
+                {option?.label ?? '—'}
               </span>
             </div>
           );
         })}
-      </div>
-
-      <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-        {response.nps_recomienda === null ? (
-          <span>Recomendación: —</span>
-        ) : response.nps_recomienda ? (
-          <><ThumbsUp className="w-3 h-3 text-green-600" /> Recomienda</>
-        ) : (
-          <><ThumbsDown className="w-3 h-3 text-red-600" /> No recomienda</>
-        )}
       </div>
 
       {response.comment && (

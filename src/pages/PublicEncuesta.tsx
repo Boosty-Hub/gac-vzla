@@ -10,7 +10,10 @@ import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import { ArrowLeft, ArrowRight, CheckCircle2, Heart, Loader2, ThumbsDown, ThumbsUp, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getAspectsForOrigin, getSubmitRpcForOrigin, getSatisfactionLevel } from '@/lib/satisfaction';
+import {
+  getAspectsForOrigin, getSubmitRpcForOrigin, getSatisfactionLevel,
+  isServiceSurvey, SERVICE_SURVEY_SECTIONS, SERVICE_SURVEY_QUESTIONS,
+} from '@/lib/satisfaction';
 
 // Public, unauthenticated satisfaction survey (/encuesta/:token).
 // Anon client + the two RPCs below only — no direct table access (mirrors the
@@ -58,22 +61,29 @@ const PublicEncuesta = () => {
   const [plate, setPlate] = useState<string | null>(null);
   const [serviceType, setServiceType] = useState<string | null>(null);
 
-  // Question set is chosen by the survey's origin, so every step boundary is derived from
-  // the resolved list rather than from a module-level constant. Both lists happen to hold
-  // 5 aspects today; deriving keeps that a coincidence instead of a hidden dependency.
-  // Steps: 0 = intro, 1..N = one per aspect, N+1 = NPS, N+2 = optional comment.
+  // Two different surveys share this page:
+  //   VENTA     — 5 aspects rated 1..5 on a slider, then an NPS step, then a comment.
+  //   POSTVENTA — 8 closed questions (Sí/No or three options), NO scale and NO NPS,
+  //               then a comment. Defined in SERVICE_SURVEY_SECTIONS.
+  // Every step boundary is derived from the resolved question list, so neither flow hardcodes
+  // the other's arithmetic.
+  const isService = isServiceSurvey(origin);
   const aspects = getAspectsForOrigin(origin);
-  const LAST_ASPECT_STEP = aspects.length;
-  const NPS_STEP = LAST_ASPECT_STEP + 1;
-  const COMMENT_STEP = NPS_STEP + 1;
-  // "Pregunta X de N" — aspects + NPS. The comment step is optional and not counted.
-  const TOTAL_QUESTIONS = NPS_STEP;
-  const isService = origin === 'service';
+  const serviceQuestions = isService ? SERVICE_SURVEY_QUESTIONS : [];
+
+  // Steps: 0 = intro, 1..N = one question each, then (sale only) NPS, then the comment.
+  const questionCount = isService ? serviceQuestions.length : aspects.length;
+  const NPS_STEP = isService ? null : questionCount + 1;
+  const COMMENT_STEP = (NPS_STEP ?? questionCount) + 1;
+  // "Pregunta X de N". The optional comment step is not counted; NPS is, when it exists.
+  const TOTAL_QUESTIONS = NPS_STEP ?? questionCount;
 
   const [step, setStep] = useState(0);
   // Presence of a key in `ratings` doubles as the per-aspect "touched" flag —
   // an aspect the user hasn't dragged yet is simply absent, never pre-filled.
   const [ratings, setRatings] = useState<Record<string, number>>({});
+  /** Postventa answers, keyed by question column. Absent = not answered yet. */
+  const [choices, setChoices] = useState<Record<string, string>>({});
   const [nps, setNps] = useState<boolean | null>(null);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -119,10 +129,14 @@ const PublicEncuesta = () => {
     };
   }, [token]);
 
-  const currentAspect = step >= 1 && step <= LAST_ASPECT_STEP ? aspects[step - 1] : null;
+  const inQuestionRange = step >= 1 && step <= questionCount;
+  const currentAspect = !isService && inQuestionRange ? aspects[step - 1] : null;
+  const currentQuestion = isService && inQuestionRange ? serviceQuestions[step - 1] : null;
+
   const currentRating = currentAspect ? ratings[currentAspect.key] : undefined;
   const aspectTouched = currentRating !== undefined;
   const currentLevel = getSatisfactionLevel(currentRating ?? 3);
+  const currentChoice = currentQuestion ? choices[currentQuestion.column] : undefined;
 
   const handleAspectChange = (values: number[]) => {
     if (!currentAspect) return;
@@ -132,21 +146,37 @@ const PublicEncuesta = () => {
   const goNext = () => setStep(s => Math.min(s + 1, COMMENT_STEP));
   const goBack = () => setStep(s => Math.max(s - 1, 0));
 
-  const canAdvance = currentAspect ? aspectTouched : step === NPS_STEP ? nps !== null : true;
+  const canAdvance = currentQuestion
+    ? currentChoice !== undefined
+    : currentAspect
+      ? aspectTouched
+      : step === NPS_STEP
+        ? nps !== null
+        : true;
 
   const handleSubmit = async () => {
-    const allRatingsSet = aspects.every(a => ratings[a.key] !== undefined);
-    if (!allRatingsSet || nps === null) {
+    const complete = isService
+      ? serviceQuestions.every(q => choices[q.column] !== undefined)
+      : aspects.every(a => ratings[a.key] !== undefined) && nps !== null;
+    if (!complete) {
       toast.error('Faltan respuestas. Vuelve atrás y completa la encuesta.');
       return;
     }
 
     setSubmitting(true);
     const payload: Record<string, unknown> = { p_token: token };
-    aspects.forEach(a => {
-      payload[`p_${a.column}`] = ratings[a.key];
-    });
-    payload.p_nps = nps;
+    if (isService) {
+      // Postventa: one text argument per question, no NPS. `p_${column}` matches
+      // submit_service_survey_response (migration 20260813120000).
+      serviceQuestions.forEach(q => {
+        payload[`p_${q.column}`] = choices[q.column];
+      });
+    } else {
+      aspects.forEach(a => {
+        payload[`p_${a.column}`] = ratings[a.key];
+      });
+      payload.p_nps = nps;
+    }
     payload.p_comment = comment.trim() || null;
 
     const { error } = await (supabase.rpc as any)(getSubmitRpcForOrigin(origin), payload);
@@ -229,9 +259,9 @@ const PublicEncuesta = () => {
               {step >= 1 && (
                 <div className="space-y-1.5">
                   <p className="text-xs text-muted-foreground text-right">
-                    {step <= NPS_STEP ? `Pregunta ${step} de ${TOTAL_QUESTIONS}` : 'Último paso'}
+                    {step <= TOTAL_QUESTIONS ? `Pregunta ${step} de ${TOTAL_QUESTIONS}` : 'Último paso'}
                   </p>
-                  <Progress value={step <= NPS_STEP ? (step / TOTAL_QUESTIONS) * 100 : 100} className="h-1.5" />
+                  <Progress value={step <= TOTAL_QUESTIONS ? (step / TOTAL_QUESTIONS) * 100 : 100} className="h-1.5" />
                 </div>
               )}
 
@@ -257,6 +287,44 @@ const PublicEncuesta = () => {
                         </p>
                       )}
                       {dealershipName && <p className="text-xs text-muted-foreground/70">{dealershipName}</p>}
+                    </div>
+                  </div>
+                )}
+
+                {currentQuestion && (
+                  <div className="space-y-5">
+                    <div className="space-y-1.5 text-center">
+                      {/* The section is shown because the questionnaire is grouped: knowing
+                          you are in "Entrega y Acabado" frames what is being asked. */}
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-primary/70">
+                        {SERVICE_SURVEY_SECTIONS.find(s => s.questions.includes(currentQuestion))?.title}
+                      </p>
+                      <h2 className="text-lg font-display font-bold">{currentQuestion.title}</h2>
+                      <p className="text-sm text-muted-foreground">{currentQuestion.question}</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      {currentQuestion.options.map(option => {
+                        const selected = currentChoice === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() =>
+                              setChoices(prev => ({ ...prev, [currentQuestion.column]: option.value }))
+                            }
+                            className={cn(
+                              'w-full min-h-12 px-4 py-3 rounded-xl border-2 text-sm font-medium text-left transition-colors',
+                              selected
+                                ? 'border-primary bg-primary/5 text-foreground'
+                                : 'border-border hover:border-primary/40 text-muted-foreground',
+                            )}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -363,7 +431,7 @@ const PublicEncuesta = () => {
                   </Button>
                 )}
 
-                {step >= 1 && step <= NPS_STEP && (
+                {step >= 1 && step <= TOTAL_QUESTIONS && (
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={goBack} className="flex-1 h-11">
                       <ArrowLeft className="w-4 h-4 mr-1" /> Atrás

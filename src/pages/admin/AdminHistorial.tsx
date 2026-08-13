@@ -14,6 +14,8 @@ import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, W
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 import { ARCHIVED_RESERVATION_STATUSES, reservationStatusStyle } from '@/lib/reservationStatus';
+import { useServiceSurveys } from '@/hooks/useServiceSurveys';
+import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 
 interface ServiceEntry {
   id: string;
@@ -94,6 +96,10 @@ const AdminHistorial = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<ServiceEntry | null>(null);
   const [vehServiceCount, setVehServiceCount] = useState(0);
+
+  // Encuesta de postventa del servicio abierto en el detalle. Se pide sólo para esa cita:
+  // traerlas para las 100 filas de la página cargaría datos que nadie va a mirar.
+  const { surveys: detailSurveys } = useServiceSurveys(detail ? [detail.id] : []);
 
   useEffect(() => {
     supabase
@@ -538,6 +544,15 @@ const AdminHistorial = () => {
                       <p className="text-xs font-semibold flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-blue-600" /> Informe Técnico</p>
                       <TechnicalReportUploader reservationId={e.id} value={e.technical_report_url} onChange={() => {}} readonly />
                     </div>
+                  </>
+                )}
+
+                {/* Resultado de la encuesta de postventa de ESTE servicio. Rinde null cuando
+                    no hay encuesta, así que un servicio sin ella se ve igual que antes. */}
+                {detailSurveys.get(e.id) && (
+                  <>
+                    <Separator />
+                    <ServiceSurveyInline survey={detailSurveys.get(e.id)} />
                   </>
                 )}
 

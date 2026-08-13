@@ -49,6 +49,17 @@ export interface SurveyResponsePdfProps {
     key: string;
     score: number;
   }[];
+  /**
+   * Postventa answers, in questionnaire order. That survey has no 1..5 scale, so its answers
+   * cannot travel through `responses`. Present only when origin === 'service'.
+   */
+  serviceAnswers?: {
+    title: string;
+    /** The option the customer picked, e.g. "No fue lavado/aspirado". */
+    label: string;
+    /** 5 / 3 / 1 — only to colour the line, same scale the sale survey reports on. */
+    score: number;
+  }[];
   npsRecomienda: boolean | null;
   comment: string | null;
   overallScore: number;
@@ -167,6 +178,7 @@ const SurveyResponsePdf = ({
   soldPlate,
   respondedAt,
   responses,
+  serviceAnswers,
   npsRecomienda,
   comment,
   overallScore,
@@ -205,7 +217,20 @@ const SurveyResponsePdf = ({
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Evaluación por aspecto</Text>
+        <Text style={styles.sectionTitle}>
+          {isService ? 'Respuestas' : 'Evaluación por aspecto'}
+        </Text>
+
+        {isService && (serviceAnswers ?? []).map(answer => {
+          const color = hslTripletToHex(getSatisfactionLevel(answer.score).color);
+          return (
+            <View key={answer.title} style={styles.aspectRow}>
+              <Text style={styles.aspectTitle}>{answer.title}</Text>
+              <Text style={[styles.aspectScore, { color }]}>{answer.label}</Text>
+            </View>
+          );
+        })}
+
         {aspects.map(aspect => {
           const response = responses.find(r => r.key === aspect.key);
           const score = response?.score ?? 0;
@@ -222,9 +247,13 @@ const SurveyResponsePdf = ({
         })}
 
         <View style={styles.npsBlock}>
-          <Text style={styles.npsLine}>
-            ¿Recomienda a GAC? {npsRecomienda === null ? '—' : npsRecomienda ? 'Sí' : 'No'}
-          </Text>
+          {/* El cuestionario de postventa no pregunta recomendación, así que la línea se
+              omite en vez de imprimir un "—" que se lee como respuesta faltante. */}
+          {!isService && (
+            <Text style={styles.npsLine}>
+              ¿Recomienda a GAC? {npsRecomienda === null ? '—' : npsRecomienda ? 'Sí' : 'No'}
+            </Text>
+          )}
           {comment && (
             <View>
               <Text style={styles.npsLine}>Comentario del cliente:</Text>

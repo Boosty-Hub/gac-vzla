@@ -12,7 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus, User } from 'lucide-react';
 import { phoneMatchSuffix } from '@/lib/phone';
 import { normalizeSoldPlate } from '@/lib/plate';
-import { getAspectsForOrigin, getSatisfactionLevel, firstMeaningfulNameToken, SURVEY_ORIGIN_LABEL } from '@/lib/satisfaction';
+import {
+  getAspectsForOrigin, getSatisfactionLevel, firstMeaningfulNameToken, SURVEY_ORIGIN_LABEL,
+  isServiceSurvey, SERVICE_SURVEY_QUESTIONS, getServiceSurveyOption,
+} from '@/lib/satisfaction';
 import { driverLabel, type DriverOption } from '@/lib/drivers';
 import DriversManager from './DriversManager';
 import type { SurveyResponsePdfProps } from '@/components/satisfaction/SurveyResponsePdf';
@@ -310,6 +313,16 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
         key: aspect.key,
         score: Number(response[`q_${aspect.column}`]),
       })),
+      // Postventa: respuestas de opción cerrada. Van por su propia vía porque no hay escala.
+      serviceAnswers: isServiceSurvey(survey.origin)
+        ? SERVICE_SURVEY_QUESTIONS.map(question => {
+            const option = getServiceSurveyOption(
+              question.column,
+              response[`q_${question.column}`] as string | null,
+            );
+            return { title: question.title, label: option?.label ?? '—', score: option?.score ?? 3 };
+          })
+        : undefined,
       npsRecomienda: response.nps_recomienda,
       comment: response.comment,
       overallScore: Number(response.overall_score),
@@ -541,6 +554,26 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                           </div>
                         ) : (
                           <>
+                            {/* POSTVENTA: preguntas cerradas, sin escala. `surveyAspects` es
+                                una lista vacía para este origen, así que el bloque de barras
+                                de abajo no renderiza nada y los dos no se pisan. */}
+                            {isServiceSurvey(survey.origin) && SERVICE_SURVEY_QUESTIONS.map(question => {
+                              const raw = response[`q_${question.column}`] as string | null;
+                              const option = getServiceSurveyOption(question.column, raw);
+                              const level = getSatisfactionLevel(option?.score ?? 3);
+                              return (
+                                <div key={question.column} className="flex items-start justify-between gap-3 text-xs">
+                                  <span className="text-muted-foreground">{question.title}</span>
+                                  <span
+                                    className="font-semibold shrink-0 text-right"
+                                    style={{ color: `hsl(${level.color})` }}
+                                  >
+                                    {option?.label ?? '—'}
+                                  </span>
+                                </div>
+                              );
+                            })}
+
                             {surveyAspects.map(aspect => {
                               const score = Number(response[`q_${aspect.column}`]);
                               const level = getSatisfactionLevel(score);

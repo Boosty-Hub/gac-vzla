@@ -64,55 +64,177 @@ export const SATISFACTION_ASPECTS: SatisfactionAspect[] = [
 ];
 
 /**
- * Ordered list of the 5 rated aspects for a POST-SERVICE (postventa) survey.
+ * POSTVENTA — "Encuesta de Satisfacción: Experiencia Técnica y Servicio Postventa".
  *
- * Deliberately a separate list rather than reworded sale questions: the answers land in
- * `service_survey_responses`, whose columns are named after THESE aspects. `column` here
- * is the RPC parameter base name for `submit_service_survey_response` (arg = `p_${column}`)
- * and the DB column base name (`q_${column}`), exactly as with the sale list.
+ * NOT a rating survey. GAC defined 8 closed questions grouped in 5 sections; there is no
+ * 1..5 scale and no NPS. That is a different SHAPE of answer, not different wording, which
+ * is why it cannot reuse `SatisfactionAspect`.
  *
- * Keeping the count at 5 keeps the public form's step arithmetic identical for both kinds.
+ * `score` mirrors the CASE expressions in
+ * supabase/migrations/20260813120000_postventa_survey_questionnaire.sql. The database is the
+ * one that computes `overall_score` / `has_low_score`; the copy here is only so the UI can
+ * colour an answer without a round trip. If the two ever disagree, the migration wins.
  */
-export const SERVICE_SATISFACTION_ASPECTS: SatisfactionAspect[] = [
+export interface ServiceSurveyOption {
+  value: string;
+  label: string;
+  /** 5 best, 3 middle, 1 worst — same scale the sale survey reports on. */
+  score: 1 | 3 | 5;
+}
+
+export interface ServiceSurveyQuestion {
+  /** DB column is `q_${column}`; RPC argument is `p_${column}`. */
+  column: string;
+  title: string;
+  question: string;
+  options: ServiceSurveyOption[];
+}
+
+export interface ServiceSurveySection {
+  title: string;
+  questions: ServiceSurveyQuestion[];
+}
+
+export const SERVICE_SURVEY_SECTIONS: ServiceSurveySection[] = [
   {
-    key: 'agendamiento',
-    column: 'agendamiento',
-    title: 'Agendamiento de la Cita',
-    question:
-      '¿Qué tan fácil te resultó agendar tu cita y obtener una fecha que se ajustara a lo que necesitabas?',
+    title: 'Atención y Diagnóstico Inicial',
+    questions: [
+      {
+        column: 'recepcion_imagen',
+        title: 'Recepción e Imagen',
+        question:
+          'Al llegar al concesionario, ¿el asesor te recibió a tiempo y mantuvo una presencia limpia, formal y profesional?',
+        options: [
+          { value: 'si', label: 'Sí', score: 5 },
+          { value: 'no', label: 'No', score: 1 },
+        ],
+      },
+      {
+        column: 'explicacion_tecnica',
+        title: 'Explicación Técnica del Asesor',
+        question:
+          '¿Qué tan clara, detallada y comprensible fue la explicación que te dio el asesor sobre el trabajo que se le realizaría a tu auto?',
+        options: [
+          { value: 'muy_clara', label: 'Muy clara y detallada', score: 5 },
+          { value: 'aceptable', label: 'Aceptable', score: 3 },
+          { value: 'confusa', label: 'Confusa o insuficiente', score: 1 },
+        ],
+      },
+    ],
   },
   {
-    key: 'recepcion_asesor',
-    column: 'recepcion_asesor',
-    title: 'Recepción y Asesor de Servicio',
-    question:
-      'Al llegar al centro de servicio, ¿cómo calificarías la atención del asesor: te escuchó, te explicó el trabajo a realizar y te dio un presupuesto claro?',
+    title: 'Calidad del Trabajo Técnico y Repuestos',
+    questions: [
+      {
+        column: 'informe_tecnico',
+        title: 'Informe Técnico Escrito',
+        question:
+          '¿Recibiste un informe técnico por escrito o digital detallando los diagnósticos y trabajos ejecutados en tu vehículo?',
+        options: [
+          { value: 'si', label: 'Sí', score: 5 },
+          { value: 'no', label: 'No', score: 1 },
+        ],
+      },
+      {
+        column: 'garantia_repuestos',
+        title: 'Garantía de Repuestos',
+        question:
+          '¿Te confirmaron y garantizaron el uso de repuestos 100% genuinos / originales durante el mantenimiento o reparación?',
+        options: [
+          { value: 'si', label: 'Sí', score: 5 },
+          // Una omisión al comunicar, no la negación de la garantía: por eso 3 y no 1.
+          { value: 'no_mencionado', label: 'No me lo mencionaron', score: 3 },
+          { value: 'no', label: 'No', score: 1 },
+        ],
+      },
+      {
+        column: 'presentacion_equipo',
+        title: 'Presentación del Equipo Técnico',
+        question:
+          'Al interactuar o visualizar al equipo de taller/mecánicos, ¿notaste una presencia limpia, cuidada y profesional?',
+        options: [
+          { value: 'si', label: 'Sí', score: 5 },
+          { value: 'no', label: 'No', score: 1 },
+        ],
+      },
+    ],
   },
   {
-    key: 'tiempo_entrega',
-    column: 'tiempo_entrega',
-    title: 'Tiempo de Entrega',
-    question: '¿Se cumplió el tiempo de entrega que te prometieron cuando dejaste tu vehículo?',
+    title: 'Entrega y Acabado del Vehículo',
+    questions: [
+      {
+        column: 'limpieza_entrega',
+        title: 'Limpieza e Higiene',
+        question: 'Al momento de retirarlo, ¿tu vehículo fue entregado completamente lavado y aspirado?',
+        options: [
+          { value: 'impecable', label: 'Sí, impecable', score: 5 },
+          { value: 'parcial', label: 'Parcialmente limpio', score: 3 },
+          { value: 'no_lavado', label: 'No fue lavado/aspirado', score: 1 },
+        ],
+      },
+    ],
   },
   {
-    key: 'calidad_servicio',
-    column: 'calidad_servicio',
-    title: 'Calidad del Servicio',
-    question:
-      'Pensando en el trabajo realizado, ¿tu vehículo te fue entregado en las condiciones que esperabas y se resolvió lo que solicitaste?',
+    title: 'Transparencia y Valor de Servicio',
+    questions: [
+      {
+        column: 'precio_mano_obra',
+        title: 'Relación Precio - Mano de Obra',
+        question:
+          'Pensando en la calidad técnica recibida y la atención brindada, ¿qué opinas sobre el costo de la mano de obra?',
+        options: [
+          { value: 'excelente', label: 'Excelente / Justo', score: 5 },
+          { value: 'adecuado', label: 'Adecuado', score: 3 },
+          { value: 'elevado', label: 'Elevado para el servicio recibido', score: 1 },
+        ],
+      },
+    ],
   },
   {
-    key: 'instalaciones',
-    column: 'instalaciones',
-    title: 'Instalaciones',
-    question: '¿Qué tan cómodas, limpias y adecuadas te parecieron nuestras instalaciones mientras esperabas?',
+    title: 'Calificación General',
+    questions: [
+      {
+        column: 'conclusion_tecnica',
+        title: 'Conclusión Técnica',
+        question:
+          'En general, ¿sientes que te brindaron la atención técnica adecuada y resolvieron de forma definitiva el motivo de tu cita?',
+        options: [
+          { value: 'satisfecho', label: 'Sí, totalmente satisfecho', score: 5 },
+          { value: 'parcial', label: 'Parcialmente', score: 3 },
+          { value: 'persiste', label: 'No, el problema persiste', score: 1 },
+        ],
+      },
+    ],
   },
 ];
 
-/** Aspect list matching a survey's origin. Unknown/absent origin falls back to the sale
- *  set, which is what every survey created before postventa existed is. */
+/** The 8 questions in order, flattened out of their sections. */
+export const SERVICE_SURVEY_QUESTIONS: ServiceSurveyQuestion[] =
+  SERVICE_SURVEY_SECTIONS.flatMap(s => s.questions);
+
+/** True when this survey uses the closed-question postventa form instead of 1..5 sliders. */
+export function isServiceSurvey(origin: string | null | undefined): boolean {
+  return origin === 'service';
+}
+
+/** The stored option for one answer, or undefined if the value is unknown. */
+export function getServiceSurveyOption(
+  column: string,
+  value: string | null | undefined,
+): ServiceSurveyOption | undefined {
+  if (!value) return undefined;
+  return SERVICE_SURVEY_QUESTIONS.find(q => q.column === column)?.options.find(o => o.value === value);
+}
+
+/**
+ * Aspect list for a SALE survey.
+ *
+ * Returns an empty list for 'service': that origin has no 1..5 aspects at all since
+ * 2026-08-13. Returning the sale list instead would have every consumer render sale titles
+ * over columns that no longer exist — five rows of "NaN/5" that still look like a report.
+ */
 export function getAspectsForOrigin(origin: string | null | undefined): SatisfactionAspect[] {
-  return origin === 'service' ? SERVICE_SATISFACTION_ASPECTS : SATISFACTION_ASPECTS;
+  return isServiceSurvey(origin) ? [] : SATISFACTION_ASPECTS;
 }
 
 /** The RPC that accepts this origin's answers. The two are not interchangeable — each one

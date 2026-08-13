@@ -8,13 +8,32 @@ import { supabase } from '@/integrations/supabase/client';
  * One query for the whole history list, not one per row — a vehicle with 30 services would
  * otherwise fire 30 requests to render a single dialog.
  *
- * EN PAUSA (2026-08-04). La postventa pertenece a un proyecto mayor que aun no arranca, asi
- * que el trigger que crea estas encuestas esta desactivado
- * (migracion 20260804140000_pause_postventa_survey.sql). Este hook queda intacto y devuelve
- * un Map vacio; `ServiceSurveyInline` no renderiza nada sin encuesta, de modo que el
- * historial del vehiculo se ve exactamente igual que antes de la funcion. Al reactivar el
- * trigger, esto vuelve a poblarse solo.
+ * REACTIVADA el 2026-08-13. Estuvo en pausa desde el 2026-08-04 por el ruteo incorrecto que
+ * mandaba la postventa al bot de ventas; eso lo resuelve
+ * 20260813130000_postventa_survey_dispatch.sql, que ademas exige la config de Kommo propia
+ * antes de despachar.
  */
+
+/** Respuestas al cuestionario de opcion cerrada. Las claves son las columnas `q_*`. */
+export interface ServiceSurveyAnswers {
+  q_recepcion_imagen: string | null;
+  q_explicacion_tecnica: string | null;
+  q_informe_tecnico: string | null;
+  q_garantia_repuestos: string | null;
+  q_presentacion_equipo: string | null;
+  q_limpieza_entrega: string | null;
+  q_precio_mano_obra: string | null;
+  q_conclusion_tecnica: string | null;
+  comment: string | null;
+  overall_score: number | string | null;
+  has_low_score: boolean | null;
+  /**
+   * Respuestas al cuestionario 1..5 anterior al 2026-08-13, archivadas al cambiar de
+   * cuestionario. Se conservan porque son respuestas reales de clientes, pero no se agregan
+   * en ningun promedio: las preguntas no son comparables.
+   */
+  legacy_answers: Record<string, unknown> | null;
+}
 
 export interface ServiceSurveySummary {
   id: string;
@@ -22,17 +41,7 @@ export interface ServiceSurveySummary {
   status: string;
   responded_at: string | null;
   /** Null until the customer answers. */
-  response: {
-    q_agendamiento: number;
-    q_recepcion_asesor: number;
-    q_tiempo_entrega: number;
-    q_calidad_servicio: number;
-    q_instalaciones: number;
-    nps_recomienda: boolean | null;
-    comment: string | null;
-    overall_score: number | string;
-    has_low_score: boolean;
-  } | null;
+  response: ServiceSurveyAnswers | null;
 }
 
 export function useServiceSurveys(reservationIds: string[]) {

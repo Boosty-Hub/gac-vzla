@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Wrench, Plus, Pencil, Trash2, Clock } from 'lucide-react';
+import { Wrench, Plus, Pencil, Trash2, Clock, Star } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ServiceType {
@@ -16,6 +16,7 @@ interface ServiceType {
   name: string;
   duration_minutes: number;
   is_active: boolean;
+  sends_postventa_survey: boolean;
   created_at: string;
 }
 
@@ -31,6 +32,7 @@ const AdminServicios = () => {
   const [formName, setFormName] = useState('');
   const [formDuration, setFormDuration] = useState('60');
   const [formIsActive, setFormIsActive] = useState(true);
+  const [formSendsSurvey, setFormSendsSurvey] = useState(true);
 
   const fetchServices = async () => {
     setLoading(true);
@@ -55,6 +57,7 @@ const AdminServicios = () => {
     setFormName('');
     setFormDuration('60');
     setFormIsActive(true);
+    setFormSendsSurvey(true);
     setDialogOpen(true);
   };
 
@@ -63,6 +66,7 @@ const AdminServicios = () => {
     setFormName(s.name);
     setFormDuration(String(s.duration_minutes));
     setFormIsActive(s.is_active);
+    setFormSendsSurvey(s.sends_postventa_survey ?? true);
     setDialogOpen(true);
   };
 
@@ -76,6 +80,7 @@ const AdminServicios = () => {
       name: formName.trim(),
       duration_minutes: duration,
       is_active: formIsActive,
+      sends_postventa_survey: formSendsSurvey,
     };
 
     if (editing) {
@@ -137,6 +142,7 @@ const AdminServicios = () => {
                 <TableHead>Nombre</TableHead>
                 <TableHead>Duración</TableHead>
                 <TableHead>Estado</TableHead>
+                <TableHead>Encuesta postventa</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
@@ -153,6 +159,15 @@ const AdminServicios = () => {
                     <Badge variant={s.is_active ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
                       {s.is_active ? 'Activo' : 'Inactivo'}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {s.sends_postventa_survey ?? true ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
+                        <Star className="w-2.5 h-2.5" /> Sí
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0">No se envía</Badge>
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -195,6 +210,16 @@ const AdminServicios = () => {
                 <p className="text-xs text-muted-foreground">Disponible para reservas</p>
               </div>
               <Switch checked={formIsActive} onCheckedChange={setFormIsActive} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>Enviar encuesta de postventa</Label>
+                <p className="text-xs text-muted-foreground">
+                  Al marcar la cita como Completada. Apagalo para reclamos o gestiones donde
+                  preguntar por la experiencia no aplica.
+                </p>
+              </div>
+              <Switch checked={formSendsSurvey} onCheckedChange={setFormSendsSurvey} />
             </div>
           </div>
           <DialogFooter>
