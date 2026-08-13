@@ -27,6 +27,7 @@ import { createKommoReservation } from '@/lib/kommo';
 import { resolveWarrantyCondition, evaluateWarranty, formatServiceCount, type WarrantyConditionRef } from '@/lib/warranty';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isInternalServiceType } from '@/lib/serviceTypes';
+import { RESERVATION_STATUS_CONFIG } from '@/lib/reservationStatus';
 
 // Radix Select cannot hold an empty value, so "no driver" needs a sentinel that can never
 // collide with a real driver id (those are UUIDs).
@@ -156,13 +157,7 @@ const isSlotPast = (slot: string, selectedDate: Date | undefined) => {
   return slot <= getNowTimeVzla();
 };
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
-  confirmada: { label: 'Confirmada', color: 'bg-blue-100 text-blue-800' },
-  en_proceso: { label: 'En Proceso', color: 'bg-purple-100 text-purple-800' },
-  completada: { label: 'Completada', color: 'bg-green-100 text-green-800' },
-  cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
-};
+const STATUS_CONFIG = RESERVATION_STATUS_CONFIG;
 
 // Minimum active vehicles required to switch "Mis Vehículos" into the enhanced
 // fleet-control view (search, filters, prioritization). Change to 3 in one line.

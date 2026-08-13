@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { RESERVATION_STATUS_COLORS } from '@/lib/reservationStatus';
 
 interface MiniReservation {
   id: string;
@@ -28,15 +29,7 @@ interface MonthlyReservationsCalendarProps<R extends MiniReservation = MiniReser
 }
 
 const DAY_LABELS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-const DEFAULT_STATUS_COLORS: Record<string, string> = {
-  pendiente: 'bg-yellow-100 text-yellow-800',
-  confirmada: 'bg-blue-100 text-blue-800',
-  en_proceso: 'bg-purple-100 text-purple-800',
-  completada: 'bg-green-100 text-green-800',
-  cancelada: 'bg-red-100 text-red-800',
-  agendada: 'bg-blue-100 text-blue-800',
-  culminado: 'bg-green-100 text-green-800',
-};
+const DEFAULT_STATUS_COLORS = RESERVATION_STATUS_COLORS;
 
 function parseYearMonth(ym: string): { year: number; month0: number } {
   const [y, m] = ym.split('-').map(Number);

@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator';
 import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText, X } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
+import { ARCHIVED_RESERVATION_STATUSES, reservationStatusStyle } from '@/lib/reservationStatus';
 
 interface ServiceEntry {
   id: string;
@@ -52,32 +53,19 @@ interface WarrantyCondition {
   service_interval_km: number;
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
-  confirmada: { label: 'Confirmada', color: 'bg-blue-100 text-blue-800' },
-  en_proceso: { label: 'En Proceso', color: 'bg-purple-100 text-purple-800' },
-  completada: { label: 'Completada', color: 'bg-green-100 text-green-800' },
-  cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
-  culminado: { label: 'Culminado', color: 'bg-slate-100 text-slate-800' },
-};
-
-// `reservations.status` has no CHECK constraint and no enum — it is a bare `text` column,
-// so an unexpected value is possible. Render it readably instead of leaking a raw slug.
-const statusBadge = (status: string) =>
-  STATUS_CONFIG[status] ?? { label: status || 'Sin estado', color: 'bg-muted text-muted-foreground' };
-
-// Statuses that count as "closed" and therefore belong in the service history.
-// Mirrors the ARCHIVED_STATUSES set already used by AdminReservas.tsx and
-// DealershipReservas.tsx — reusing the project's own notion of closed rather than
-// inventing a second one.
+// CORRECTION (2026-08-13): the comment previously here claimed `reservations.status` was an
+// unconstrained `text` column. It is not, and never was:
 //
-// Live distribution of `reservations.status` on 2026-07-30: completada 416, pendiente 38,
-// en_proceso 28, confirmada 14, cancelada 11 — and `culminado` **zero rows**. It is kept in
-// this list anyway because two other files already treat it as an archived state, the column
-// is unconstrained `text`, and the failure mode is asymmetric: including an unused value
-// costs nothing, while omitting one that later appears silently hides those rows — which is
-// precisely the bug this change exists to fix.
-const HISTORY_STATUSES = ['completada', 'cancelada', 'culminado'];
+//   reservations_status_check CHECK (status = ANY (ARRAY[
+//     'pendiente','confirmada','en_proceso','completada','cancelada']))
+//
+// That mistaken belief is what justified carrying `culminado` around as a "harmless extra".
+// It was not harmless — two views OFFERED it in their status dropdowns, and the database
+// rejected every attempt to save it. See src/lib/reservationStatus.ts.
+const statusBadge = reservationStatusStyle;
+
+// Statuses that close an appointment and therefore belong in the service history.
+const HISTORY_STATUSES = [...ARCHIVED_RESERVATION_STATUSES];
 
 const AdminHistorial = () => {
   const { profile, role, getModuleScope } = useAuth();

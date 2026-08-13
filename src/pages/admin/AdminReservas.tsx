@@ -28,6 +28,12 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 import { computeSlotOccupancy, formatMinuteLabel, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isPartsRequest, PLANT_DEALERSHIP_ID } from '@/lib/serviceTypes';
+import {
+  RESERVATION_STATUS_LABELS as STATUS_LABELS,
+  RESERVATION_STATUS_COLORS as STATUS_COLORS,
+  ARCHIVED_RESERVATION_STATUSES,
+  reservationStatusStyle,
+} from '@/lib/reservationStatus';
 import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
 
 interface Dealership {
@@ -112,35 +118,10 @@ const HOUR_LABELS: Record<string, string> = {
   '16:00': '4:00 PM', '17:00': '5:00 PM',
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  pendiente: 'bg-yellow-100 text-yellow-800',
-  confirmada: 'bg-blue-100 text-blue-800',
-  en_proceso: 'bg-orange-100 text-orange-800',
-  completada: 'bg-green-100 text-green-800',
-  cancelada: 'bg-red-100 text-red-800',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  pendiente: 'Pendiente',
-  confirmada: 'Confirmada',
-  en_proceso: 'En Proceso',
-  completada: 'Completada',
-  cancelada: 'Cancelada',
-};
-
+// An incidencia is still a reservation: same table, same status column, same CHECK
+// constraint. It used to render its own `agendada` / `culminado` vocabulary, which the
+// database rejected on every save — see src/lib/reservationStatus.ts.
 const INCIDENCIA_TYPES = new Set(['Incidencia', 'Falla o Desperfecto']);
-const INCIDENCIA_STATUS_LABELS: Record<string, string> = {
-  pendiente: 'Pendiente',
-  agendada: 'Agendada',
-  en_proceso: 'En Proceso',
-  culminado: 'Culminado',
-};
-const INCIDENCIA_STATUS_COLORS: Record<string, string> = {
-  pendiente: 'bg-yellow-100 text-yellow-800',
-  agendada: 'bg-blue-100 text-blue-800',
-  en_proceso: 'bg-orange-100 text-orange-800',
-  culminado: 'bg-green-100 text-green-800',
-};
 
 const AR_LS_KEY = 'admin_reservas_create_form';
 const getArLS = () => { try { return JSON.parse(localStorage.getItem(AR_LS_KEY) || '{}'); } catch { return {}; } };
@@ -911,7 +892,7 @@ const AdminReservas = () => {
 
   const partsRequestsCount = reservations.filter(r => isPartsRequest(r.service_type)).length;
 
-  const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
+  const ARCHIVED_STATUSES = ARCHIVED_RESERVATION_STATUSES;
   const filteredReservations = reservations.filter(r => {
     // Split into "Citas" vs "Solicitudes de Repuestos" tabs
     if (reservationTab === 'repuestos') {
@@ -1810,10 +1791,7 @@ const AdminReservas = () => {
                 <Select value={fStatus} onValueChange={setFStatus}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {INCIDENCIA_TYPES.has(fService)
-                      ? Object.entries(INCIDENCIA_STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)
-                      : Object.entries(STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)
-                    }
+                    {Object.entries(STATUS_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -2013,10 +1991,8 @@ const AdminReservas = () => {
               {/* Status badge */}
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 {(() => {
-                  const isInc = INCIDENCIA_TYPES.has(detailRes.service_type);
-                  const statusColor = isInc ? (INCIDENCIA_STATUS_COLORS[detailRes.status] || 'bg-muted') : (STATUS_COLORS[detailRes.status] || 'bg-muted');
-                  const statusLabel = isInc ? (INCIDENCIA_STATUS_LABELS[detailRes.status] || detailRes.status) : (STATUS_LABELS[detailRes.status] || detailRes.status);
-                  return <Badge className={cn('text-xs px-2 py-0.5', statusColor)}>{statusLabel}</Badge>;
+                  const st = reservationStatusStyle(detailRes.status);
+                  return <Badge className={cn('text-xs px-2 py-0.5', st.color)}>{st.label}</Badge>;
                 })()}
                 <span className="text-xs text-muted-foreground break-words">{formatDate(detailRes.reservation_date)} · {formatTime(detailRes.reservation_time)}</span>
               </div>

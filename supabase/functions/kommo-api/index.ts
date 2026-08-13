@@ -305,14 +305,20 @@ const POSTVENTA_PIPELINE_ID = 13151339
 // status flow below.
 const CONVERSATION_STAGE = 104023216  // "En conversación Cliente/Empresa"
 
+// Mirrors reservations_status_check exactly — the five statuses the database accepts.
+// See src/lib/reservationStatus.ts.
+//
+// Removed on 2026-08-13: `agendada -> 101411323` and `culminado -> 142`. Neither could ever
+// arrive here, because the CHECK constraint rejected both on write and production holds zero
+// rows with either value. `agendada` pointed at the SAME stage as `confirmada`, so it was
+// never a distinct state; `culminado` pointed at `142`, a 3-digit id where every real Post
+// Venta stage id is 9 digits — it would have 400'd against Kommo had it ever fired.
 const POSTVENTA_STATUS_TO_STAGE: Record<string, number> = {
   pendiente:  101411319,  // Pendiente
   confirmada: 101411323,  // Confirmada
   en_proceso: 101411327,  // En proceso
   completada: 104022404,  // Completada
   cancelada:  104022408,  // Cancelada
-  agendada:   101411323,  // Confirmada (incidencias agendadas)
-  culminado:  142,        // servicio realizado
 }
 
 // Custom fields específicos del pipeline Post Venta (grupo leads_87791771102231)

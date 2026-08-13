@@ -30,6 +30,11 @@ import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isPartsRequest, PLANT_DEALERSHIP_ID } from '@/lib/serviceTypes';
+import {
+  RESERVATION_STATUS_CONFIG,
+  ARCHIVED_RESERVATION_STATUSES,
+  reservationStatusStyle,
+} from '@/lib/reservationStatus';
 import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
 import { List, LayoutGrid } from 'lucide-react';
 
@@ -143,20 +148,10 @@ interface VehicleResult {
   vehicle_models: { name: string; brand: string } | null;
 }
 
-const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
-  confirmada: { label: 'Confirmada', color: 'bg-blue-100 text-blue-800' },
-  en_proceso: { label: 'En Proceso', color: 'bg-purple-100 text-purple-800' },
-  completada: { label: 'Completada', color: 'bg-green-100 text-green-800' },
-  cancelada: { label: 'Cancelada', color: 'bg-red-100 text-red-800' },
-};
-
-const INCIDENCIA_STATUSES: Record<string, { label: string; color: string }> = {
-  pendiente: { label: 'Pendiente', color: 'bg-yellow-100 text-yellow-800' },
-  agendada: { label: 'Agendada', color: 'bg-blue-100 text-blue-800' },
-  en_proceso: { label: 'En Proceso', color: 'bg-purple-100 text-purple-800' },
-  culminado: { label: 'Culminado', color: 'bg-green-100 text-green-800' },
-};
+// Statuses come from src/lib/reservationStatus.ts so this view, AdminReservas and the
+// advisor panel cannot drift apart again. The incidencia-only `agendada` / `culminado`
+// pair that used to live here was rejected by the database on every save.
+const STATUS_CONFIG = RESERVATION_STATUS_CONFIG;
 
 const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
   const h = Math.floor(i / 2) + 8;
@@ -534,7 +529,7 @@ const DealershipReservas = () => {
     } catch {}
   }, [createOpen, editingRes, unifiedSearch, plateResult, plateSearched, fDate, fTime, fService, fMileage, fNotes, fState, fWalkinName, fWalkinPhone, fWalkinPlate, manualMode, fWalkinCedula, fWalkinModelId, fWalkinUseManualModel, fWalkinManualBrand, fWalkinManualModelName, fWalkinYear, fWalkinExternalSource]);
 
-  const ARCHIVED_STATUSES = new Set(['completada', 'cancelada', 'culminado']);
+  const ARCHIVED_STATUSES = ARCHIVED_RESERVATION_STATUSES;
   const filteredReservations = reservations.filter(r => {
     // Split into "Citas" vs "Solicitudes de Repuestos" tabs
     if (reservationTab === 'repuestos') {
@@ -1008,10 +1003,9 @@ const DealershipReservas = () => {
     setCompleting(false);
   };
 
-  const calendarStatusColors: Record<string, string> = {
-    ...Object.fromEntries(Object.entries(STATUS_CONFIG).map(([k, v]) => [k, v.color])),
-    ...Object.fromEntries(Object.entries(INCIDENCIA_STATUSES).map(([k, v]) => [k, v.color])),
-  };
+  const calendarStatusColors: Record<string, string> = Object.fromEntries(
+    Object.entries(STATUS_CONFIG).map(([k, v]) => [k, v.color]),
+  );
 
   return (
     <div className="space-y-3">
@@ -1100,9 +1094,6 @@ const DealershipReservas = () => {
             <SelectContent>
               <SelectItem value="todos">Todos los estados</SelectItem>
               {Object.entries(STATUS_CONFIG).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
-              <SelectSeparator />
-              <SelectItem value="agendada">Agendada</SelectItem>
-              <SelectItem value="culminado">Culminado</SelectItem>
             </SelectContent>
           </Select>
           <Select value={resServiceFilter} onValueChange={setResServiceFilter}>
@@ -1183,8 +1174,7 @@ const DealershipReservas = () => {
                   : r.walkin_plate || '-';
                 const plate = r.vehicles?.plate || r.walkin_plate || '-';
                 const isInc = INCIDENCIA_TYPES.has(r.service_type);
-                const statusMap = isInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
-                const st = statusMap[r.status] || (isInc ? INCIDENCIA_STATUSES.pendiente : STATUS_CONFIG.pendiente);
+                const st = reservationStatusStyle(r.status);
                 return (
                   <TableRow key={r.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(r)}>
                     <TableCell className="font-medium">
@@ -1320,8 +1310,7 @@ const DealershipReservas = () => {
           </DialogHeader>
           {detailRes && (() => {
             const isInc = INCIDENCIA_TYPES.has(detailRes.service_type);
-            const statusMap = isInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
-            const st = statusMap[detailRes.status] || (isInc ? INCIDENCIA_STATUSES.pendiente : STATUS_CONFIG.pendiente);
+            const st = reservationStatusStyle(detailRes.status);
             const clientName = detailRes.clients?.full_name || detailRes.walkin_client_name || '-';
             return (
               <Tabs defaultValue="cita" className="w-full">
@@ -1462,8 +1451,7 @@ const DealershipReservas = () => {
                       <p className="text-xs text-muted-foreground">{vehicleHistory.length} servicio(s) previo(s)</p>
                       {vehicleHistory.map(h => {
                         const hIsInc = INCIDENCIA_TYPES.has(h.service_type);
-                        const hMap = hIsInc ? INCIDENCIA_STATUSES : STATUS_CONFIG;
-                        const hst = hMap[h.status] || hMap.pendiente;
+                        const hst = reservationStatusStyle(h.status);
                         return (
                           <div key={h.id} className="border rounded-md p-2.5 text-xs space-y-1.5">
                             <div className="flex items-center justify-between">
