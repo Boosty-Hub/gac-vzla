@@ -782,7 +782,7 @@ const DealershipReservas = () => {
     }
 
     if (editingRes) {
-      const updatePayload = {
+      const updatePayload: Record<string, unknown> = {
         dealership_id: isRepuestos ? PLANT_DEALERSHIP_ID : selectedDealership,
         reservation_date: fDate, reservation_time: isRepuestos ? '00:00:00' : fTime, service_type: fService,
         current_mileage: parseInt(fMileage) || 0,
@@ -792,6 +792,13 @@ const DealershipReservas = () => {
         technical_report_url: createTechReportUrl || null,
         ...assign,
       };
+      // Los dos campos de texto libre no viajan si no cambiaron. `editingRes` sale de la lista
+      // en pantalla, que puede tener horas: sin esto, abrir Editar para corregir la hora y
+      // guardar revierte la nota que otro escribió mientras tanto, sin haberla tocado.
+      const sinCambios = (valor: string, original: string | null) => valor.trim() === (original || '').trim();
+      if (sinCambios(fNotes, editingRes.notes)) delete updatePayload.notes;
+      if (sinCambios(fObs, editingRes.internal_notes)) delete updatePayload.internal_notes;
+
       const { error } = await supabase.from('reservations').update(updatePayload).eq('id', editingRes.id);
       if (error) { toast.error('Error al actualizar reserva'); console.error(error); }
       else {

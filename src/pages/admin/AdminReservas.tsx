@@ -804,6 +804,17 @@ const AdminReservas = () => {
     };
 
     if (editingRes) {
+      // Los dos campos de texto libre no viajan si no cambiaron.
+      //
+      // Mismo problema que en "Completar servicio": `editingRes` sale de la lista en pantalla,
+      // que puede tener horas. Alguien abre Editar para corregir la hora de la cita, guarda, y
+      // sin haber tocado nada revierte la nota que otro escribió mientras tanto. El resto de
+      // los campos sí se mandan siempre — fecha, estado, servicio son de valor único y quien
+      // edita los está mirando; una nota que se acumula entre varias personas, no.
+      const sinCambios = (valor: string, original: string | null) => valor.trim() === (original || '').trim();
+      if (sinCambios(fNotes, editingRes.notes)) delete payload.notes;
+      if (sinCambios(fObs, editingRes.internal_notes)) delete payload.internal_notes;
+
       const { error } = await supabase.from('reservations').update(payload).eq('id', editingRes.id);
       if (error) { toast.error('Error al actualizar reserva'); console.error(error); }
       else {
