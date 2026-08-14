@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import PostventaSurveyConfigCard from '@/components/config/PostventaSurveyConfigCard';
+import OpenReservationsReminderCard from '@/components/config/OpenReservationsReminderCard';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -161,6 +162,8 @@ export default function AdminAutomatizaciones() {
       </Card>
 
       <PostventaSurveyConfigCard />
+
+      <OpenReservationsReminderCard />
 
       {/* Stage mapping */}
       <Card>

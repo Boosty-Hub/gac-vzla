@@ -220,6 +220,8 @@ const DealershipReservas = () => {
   const [createTechReportUrl, setCreateTechReportUrl] = useState<string | null>(null);
   const [completeInternalNotes, setCompleteInternalNotes] = useState('');
   const [completeRecommendation, setCompleteRecommendation] = useState('');
+  /** Valores que tenía la cita al abrir "Completar servicio". Ver handleComplete. */
+  const [completeSnapshot, setCompleteSnapshot] = useState({ internal_notes: '', recommendation: '' });
   const [completing, setCompleting] = useState(false);
 
   // Create dialog (initialized from localStorage to survive page refresh)
@@ -976,6 +978,9 @@ const DealershipReservas = () => {
     setTechnicalReportUrl(r.technical_report_url || null);
     setCompleteInternalNotes(r.internal_notes || '');
     setCompleteRecommendation(r.recommendation || '');
+    // Snapshot de lo que había al abrir. Ver handleComplete: sirve para no reescribir campos
+    // que este diálogo no tocó.
+    setCompleteSnapshot({ internal_notes: r.internal_notes || '', recommendation: r.recommendation || '' });
     setCompleteOpen(true);
   };
 
@@ -987,13 +992,29 @@ const DealershipReservas = () => {
     // updates zero rows and returns 204 with no error. Without reading the affected rows
     // back, an unauthorized user gets a green "Servicio completado" toast on an
     // appointment that never actually closed.
-    const { data: updated, error } = await supabase.from('reservations').update({
+    // Sólo se escriben los campos que ESTE diálogo cambió.
+    //
+    // `completingRes` sale de la lista cargada en pantalla, que puede tener minutos u horas.
+    // Si otra persona escribió la nota interna después de ese fetch, mandarla igual la pisa
+    // con el valor viejo — y como el valor viejo suele ser vacío, la nota se pierde. Ese es
+    // el reporte de "las notas internas desaparecen al pasar a completada": no las borra la
+    // base (verificado forzando la transición con todos los triggers y el webhook activos),
+    // las borra este UPDATE con una foto vencida.
+    const completePayload: Record<string, unknown> = {
       status: 'completada', service_notes: serviceNotes.trim(),
       technical_report_url: technicalReportUrl || null, completed_at: new Date().toISOString(),
-      internal_notes: completeInternalNotes.trim() || null,
-      // `recommendation` isn't in generated Supabase types yet (see migration 20260721140000).
-      recommendation: completeRecommendation.trim() || null,
-    } as any).eq('id', completingRes.id).select('id');
+    };
+    if (completeInternalNotes.trim() !== completeSnapshot.internal_notes.trim()) {
+      completePayload.internal_notes = completeInternalNotes.trim() || null;
+    }
+    // `recommendation` isn't in generated Supabase types yet (see migration 20260721140000).
+    if (completeRecommendation.trim() !== completeSnapshot.recommendation.trim()) {
+      completePayload.recommendation = completeRecommendation.trim() || null;
+    }
+
+    const { data: updated, error } = await supabase.from('reservations').update(
+      completePayload as any,
+    ).eq('id', completingRes.id).select('id');
     if (error) { toast.error('Error al completar'); console.error(error); }
     else if (!updated || updated.length === 0) {
       toast.error('No se pudo cerrar la cita: tu usuario no tiene permisos sobre este concesionario. Contacta a un administrador.');
@@ -1304,7 +1325,8 @@ const DealershipReservas = () => {
 
       {/* DETAIL DIALOG */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        {/* Vista previa del asesor: 7 datos + hasta 5 bloques de texto + acciones. */}
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[85vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               {detailRes && INCIDENCIA_TYPES.has(detailRes.service_type)
@@ -1537,7 +1559,7 @@ const DealershipReservas = () => {
 
       {/* CREATE DIALOG */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               {isIncidencia

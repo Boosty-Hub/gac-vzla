@@ -19,6 +19,7 @@ const typeConfig: Record<string, { icon: typeof Bell; label: string; colorClass:
   reservation_cancelled: { icon: CalendarDays, label: 'Reserva', colorClass: 'text-destructive' },
   reservation_completed: { icon: Check, label: 'Servicio', colorClass: 'text-emerald-600' },
   reservation_status: { icon: CalendarDays, label: 'Reserva', colorClass: 'text-amber-500' },
+  reservation_open_reminder: { icon: AlertTriangle, label: 'Recordatorio', colorClass: 'text-amber-600' },
   warranty: { icon: AlertTriangle, label: 'Garantía', colorClass: 'text-orange-500' },
   info: { icon: Info, label: 'Info', colorClass: 'text-muted-foreground' },
 };

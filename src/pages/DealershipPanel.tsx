@@ -1129,7 +1129,8 @@ const DealershipPanel = () => {
 
       {/* DETAIL DIALOG */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        {/* Vista previa del asesor: ~8 datos + notas + acciones. */}
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl max-h-[85vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               <CalendarDays className="w-4 h-4" /> Detalle de Cita
@@ -1406,7 +1407,7 @@ const DealershipPanel = () => {
 
       {/* CREATE RESERVATION DIALOG */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="font-display">Nueva Reserva</DialogTitle>
           </DialogHeader>

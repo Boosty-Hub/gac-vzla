@@ -187,6 +187,8 @@ const AdminReservas = () => {
   const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
   const [satisfactionRating, setSatisfactionRating] = useState<number | null>(null);
   const [completeInternalNotes, setCompleteInternalNotes] = useState('');
+  /** Valores que tenía la cita al abrir "Completar servicio". Ver handleComplete. */
+  const [completeSnapshot, setCompleteSnapshot] = useState({ internal_notes: '', recommendation: '' });
   const [completeRecommendation, setCompleteRecommendation] = useState('');
   const [completing, setCompleting] = useState(false);
 
@@ -854,6 +856,9 @@ const AdminReservas = () => {
     setSatisfactionRating(r.satisfaction_rating || null);
     setCompleteInternalNotes(r.internal_notes || '');
     setCompleteRecommendation(r.recommendation || '');
+    // Snapshot de lo que había al abrir. Ver handleComplete: sirve para no reescribir campos
+    // que este diálogo no tocó.
+    setCompleteSnapshot({ internal_notes: r.internal_notes || '', recommendation: r.recommendation || '' });
     setCompleteOpen(true);
   };
 
@@ -865,16 +870,35 @@ const AdminReservas = () => {
     // updates zero rows and returns 204 with no error. Without reading the affected rows
     // back, an unauthorized user gets a green "Servicio completado" toast on an
     // appointment that never actually closed.
-    const { data: updated, error } = await supabase.from('reservations').update({
+    // Sólo se escriben los campos que ESTE diálogo cambió.
+    //
+    // `completingRes` sale de la lista cargada en pantalla, que puede tener minutos o horas.
+    // Si otra persona escribió la nota interna después de ese fetch, mandarla igual la pisa
+    // con el valor viejo — y como el valor viejo suele ser vacío, la nota se pierde. Ese es
+    // el reporte de "las notas internas desaparecen al pasar a completada": no las borra la
+    // base (verificado forzando la transición con todos los triggers y el webhook activos),
+    // las borra este UPDATE con una foto vencida.
+    //
+    // Omitir la columna deja intacto lo que haya en la base, que es lo correcto cuando el
+    // usuario no la tocó.
+    const completePayload: Record<string, unknown> = {
       status: 'completada',
       service_notes: serviceNotes.trim(),
       technical_report_url: technicalReportUrl || null,
       satisfaction_rating: satisfactionRating,
       completed_at: new Date().toISOString(),
-      internal_notes: completeInternalNotes.trim() || null,
-      // `recommendation` isn't in generated Supabase types yet (see migration 20260721140000).
-      recommendation: completeRecommendation.trim() || null,
-    } as any).eq('id', completingRes.id).select('id');
+    };
+    if (completeInternalNotes.trim() !== completeSnapshot.internal_notes.trim()) {
+      completePayload.internal_notes = completeInternalNotes.trim() || null;
+    }
+    // `recommendation` isn't in generated Supabase types yet (see migration 20260721140000).
+    if (completeRecommendation.trim() !== completeSnapshot.recommendation.trim()) {
+      completePayload.recommendation = completeRecommendation.trim() || null;
+    }
+
+    const { data: updated, error } = await supabase.from('reservations').update(
+      completePayload as any,
+    ).eq('id', completingRes.id).select('id');
     if (error) { toast.error('Error al completar'); console.error(error); }
     else if (!updated || updated.length === 0) {
       toast.error('No se pudo cerrar la cita: tu usuario no tiene permisos sobre este concesionario. Contacta a un administrador.');
@@ -1470,11 +1494,16 @@ const AdminReservas = () => {
 
       {/* CREATE/EDIT DIALOG */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        {/* Ancho 4xl: este formulario tiene 12 campos, y 20 con el ingreso manual abierto.
+            A max-w-xl entraba en una sola columna y sólo se podía recorrer con la barra. */}
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="font-display">{editingRes ? (INCIDENCIA_TYPES.has(editingRes.service_type) ? 'Editar Incidencia' : 'Editar Reserva') : (INCIDENCIA_TYPES.has(fService) ? 'Nueva Incidencia' : 'Nueva Reserva')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {/* Concesionario y Estado van de a dos por fila: son dos selects cortos que
+                ocupaban dos filas enteras del formulario. */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Concesionario — no aplica a Solicitud de Repuestos (auto-asignada a planta) */}
             <div className="space-y-2">
               <Label>Concesionario{!isRepuestos && ' *'}</Label>
@@ -1513,6 +1542,7 @@ const AdminReservas = () => {
                   {VENEZUELA_STATES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
             </div>
 
             {/* Cliente: búsqueda existente o ingreso manual (crea cliente + vehículo) */}
@@ -1908,7 +1938,7 @@ const AdminReservas = () => {
       </Dialog>
       {/* SERVICE MANAGER DIALOG */}
       <Dialog open={svcOpen} onOpenChange={setSvcOpen}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl max-h-[85vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               <Settings className="w-4 h-4" /> Gestionar Tipos de Servicio
@@ -1978,7 +2008,9 @@ const AdminReservas = () => {
 
       {/* DETAIL DIALOG */}
       <Dialog open={!!detailRes} onOpenChange={open => { if (!open) setDetailRes(null); }}>
-        <DialogContent className="max-w-lg">
+        {/* Vista previa: 6 datos cortos + 5 bloques de texto. A max-w-lg quedaban 11 filas
+            apiladas y había que scrollear para ver el motivo del ingreso. */}
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-3xl max-h-[85vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
             <DialogTitle className="font-display flex items-center gap-2">
               {detailRes && INCIDENCIA_TYPES.has(detailRes.service_type)
@@ -2000,7 +2032,8 @@ const AdminReservas = () => {
                 <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'Cliente'}</span>{` · ${detailRes.created_by_role || 'Portal'}`}</p>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              {/* Tres columnas: son 6 datos cortos, así entran en dos filas en vez de seis. */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
                 {/* Client */}
                 <div className="space-y-0.5">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Cliente</p>
@@ -2065,6 +2098,9 @@ const AdminReservas = () => {
                 )}
               </div>
 
+              {/* Los cuatro bloques de texto van de a dos por fila. Apilados a ancho completo
+                  eran los que obligaban a scrollear para llegar al motivo del ingreso. */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Motivo del ingreso. Se muestra para CUALQUIER tipo de servicio: antes sólo
                   aparecía en incidencias y repuestos, así que en un mantenimiento normal el
                   por qué de la visita sólo era visible entrando a Editar. */}
@@ -2112,6 +2148,7 @@ const AdminReservas = () => {
                   </div>
                 </div>
               )}
+              </div>
 
               {/* Technical report */}
               {detailRes.technical_report_url && (

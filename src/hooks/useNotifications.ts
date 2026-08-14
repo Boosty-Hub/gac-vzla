@@ -30,7 +30,18 @@ export const useNotifications = () => {
   const isAdmin = role?.name === 'superadmin' || role?.name === 'admin';
   // Concesionario managers see all dealership-wide notifications (recipient_profile_id IS NULL) + their own.
   // Vendedores only see notifications explicitly addressed to their profile_id.
-  const isConcesionario = role?.name === 'concesionario';
+  //
+  // El asesor de servicio va con el concesionario, no con el vendedor. Todas las
+  // notificaciones de reservas se insertan con `recipient_dealership_id` y sin perfil
+  // (ver notify_on_reservation_insert / notify_on_reservation_status_change), así que con
+  // el filtro de vendedor el asesor no veía NINGUNA notificación de citas — ni las nuevas,
+  // ni los cambios de estado. El RLS ya se las permite vía `dealership_users`; el que las
+  // escondía era este filtro.
+  //
+  // El nombre del rol lleva mayúsculas y espacios en la tabla `roles` ("Asesor de
+  // Servicio"), por eso la comparación va en minúsculas.
+  const roleName = (role?.name || '').toLowerCase();
+  const isConcesionario = roleName === 'concesionario' || roleName === 'asesor de servicio';
 
   const applyFilter = useCallback((q: any): any => {
     if (isAdmin) return q;
