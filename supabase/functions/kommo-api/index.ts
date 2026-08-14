@@ -311,8 +311,10 @@ const CONVERSATION_STAGE = 104023216  // "En conversación Cliente/Empresa"
 // Removed on 2026-08-13: `agendada -> 101411323` and `culminado -> 142`. Neither could ever
 // arrive here, because the CHECK constraint rejected both on write and production holds zero
 // rows with either value. `agendada` pointed at the SAME stage as `confirmada`, so it was
-// never a distinct state; `culminado` pointed at `142`, a 3-digit id where every real Post
-// Venta stage id is 9 digits — it would have 400'd against Kommo had it ever fired.
+// never a distinct state; `culminado` pointed at `142`, which IS a real stage
+// ("servicio realizado") — Kommo reuses 142/143 as won/lost inside every pipeline — but a
+// status the database never stores cannot route anywhere. These stages live in pipeline
+// 13151339 "Servicio", not in 13988420 "Post Venta", which is a separate pipeline.
 const POSTVENTA_STATUS_TO_STAGE: Record<string, number> = {
   pendiente:  101411319,  // Pendiente
   confirmada: 101411323,  // Confirmada
