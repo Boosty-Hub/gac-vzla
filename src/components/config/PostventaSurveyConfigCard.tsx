@@ -14,20 +14,23 @@ import { toast } from 'sonner';
  * Existe porque esta configuración vivía únicamente dentro del JSON de
  * `integration_configs` y sólo podía cambiarse por SQL.
  *
- * RUTEO — la etapa de postventa es OBLIGATORIA, no un override opcional.
+ * RUTEO — venta y postventa se entregan por caminos separados de punta a punta.
  *
- * El sistema no manda el mensaje: escribe el enlace en el campo y rebota la etapa del lead.
- * Quien manda el mensaje es el SalesBot enganchado a esa etapa. La etapa 109744268
- * "ENCUESTA ENVIADA" (pipeline 13151339 "Servicio") tiene el bot de VENTAS, el que saluda
- * por la entrega de un vehículo — así que compartirla mandaba ese texto a clientes de
- * taller. Pasó: 30 entregas el 2026-08-14 antes de cortarlo.
+ * Venta: escribe `Link Encuesta` (3456839) en el lead de CONVERSACIÓN del cliente y rebota la
+ * etapa hasta "ENCUESTA ENVIADA" (109744268). El bot arranca al ENTRAR a esa etapa, 20 horas
+ * después de la compra.
  *
- * El CAMPO sí puede compartirse: cada entrega lo sobrescribe justo antes de mover la etapa,
- * así que el bot siempre lee el enlace que le corresponde. Lo que no puede compartirse es la
- * etapa, porque la etapa es el disparador.
+ * Postventa: escribe `Link Encuesta / Servicio` (3457883) en el lead DE LA RESERVA, que ya
+ * está parado en la columna "Completada", y no mueve ninguna etapa. El bot de postventa vive
+ * en esa columna y arranca cuando ese CAMPO se escribe.
  *
- * Mientras estos dos IDs estén vacíos, `fn_dispatch_eligible_surveys` no despacha postventa:
- * las encuestas se siguen creando al completar el servicio y quedan en cola.
+ * Por eso acá sólo se pide el campo: el disparador de postventa es el campo, no una etapa. Y
+ * por eso tiene que ser un campo distinto al de venta — compartiéndolo, escribir la encuesta
+ * de compra dispararía también al bot de taller. Fue el error del 2026-08-14: 30 clientes de
+ * taller recibieron el mensaje de entrega de vehículo.
+ *
+ * Con el campo vacío no se despacha nada: las encuestas se siguen creando al completar el
+ * servicio y quedan en cola.
  */
 
 interface DeliveryConfig {
@@ -46,7 +49,6 @@ const PostventaSurveyConfigCard = () => {
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [stageId, setStageId] = useState('');
   const [fieldId, setFieldId] = useState('');
 
   const load = async () => {
@@ -61,7 +63,6 @@ const PostventaSurveyConfigCard = () => {
     const row = (Array.isArray(data) ? data[0] : data) as DeliveryConfig | undefined;
     if (row) {
       setConfig(row);
-      setStageId(row.survey_stage_id_service ?? '');
       setFieldId(row.survey_link_field_id_service ?? '');
     }
     setLoading(false);
@@ -72,15 +73,15 @@ const PostventaSurveyConfigCard = () => {
   const handleSave = async () => {
     setSaving(true);
     const { error } = await rpc('set_postventa_survey_config', {
-      p_stage_id: stageId.trim() || null,
+      // Postventa ya no usa etapa: su disparador es la escritura del campo.
+      p_stage_id: null,
       p_link_field_id: fieldId.trim() || null,
     });
     setSaving(false);
     if (error) {
       console.error(error);
       const msg = String(error.message || '');
-      if (msg.includes('stage_id_invalido')) toast.error('El ID de etapa debe ser numérico');
-      else if (msg.includes('field_id_invalido')) toast.error('El ID del campo debe ser numérico');
+      if (msg.includes('field_id_invalido')) toast.error('El ID del campo debe ser numérico');
       else if (msg.includes('not_authorized')) toast.error('No tenés permiso para cambiar esta configuración');
       else toast.error('No se pudo guardar');
       return;
@@ -127,51 +128,44 @@ const PostventaSurveyConfigCard = () => {
                   Las encuestas se están generando, pero no se envían.
                 </p>
                 <p className="text-amber-800">
-                  Falta la etapa propia de postventa en Kommo. Las encuestas quedan en cola sin
+                  Falta el campo del enlace de postventa. Las encuestas quedan en cola sin
                   perderse y salen solas apenas se cargue el ID acá abajo.
                 </p>
               </div>
             )}
 
-            <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-1">
-              <p className="font-medium">Por qué hace falta una etapa propia</p>
+            <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-2">
+              <p className="font-medium">Cómo se entrega cada una</p>
               <p className="text-muted-foreground">
-                El sistema escribe el enlace en el campo y mueve el lead de etapa. El mensaje lo
-                manda el bot que esté enganchado a esa etapa. La etapa de ventas{' '}
-                <code className="font-mono">{config?.survey_stage_id || '—'}</code> tiene el bot de
-                entrega de vehículo, así que un cliente de taller recibiría el texto de compra. El
-                campo del enlace <code className="font-mono">{config?.survey_link_field_id || '—'}</code>{' '}
-                sí puede ser el mismo: se sobrescribe justo antes de mover la etapa.
+                <span className="font-medium text-foreground">Compra de vehículo:</span> escribe el
+                enlace en el campo{' '}
+                <code className="font-mono">{config?.survey_link_field_id || '—'}</code> del lead de
+                conversación y lo mueve a la etapa{' '}
+                <code className="font-mono">{config?.survey_stage_id || '—'}</code>. El bot arranca
+                al entrar a esa etapa, 20 horas después de la compra.
+              </p>
+              <p className="text-muted-foreground">
+                <span className="font-medium text-foreground">Servicio:</span> escribe el enlace en
+                el campo de acá abajo, sobre el lead de la reserva, que ya está en la columna
+                Completada. No mueve ninguna etapa: el bot arranca porque el campo se escribió.
+              </p>
+              <p className="text-muted-foreground">
+                Tiene que ser un campo distinto al de compra. Compartiéndolo, entregar una encuesta
+                de compra dispararía también al bot de taller.
               </p>
             </div>
 
             <div className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="pv-stage">ID de la etapa de postventa</Label>
-                  <Input
-                    id="pv-stage"
-                    value={stageId}
-                    onChange={e => setStageId(e.target.value)}
-                    placeholder="Etapa nueva en el embudo Servicio"
-                    inputMode="numeric"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="pv-field">ID del campo del enlace</Label>
-                  <Input
-                    id="pv-field"
-                    value={fieldId}
-                    onChange={e => setFieldId(e.target.value)}
-                    placeholder="Puede ser el mismo de ventas"
-                    inputMode="numeric"
-                  />
-                </div>
+              <div className="space-y-1.5 max-w-xs">
+                <Label htmlFor="pv-field">ID del campo del enlace de postventa</Label>
+                <Input
+                  id="pv-field"
+                  value={fieldId}
+                  onChange={e => setFieldId(e.target.value)}
+                  placeholder="Campo url propio de servicio"
+                  inputMode="numeric"
+                />
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                La etapa tiene que estar en el mismo embudo que las citas (Servicio). El lead que
-                llega ahí es el de conversación del cliente, no el de la reserva.
-              </p>
               <Button size="sm" onClick={handleSave} disabled={saving}>
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar y activar envío'}
               </Button>

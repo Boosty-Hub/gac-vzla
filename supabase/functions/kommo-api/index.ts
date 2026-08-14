@@ -2100,20 +2100,24 @@ Deno.serve(async (req) => {
 
       const surveyBaseUrl = String(surveyBaseUrlRaw)
 
-      // A postventa survey must NOT wake the sale SalesBot: its template greets the customer
-      // for joining the family, which is nonsense after a workshop visit. When these two
-      // optional config keys are present, a survey with origin='service' is delivered
-      // through its OWN custom field and stage, so it can be answered by its own bot.
+      // VENTA y POSTVENTA se entregan por caminos completamente distintos.
       //
-      // Both fall back to the sale pair when absent, which is deliberate: until the Kommo
-      // objects exist, a postventa survey still gets its link written and stays visible on
-      // the lead rather than silently going nowhere. Delivery is gated by
-      // `survey_delivery_enabled` anyway, so nothing reaches a customer before it is
-      // switched on.
+      // Venta: escribe `Link Encuesta` (3456839) en el lead de CONVERSACIÓN del cliente y
+      // rebota la etapa hasta "ENCUESTA ENVIADA". El bot arranca al ENTRAR a esa etapa.
+      //
+      // Postventa: escribe `Link Encuesta / Servicio` (3457883) en el lead DE LA RESERVA,
+      // que ya está parado en la columna "Completada", y NO toca ninguna etapa. El bot de
+      // postventa vive en esa columna y arranca cuando ese CAMPO se escribe.
+      //
+      // Por eso postventa no necesita etapa propia: su disparador es el campo. Y por eso el
+      // campo tiene que ser distinto al de venta — compartiéndolo, escribir la encuesta de
+      // compra dispararía también al bot de taller.
+      //
+      // Sin `survey_link_field_id_service` no hay ruteo de postventa y la entrega se rechaza,
+      // en vez de caer al camino de ventas. Esa caída fue exactamente lo que le mandó el
+      // mensaje de compra de vehículo a 30 clientes de taller el 2026-08-14.
       const serviceLinkFieldIdRaw = config.survey_link_field_id_service
-      const serviceStageIdRaw = config.survey_stage_id_service
-      const hasServiceRouting =
-        String(serviceLinkFieldIdRaw ?? '').trim() !== '' && String(serviceStageIdRaw ?? '').trim() !== ''
+      const hasServiceRouting = String(serviceLinkFieldIdRaw ?? '').trim() !== ''
 
       try {
         // 4) Resolve the survey row. It already exists by this point — created by the
@@ -2129,26 +2133,29 @@ Deno.serve(async (req) => {
           id: string; token: string; client_id: string | null
           suppressed_reason: string | null; delivered_at: string | null
           eligible_at: string | null
-          // 'won' | 'repurchase' | 'service' — selects which Kommo field/stage pair to
-          // drive, i.e. which SalesBot ends up answering.
+          // 'won' | 'repurchase' | 'service' — selects the whole delivery path: which field,
+          // which lead, and whether a stage is touched at all.
           origin: string | null
           // Snapshot of WHO this survey is about, taken when it was created. For a 'won'
           // survey that is the prospect's name — the actual person who negotiated.
           client_name: string | null
+          // La cita que originó una encuesta de postventa. Su lead en Kommo es el que está en
+          // "Completada" y el que recibe el link.
+          reservation_id: string | null
         }
         let survey: SurveyRow | null = null
 
         if (survey_id) {
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name, reservation_id')
             .eq('id', survey_id)
             .maybeSingle()
           survey = data as SurveyRow | null
         } else if (prospect_id) {
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name, reservation_id')
             .eq('prospect_id', prospect_id)
             .maybeSingle()
           survey = data as SurveyRow | null
@@ -2156,7 +2163,7 @@ Deno.serve(async (req) => {
           // client_id path (repurchase / resend): most recent survey for this client.
           const { data } = await supabase
             .from('satisfaction_surveys')
-            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name')
+            .select('id, token, client_id, suppressed_reason, delivered_at, eligible_at, origin, client_name, reservation_id')
             .eq('client_id', client_id_in as string)
             .order('created_at', { ascending: false })
             .limit(1)
@@ -2166,11 +2173,23 @@ Deno.serve(async (req) => {
 
         if (!survey) throw new Error('survey_not_found')
 
-        // Route to the postventa field/stage pair only once we know this survey's origin.
-        const useServiceRouting = survey.origin === 'service' && hasServiceRouting
+        // El camino se elige recién ahora, cuando ya sabemos el origen de esta encuesta.
+        const isServiceSurvey = survey.origin === 'service'
+        const useServiceRouting = isServiceSurvey && hasServiceRouting
+
+        // Una encuesta de postventa sin campo propio configurado NO se entrega por el camino
+        // de ventas. Se rechaza y queda pendiente para cuando el campo esté cargado.
+        if (isServiceSurvey && !useServiceRouting) {
+          await logDelivery('error', { error: 'service_link_field_not_configured', survey_id: survey.id })
+          return jsonResponse({ error: 'service_link_field_not_configured' }, 400)
+        }
+
         const surveyLinkFieldId = Number(useServiceRouting ? serviceLinkFieldIdRaw : surveyLinkFieldIdRaw)
-        const surveyStageId = Number(useServiceRouting ? serviceStageIdRaw : surveyStageIdRaw)
-        if (!Number.isFinite(surveyLinkFieldId) || !Number.isFinite(surveyStageId)) {
+        // La etapa sólo interviene en ventas. Postventa la deja intacta: mover el lead de la
+        // reserva fuera de "Completada" rompería el tablero del asesor y despertaría a las
+        // automatizaciones de la etapa buffer.
+        const surveyStageId = Number(surveyStageIdRaw)
+        if (!Number.isFinite(surveyLinkFieldId) || (!useServiceRouting && !Number.isFinite(surveyStageId))) {
           await logDelivery('error', { error: 'survey_routing_not_numeric', origin: survey.origin })
           return jsonResponse({ error: 'survey_routing_not_numeric' }, 400)
         }
@@ -2253,18 +2272,34 @@ Deno.serve(async (req) => {
           return false
         }
 
-        let leadId = (client as { kommo_conversation_lead_id: number | null }).kommo_conversation_lead_id ?? null
+        let leadId: number | null = null
 
-        if (!leadId) {
-          // 7) No lead yet — reuse the existing dedup-safe link/create logic verbatim
-          // (:653): self-skips when set, dedups CI-RIF→phone→email, links an existing
-          // pipeline lead instead of creating a second one.
-          const syncResult = await syncOneClientToConversation(supabase, baseUrl, authHeaders, client as Record<string, unknown>)
-          leadId = syncResult.leadId
+        if (useServiceRouting) {
+          // 6-bis) Postventa escribe sobre el lead DE LA RESERVA, no sobre el de conversación.
+          // Ese lead ya está en "Completada", que es donde vive el bot de postventa, y es
+          // exclusivo de esta cita: no lo comparte con nadie, así que no necesita el guard de
+          // lead compartido. Además deja el link atado al servicio concreto que se hizo.
+          const { data: res } = await supabase
+            .from('reservations')
+            .select('kommo_lead_id')
+            .eq('id', survey.reservation_id as string)
+            .maybeSingle()
+          leadId = (res as { kommo_lead_id: number | null } | null)?.kommo_lead_id ?? null
+          if (!leadId) throw new Error('service_reservation_lead_missing')
+        } else {
+          leadId = (client as { kommo_conversation_lead_id: number | null }).kommo_conversation_lead_id ?? null
+
+          if (!leadId) {
+            // 7) No lead yet — reuse the existing dedup-safe link/create logic verbatim
+            // (:653): self-skips when set, dedups CI-RIF→phone→email, links an existing
+            // pipeline lead instead of creating a second one.
+            const syncResult = await syncOneClientToConversation(supabase, baseUrl, authHeaders, client as Record<string, unknown>)
+            leadId = syncResult.leadId
+          }
+          if (!leadId) throw new Error('kommo_lead_resolution_failed')
         }
-        if (!leadId) throw new Error('kommo_lead_resolution_failed')
 
-        if (await guardSharedLead(leadId)) {
+        if (!useServiceRouting && await guardSharedLead(leadId)) {
           return jsonResponse({
             delivered: false, skipped: 'shared_conversation_lead',
             survey_id: survey.id, client_id: clientId, lead_id: leadId, token: survey.token,
@@ -2314,21 +2349,28 @@ Deno.serve(async (req) => {
 
         // 10) Stage toggle — the mechanism that wakes the SalesBot (mirrors :1877-1885).
         // The buffer must differ from the target or the "entered stage" event never fires.
-        const buffer = surveyStageId === CONVERSATION_STAGE
-          ? POSTVENTA_STATUS_TO_STAGE.pendiente
-          : CONVERSATION_STAGE
+        //
+        // SÓLO para ventas. El bot de postventa no espera una entrada de etapa: arranca con el
+        // PATCH del campo que acaba de hacerse arriba, estando el lead donde ya estaba. Mover
+        // el lead de la reserva fuera de "Completada" y de vuelta lo sacaría de la columna
+        // ante los ojos del asesor y despertaría lo que haya colgado en la etapa buffer.
+        if (!useServiceRouting) {
+          const buffer = surveyStageId === CONVERSATION_STAGE
+            ? POSTVENTA_STATUS_TO_STAGE.pendiente
+            : CONVERSATION_STAGE
 
-        const bufferRes = await fetch(`${baseUrl}/leads/${leadId}`, {
-          method: 'PATCH', headers: authHeaders,
-          body: JSON.stringify({ status_id: buffer }),
-        })
-        if (!bufferRes.ok) throw new Error(`Kommo error al mover a etapa buffer: ${await bufferRes.text()}`)
+          const bufferRes = await fetch(`${baseUrl}/leads/${leadId}`, {
+            method: 'PATCH', headers: authHeaders,
+            body: JSON.stringify({ status_id: buffer }),
+          })
+          if (!bufferRes.ok) throw new Error(`Kommo error al mover a etapa buffer: ${await bufferRes.text()}`)
 
-        const targetRes = await fetch(`${baseUrl}/leads/${leadId}`, {
-          method: 'PATCH', headers: authHeaders,
-          body: JSON.stringify({ status_id: surveyStageId }),
-        })
-        if (!targetRes.ok) throw new Error(`Kommo error al volver a etapa de encuesta: ${await targetRes.text()}`)
+          const targetRes = await fetch(`${baseUrl}/leads/${leadId}`, {
+            method: 'PATCH', headers: authHeaders,
+            body: JSON.stringify({ status_id: surveyStageId }),
+          })
+          if (!targetRes.ok) throw new Error(`Kommo error al volver a etapa de encuesta: ${await targetRes.text()}`)
+        }
 
         // 11) Mark sent + timestamp + log. Retry-safe: the CF write and the stage toggle
         // are both idempotent, and mark_survey_sent (20260720120000:198-218) refuses to
