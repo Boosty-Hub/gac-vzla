@@ -25,6 +25,7 @@ import { DashboardDateRange, rangeDescription } from '@/components/DashboardDate
 import SatisfactionDashboard from '@/components/satisfaction/SatisfactionDashboard';
 import { useAuth } from '@/contexts/AuthContext';
 import { isPartsRequest } from '@/lib/serviceTypes';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 
 /**
  * Orden POR DEFECTO de los reportes estándar. Solo se usa cuando el usuario nunca movió
@@ -128,32 +129,15 @@ const AdminDashboard = () => {
       const since = fechaDesde ? `${fechaDesde}T00:00:00` : undefined;
       const until = fechaHasta ? `${fechaHasta}T23:59:59` : undefined;
 
-      // PostgREST devuelve como mucho 1000 filas por pedido. Sin paginar, el tablero
-      // empezaba a truncar en silencio al pasar ese número y los totales quedaban cortos
-      // sin ningún aviso. Se pide de a 1000 hasta que una página venga incompleta.
-      const fetchAll = async (
-        build: (from: number, to: number) => PromiseLike<{ data: unknown[] | null }>,
-      ): Promise<unknown[]> => {
-        const PAGE = 1000;
-        const acc: unknown[] = [];
-        for (let page = 0; ; page++) {
-          const { data } = await build(page * PAGE, page * PAGE + PAGE - 1);
-          const rows = data || [];
-          acc.push(...rows);
-          if (rows.length < PAGE) break;
-        }
-        return acc;
-      };
-
       const [pRows, rRows, dRes] = await Promise.all([
-        fetchAll((from, to) => {
+        fetchAllRows<unknown>((from, to) => {
           let q: any = supabase.from('prospects')
             .select('id, status, source, salesperson, created_at, dealership_id, event_name');
           if (since) q = q.gte('created_at', since);
           if (until) q = q.lte('created_at', until);
           return q.order('created_at', { ascending: true }).range(from, to);
         }),
-        fetchAll((from, to) => {
+        fetchAllRows<unknown>((from, to) => {
           let q: any = supabase.from('reservations')
             .select('id, status, reservation_date, service_type, dealership_id, created_at, satisfaction_rating');
           // El rango se aplica sobre `reservation_date`, la fecha DE LA CITA, no sobre

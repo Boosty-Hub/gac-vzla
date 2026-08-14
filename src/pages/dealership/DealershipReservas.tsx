@@ -30,6 +30,7 @@ import { resolveAutoVehicle } from '@/lib/vehicleSelection';
 import { resolveReservationAssignment, createOrReuseManualEntities } from '@/lib/reservationAssignment';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isPartsRequest, PLANT_DEALERSHIP_ID, serviceNotesLabel } from '@/lib/serviceTypes';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 import {
@@ -305,29 +306,36 @@ const DealershipReservas = () => {
   const fetchReservations = async () => {
     if (!selectedDealership) return;
     setLoading(true);
-    let query = supabase
-      .from('reservations')
-      .select('*, kommo_lead_id, clients(full_name, cedula, phone, is_manual, external_source), vehicles(plate, year, vehicle_models(name, brand)), dealerships(name, state)')
-      .order('created_at', { ascending: false })
-      .limit(view === 'matrix' ? 1000 : 300);
-    // "__all" → no dealership filter, traer de todos
-    if (selectedDealership !== '__all') {
-      query = query.eq('dealership_id', selectedDealership);
-    }
-    // Vendedor sees ONLY their own reservations/incidencias
-    if (isVendedor && profile?.id) {
-      query = query.eq('created_by_profile_id', profile.id);
-    }
-    // Matrix mode: fetch only the displayed month
-    if (view === 'matrix') {
-      const [y, m] = calendarMonth.split('-').map(Number);
-      const firstDay = `${calendarMonth}-01`;
-      const lastDayDate = new Date(y, m, 0);
-      const lastDay = `${lastDayDate.getFullYear()}-${String(lastDayDate.getMonth() + 1).padStart(2, '0')}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
-      query = query.gte('reservation_date', firstDay).lte('reservation_date', lastDay);
-    }
-    const { data } = await query;
-    setReservations((data || []) as Reservation[]);
+    // Paginado en vez del `.limit(300)` que tenía en vista tabla: con 637 citas en la tabla
+    // y el selector en "todos los concesionarios", se perdían más de la mitad sin aviso, y
+    // los contadores de esta pantalla contaban sobre lo truncado.
+    const data = await fetchAllRows<Reservation>((from, to) => {
+      let query = supabase
+        .from('reservations')
+        .select('*, kommo_lead_id, clients(full_name, cedula, phone, is_manual, external_source), vehicles(plate, year, vehicle_models(name, brand)), dealerships(name, state)')
+        .order('created_at', { ascending: false })
+        // Desempate estable: sin esto, dos citas con el mismo `created_at` pueden cambiar de
+        // orden entre página y página y una se pierde mientras otra se repite.
+        .order('id', { ascending: false });
+      // "__all" → no dealership filter, traer de todos
+      if (selectedDealership !== '__all') {
+        query = query.eq('dealership_id', selectedDealership);
+      }
+      // Vendedor sees ONLY their own reservations/incidencias
+      if (isVendedor && profile?.id) {
+        query = query.eq('created_by_profile_id', profile.id);
+      }
+      // Matrix mode: fetch only the displayed month
+      if (view === 'matrix') {
+        const [y, m] = calendarMonth.split('-').map(Number);
+        const firstDay = `${calendarMonth}-01`;
+        const lastDayDate = new Date(y, m, 0);
+        const lastDay = `${lastDayDate.getFullYear()}-${String(lastDayDate.getMonth() + 1).padStart(2, '0')}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
+        query = query.gte('reservation_date', firstDay).lte('reservation_date', lastDay);
+      }
+      return query.range(from, to);
+    });
+    setReservations(data as Reservation[]);
     setLoading(false);
   };
 

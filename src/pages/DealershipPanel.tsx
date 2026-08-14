@@ -23,6 +23,7 @@ import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservatio
 import { getSignedFileUrl } from '@/lib/storage';
 import { RESERVATION_STATUS_CONFIG } from '@/lib/reservationStatus';
 import { serviceNotesLabel } from '@/lib/serviceTypes';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 
@@ -244,14 +245,19 @@ const DealershipPanel = () => {
   const fetchReservations = async () => {
     if (!selectedDealership) return;
     setLoading(true);
-    const { data } = await supabase
-      .from('reservations')
-      .select('*, clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand))')
-      .eq('dealership_id', selectedDealership)
-      .order('reservation_date', { ascending: false })
-      .order('reservation_time', { ascending: false })
-      .limit(200);
-    setReservations((data || []) as unknown as Reservation[]);
+    // Paginado en vez del `.limit(200)` que tenía: con 637 citas en la tabla, el asesor veía
+    // sólo las 200 más recientes y no había forma de saberlo desde la pantalla.
+    const data = await fetchAllRows<Record<string, unknown>>((from, to) =>
+      supabase
+        .from('reservations')
+        .select('*, clients(full_name, cedula, phone), vehicles(plate, year, vehicle_models(name, brand))')
+        .eq('dealership_id', selectedDealership)
+        .order('reservation_date', { ascending: false })
+        .order('reservation_time', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to),
+    );
+    setReservations(data as unknown as Reservation[]);
     setLoading(false);
   };
 

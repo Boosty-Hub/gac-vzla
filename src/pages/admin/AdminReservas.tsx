@@ -28,6 +28,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCalendar';
 import { computeSlotOccupancy, formatMinuteLabel, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isPartsRequest, PLANT_DEALERSHIP_ID, serviceNotesLabel } from '@/lib/serviceTypes';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import {
   RESERVATION_STATUS_LABELS as STATUS_LABELS,
   RESERVATION_STATUS_COLORS as STATUS_COLORS,
@@ -42,6 +43,7 @@ interface Dealership {
   city: string | null;
   state: string | null;
   bays: number;
+  is_active: boolean;
 }
 
 interface ServiceType {
@@ -256,8 +258,11 @@ const AdminReservas = () => {
   const fetchDealerships = async () => {
     const { data } = await supabase
       .from('dealerships')
-      .select('id, name, city, state, bays')
-      .eq('is_active', true)
+      // Se traen TAMBIÉN los inactivos. Un concesionario dado de baja no borra sus citas:
+      // filtrarlo acá las hacía desaparecer de la matriz y del filtro mientras seguían
+      // contando en los totales. Para CREAR o REASIGNAR una cita se ofrecen sólo los
+      // activos (`activeDealerships`), que es donde el filtro sí tiene sentido.
+      .select('id, name, city, state, bays, is_active')
       .order('name');
     if (data) setDealerships(data);
   };
@@ -293,30 +298,36 @@ const AdminReservas = () => {
 
   const fetchReservations = async () => {
     setLoading(true);
-    let query = supabase
-      .from('reservations')
-      .select('*, kommo_lead_id, dealerships(id, name, city, state), clients(full_name, cedula, phone, state, is_manual, external_source), vehicles(plate, year, vehicle_models(name, brand)), created_by_name, created_by_role');
+    // Paginado: esta consulta no traía `.limit()`, y sin él PostgREST igual corta en 1000
+    // filas. Con 637 citas hoy todavía entra, pero el día que pase el tope la pantalla
+    // empieza a mostrar de menos sin ningún error visible.
+    const data = await fetchAllRows<Reservation>((from, to) => {
+      let query = supabase
+        .from('reservations')
+        .select('*, kommo_lead_id, dealerships(id, name, city, state), clients(full_name, cedula, phone, state, is_manual, external_source), vehicles(plate, year, vehicle_models(name, brand)), created_by_name, created_by_role');
 
-    if (view === 'matrix') {
-      // Fetch reservations within the calendar month range
-      const [y, m] = calendarMonth.split('-').map(Number);
-      const firstDay = `${calendarMonth}-01`;
-      const lastDayDate = new Date(y, m, 0); // day 0 of next month = last day of current
-      const lastDay = `${calendarMonth}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
-      query = query.gte('reservation_date', firstDay).lte('reservation_date', lastDay);
-    }
+      if (view === 'matrix') {
+        // Fetch reservations within the calendar month range
+        const [y, m] = calendarMonth.split('-').map(Number);
+        const firstDay = `${calendarMonth}-01`;
+        const lastDayDate = new Date(y, m, 0); // day 0 of next month = last day of current
+        const lastDay = `${calendarMonth}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
+        query = query.gte('reservation_date', firstDay).lte('reservation_date', lastDay);
+      }
 
-    if (filtroConc !== 'todos') {
-      query = query.eq('dealership_id', filtroConc);
-    }
+      if (filtroConc !== 'todos') {
+        query = query.eq('dealership_id', filtroConc);
+      }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+      // El desempate por id evita que dos citas con el mismo `created_at` bailen entre
+      // páginas: una se perdería y otra vendría repetida.
+      return query
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to);
+    });
 
-    if (error) {
-      console.error('Error fetching reservations:', error);
-    } else {
-      setReservations((data || []) as Reservation[]);
-    }
+    setReservations(data as Reservation[]);
     setLoading(false);
   };
 
@@ -983,6 +994,9 @@ const AdminReservas = () => {
     ? dealerships.filter(d => d.id === filtroConc)
     : dealerships;
 
+  /** Sólo los que siguen operando: es a los únicos que tiene sentido mandarles una cita nueva. */
+  const activeDealerships = dealerships.filter(d => d.is_active);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -1446,7 +1460,7 @@ const AdminReservas = () => {
                 <Select value={bulkDealership} onValueChange={setBulkDealership}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
                   <SelectContent>
-                    {dealerships.map(d => (
+                    {activeDealerships.map(d => (
                       <SelectItem key={d.id} value={d.id}>{d.name}{d.city ? ` — ${d.city}` : ''}</SelectItem>
                     ))}
                   </SelectContent>
@@ -1539,7 +1553,7 @@ const AdminReservas = () => {
                 >
                   <SelectTrigger><SelectValue placeholder="Seleccionar concesionario" /></SelectTrigger>
                   <SelectContent>
-                    {dealerships.map(d => (
+                    {activeDealerships.map(d => (
                       <SelectItem key={d.id} value={d.id}>{d.name} — {d.city}</SelectItem>
                     ))}
                   </SelectContent>
