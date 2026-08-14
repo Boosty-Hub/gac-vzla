@@ -323,6 +323,13 @@ const POSTVENTA_STATUS_TO_STAGE: Record<string, number> = {
   cancelada:  104022408,  // Cancelada
 }
 
+/**
+ * Citas cerradas: ya no hay nada que atender en ellas. Espejo de
+ * ARCHIVED_RESERVATION_STATUSES en src/lib/reservationStatus.ts — no se puede importar
+ * desde acá, así que se repite a mano y se mantiene en sincronía con ese archivo.
+ */
+const ARCHIVED_RESERVATION_STATUSES = new Set(['completada', 'cancelada'])
+
 // Custom fields específicos del pipeline Post Venta (grupo leads_87791771102231)
 const CF_RES = {
   vehiculo:          2989052,  // Vehículo (text)
@@ -1513,7 +1520,21 @@ Deno.serve(async (req) => {
       }
 
       // ── Notify dealership (fire-and-forget, does not block response) ────────
-      if (newLead?.id) {
+      //
+      // Sólo para citas que siguen abiertas. Este aviso dice "tenés una cita nueva", y una
+      // cita ya cerrada no es una cita nueva.
+      //
+      // No es hipotético: al completar, el frontend llama `update_reservation_stage` cuando
+      // hay `kommo_lead_id` y cae acá cuando no lo hay — y las citas viejas o creadas mientras
+      // Kommo estaba caído no lo tienen. Ese fallback es NECESARIO (sin lead, la encuesta de
+      // postventa no tiene dónde escribir el link), así que lo que se corta es el aviso, no la
+      // creación del lead. Medido: 10 avisos disparados a segundos de cerrarse la cita, en El
+      // Tigre, Valencia, Maracaibo, La Florida y el Centro de Servicio.
+      //
+      // El guard va acá y no en quien llama, porque el estado de la cita ya está leído en este
+      // lado y así ningún caller futuro puede volver a equivocarse.
+      const reservationIsClosed = ARCHIVED_RESERVATION_STATUSES.has(String(res.status))
+      if (newLead?.id && !reservationIsClosed) {
         supabase.functions.invoke('kommo-api', {
           body: {
             action: 'notify_dealership_reservation',
