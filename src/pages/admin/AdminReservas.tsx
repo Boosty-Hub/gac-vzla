@@ -977,8 +977,13 @@ const AdminReservas = () => {
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <h1 className="text-lg font-display font-bold whitespace-nowrap">Reservas / Servicios</h1>
-          <Badge variant="outline" className="gap-1 text-xs shrink-0">
-            <CalendarDays className="w-3 h-3" /> {reservations.length}
+          {/* Cuenta lo que se está viendo, no el array crudo.
+              `reservations` ya viene recortado por el mes del calendario en vista Matriz y por
+              el concesionario del filtro, e incluye repuestos y archivadas que la tabla de
+              abajo esconde. Mostrarlo como si fuera el total global era el "el número de citas
+              no corresponde": nunca coincidía con las filas visibles. */}
+          <Badge variant="outline" className="gap-1 text-xs shrink-0" title="Citas visibles con los filtros actuales">
+            <CalendarDays className="w-3 h-3" /> {filteredReservations.length}
           </Badge>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

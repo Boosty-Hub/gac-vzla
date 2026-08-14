@@ -23,6 +23,8 @@ import ChartCard from '@/components/dashboard/ChartCard';
 import { useDashboardLayout } from '@/hooks/useDashboardLayout';
 import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
 import SatisfactionDashboard from '@/components/satisfaction/SatisfactionDashboard';
+import { useAuth } from '@/contexts/AuthContext';
+import { isPartsRequest } from '@/lib/serviceTypes';
 
 /**
  * Orden POR DEFECTO de los reportes estándar. Solo se usa cuando el usuario nunca movió
@@ -43,6 +45,27 @@ const DASHBOARD_CHART_KEYS = [
   'tendencia_diaria',
   'eventos',
 ];
+
+/**
+ * Permiso que exige cada reporte. Un asesor de servicio no tiene `prospectos.view`, así que
+ * el tablero deja de mostrarle el ranking de vendedores o los canales de captación: son datos
+ * de ventas que no puede ver en ninguna otra pantalla, y que acá se le colaban.
+ *
+ * Una clave sin entrada acá se muestra siempre. Al agregar un reporte nuevo, agregá también
+ * su permiso o quedará visible para todos.
+ */
+const DASHBOARD_CHART_PERMISSIONS: Record<string, string> = {
+  citas_concesionario: 'reservas.view',
+  tipos_servicio: 'reservas.view',
+  satisfaccion_concesionario: 'reservas.view',
+  prospectos_conversion: 'prospectos.view',
+  ranking_vendedores: 'prospectos.view',
+  prospectos_canal: 'prospectos.view',
+  prospectos_estado: 'prospectos.view',
+  contacto_vendedor: 'prospectos.view',
+  tendencia_diaria: 'prospectos.view',
+  eventos: 'prospectos.view',
+};
 
 interface Prospect {
   id: string;
@@ -83,6 +106,9 @@ const COLORS = [
 
 const AdminDashboard = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
+  const { hasPermission } = useAuth();
+  const canSeeProspects = hasPermission('prospectos.view');
+  const canSeeReservations = hasPermission('reservas.view');
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   // Cómo se ve y dónde está cada gráfico, guardado por usuario.
@@ -102,19 +128,50 @@ const AdminDashboard = () => {
       const since = fechaDesde ? `${fechaDesde}T00:00:00` : undefined;
       const until = fechaHasta ? `${fechaHasta}T23:59:59` : undefined;
 
-      let pq: any = supabase.from('prospects').select('id, status, source, salesperson, created_at, dealership_id, event_name');
-      let rq: any = supabase.from('reservations').select('id, status, reservation_date, service_type, dealership_id, created_at, satisfaction_rating');
-      if (since) { pq = pq.gte('created_at', since); rq = rq.gte('created_at', since); }
-      if (until) { pq = pq.lte('created_at', until); rq = rq.lte('created_at', until); }
+      // PostgREST devuelve como mucho 1000 filas por pedido. Sin paginar, el tablero
+      // empezaba a truncar en silencio al pasar ese número y los totales quedaban cortos
+      // sin ningún aviso. Se pide de a 1000 hasta que una página venga incompleta.
+      const fetchAll = async (
+        build: (from: number, to: number) => PromiseLike<{ data: unknown[] | null }>,
+      ): Promise<unknown[]> => {
+        const PAGE = 1000;
+        const acc: unknown[] = [];
+        for (let page = 0; ; page++) {
+          const { data } = await build(page * PAGE, page * PAGE + PAGE - 1);
+          const rows = data || [];
+          acc.push(...rows);
+          if (rows.length < PAGE) break;
+        }
+        return acc;
+      };
 
-      const [pRes, rRes, dRes] = await Promise.all([
-        pq,
-        rq,
-        supabase.from('dealerships').select('id, name, is_service_center').eq('is_active', true),
+      const [pRows, rRows, dRes] = await Promise.all([
+        fetchAll((from, to) => {
+          let q: any = supabase.from('prospects')
+            .select('id, status, source, salesperson, created_at, dealership_id, event_name');
+          if (since) q = q.gte('created_at', since);
+          if (until) q = q.lte('created_at', until);
+          return q.order('created_at', { ascending: true }).range(from, to);
+        }),
+        fetchAll((from, to) => {
+          let q: any = supabase.from('reservations')
+            .select('id, status, reservation_date, service_type, dealership_id, created_at, satisfaction_rating');
+          // El rango se aplica sobre `reservation_date`, la fecha DE LA CITA, no sobre
+          // `created_at`, que es cuándo se cargó. Con `created_at` una cita agendada para
+          // el mes que viene contaba en el mes actual: 17 citas completadas tienen esas dos
+          // fechas en meses distintos, y eran parte del "el total no corresponde".
+          if (since) q = q.gte('reservation_date', since.slice(0, 10));
+          if (until) q = q.lte('reservation_date', until.slice(0, 10));
+          return q.order('reservation_date', { ascending: true }).range(from, to);
+        }),
+        // Sin filtrar por `is_active`: las citas de un concesionario dado de baja siguen
+        // existiendo, y filtrarlo acá las hacía desaparecer del gráfico mientras seguían
+        // contando en el KPI de arriba.
+        supabase.from('dealerships').select('id, name, is_service_center'),
       ]);
 
-      setProspects((pRes.data || []) as Prospect[]);
-      setReservations((rRes.data || []) as unknown as Reservation[]);
+      setProspects(pRows as Prospect[]);
+      setReservations(rRows as unknown as Reservation[]);
       setDealerships((dRes.data || []) as unknown as Dealership[]);
       setLoading(false);
     };
@@ -136,6 +193,10 @@ const AdminDashboard = () => {
   const reservasPendientes = reservations.filter(r => r.status === 'pendiente').length;
   const reservasCompletadas = reservations.filter(r => r.status === 'completada').length;
   const reservasCanceladas = reservations.filter(r => r.status === 'cancelada').length;
+  // El subtítulo del KPI decía "N completadas · M pendientes" bajo un total que incluye los
+  // cinco estados: quedaban 88 citas sin explicar y parecía que el total estaba mal. Se
+  // muestran las abiertas — que es además lo accionable — y así los tres números cierran.
+  const reservasAbiertas = totalReservations - reservasCompletadas - reservasCanceladas;
 
   // ─── 1. Citas por concesionario / centro de servicio ───
   const reservasByDealership = useMemo(() => {
@@ -154,7 +215,11 @@ const AdminDashboard = () => {
   // ─── 2. Tipos de servicio ───
   const serviceTypeData = useMemo(() => {
     const map: Record<string, number> = {};
-    reservations.forEach(r => { map[r.service_type] = (map[r.service_type] || 0) + 1; });
+    // Sin "Solicitud de Repuestos": es un pedido interno a planta, no una cita, y la pantalla
+    // de Reservas la separa en otra pestaña. Contarla acá inflaba el gráfico rotulado "Citas".
+    reservations
+      .filter(r => !isPartsRequest(r.service_type))
+      .forEach(r => { map[r.service_type] = (map[r.service_type] || 0) + 1; });
     return Object.entries(map)
       .map(([name, value]) => ({ name, value }))
       .sort((a, b) => b.value - a.value);
@@ -756,12 +821,21 @@ const AdminDashboard = () => {
         <span className="text-[10px] text-muted-foreground">indicadores y reportes estándar</span>
       </div>
 
-      {/* KPI Cards */}
+      {/* KPI Cards — cada uno detrás de su permiso: un asesor de servicio no ve indicadores
+          de ventas. Ver DASHBOARD_CHART_PERMISSIONS para los reportes de abajo. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCard icon={CalendarDays} label="Citas Reservadas" value={totalReservations} color="text-primary" sub={`${reservasCompletadas} completadas · ${reservasPendientes} pendientes`} />
-        <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
-        <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600" sub={`${ganados} ganados de ${totalProspects}`} />
-        <KpiCard icon={Star} label="Satisfacción Gral." value={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.avgAll}/5` : 'N/A'} color="text-amber-500" sub={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.ratedAll} respuestas` : 'Sin calificaciones'} />
+        {canSeeReservations && (
+          <KpiCard icon={CalendarDays} label="Citas Reservadas" value={totalReservations} color="text-primary" sub={`${reservasCompletadas} completadas · ${reservasAbiertas} abiertas · ${reservasCanceladas} canceladas`} />
+        )}
+        {canSeeProspects && (
+          <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
+        )}
+        {canSeeProspects && (
+          <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600" sub={`${ganados} ganados de ${totalProspects}`} />
+        )}
+        {canSeeReservations && (
+          <KpiCard icon={Star} label="Satisfacción Gral." value={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.avgAll}/5` : 'N/A'} color="text-amber-500" sub={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.ratedAll} respuestas` : 'Sin calificaciones'} />
+        )}
       </div>
 
       {/* ── Reportes estándar ──────────────────────────────────────────────────
@@ -773,6 +847,8 @@ const AdminDashboard = () => {
         {layout.order(DASHBOARD_CHART_KEYS).map(key => {
           const block = chartBlocks[key];
           if (!block) return null;
+          const required = DASHBOARD_CHART_PERMISSIONS[key];
+          if (required && !hasPermission(required)) return null;
           return (
             <div key={key} className={block.span === 'full' ? 'md:col-span-2' : ''}>
               {block.node}

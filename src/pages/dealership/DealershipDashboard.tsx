@@ -74,7 +74,10 @@ const DealershipDashboard = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
   const { selectedDealership, loading: loadingAccess } = useDealershipAccess();
   const { salesperson: currentSalesperson, loading: loadingSalesperson } = useCurrentSalesperson();
-  const { user, profile, role } = useAuth();
+  const { user, profile, role, hasPermission } = useAuth();
+  // Un asesor de servicio no tiene prospectos.view: el tablero deja de mostrarle los
+  // reportes de ventas, que no puede abrir en ninguna otra pantalla.
+  const canSeeProspects = hasPermission('prospectos.view');
   const isMobile = useIsMobile();
 
   // Individual salesperson view: gated SOLELY by the "vendedor" role. Roles like
@@ -141,6 +144,8 @@ const DealershipDashboard = () => {
   const ganados = prospectsByStatus['ganado'] || 0;
   const conversionRate = totalProspects > 0 ? Math.round((ganados / totalProspects) * 100) : 0;
   const reservasPendientes = reservations.filter(r => r.status === 'pendiente').length;
+  const reservasConfirmadas = reservations.filter(r => r.status === 'confirmada').length;
+  const reservasEnProceso = reservations.filter(r => r.status === 'en_proceso').length;
   const reservasCompletadas = reservations.filter(r => r.status === 'completada').length;
   const reservasCanceladas = reservations.filter(r => r.status === 'cancelada').length;
 
@@ -150,11 +155,15 @@ const DealershipDashboard = () => {
       name: s.label, value: prospectsByStatus[s.name] || 0,
     })), [PROSPECT_STATUSES, prospectsByStatus]);
 
+  // Los cinco estados, no tres. Faltaban `confirmada` y `en_proceso`, así que la torta nunca
+  // sumaba el KPI de al lado — a escala global eran 77 citas que no aparecían en ningún lado.
   const reservationStatusPie = useMemo(() => [
     { name: 'Pendientes', value: reservasPendientes, color: 'hsl(45, 90%, 50%)' },
+    { name: 'Confirmadas', value: reservasConfirmadas, color: 'hsl(210, 80%, 55%)' },
+    { name: 'En proceso', value: reservasEnProceso, color: 'hsl(280, 60%, 58%)' },
     { name: 'Completadas', value: reservasCompletadas, color: 'hsl(160, 60%, 45%)' },
     { name: 'Canceladas', value: reservasCanceladas, color: 'hsl(0, 70%, 55%)' },
-  ].filter(s => s.value > 0), [reservasPendientes, reservasCompletadas, reservasCanceladas]);
+  ].filter(s => s.value > 0), [reservasPendientes, reservasConfirmadas, reservasEnProceso, reservasCompletadas, reservasCanceladas]);
 
   const dailyTrend = useMemo(() => {
     const days: Record<string, { date: string; prospectos: number; reservas: number }> = {};
@@ -272,20 +281,26 @@ const DealershipDashboard = () => {
 
       {/* KPI Cards */}
       <div className={cn("grid grid-cols-2 gap-3", salespersonName ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
-        <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
-        <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600"
-          sub={`${ganados} ganados de ${totalProspects}`} />
-        {salespersonName && (
+        {canSeeProspects && (
+          <KpiCard icon={Users} label="Leads Captados" value={totalProspects} color="text-blue-600" sub={`${ganados} ganados · ${prospectsByStatus['perdido'] || 0} perdidos`} />
+        )}
+        {canSeeProspects && (
+          <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600"
+            sub={`${ganados} ganados de ${totalProspects}`} />
+        )}
+        {canSeeProspects && salespersonName && (
           <KpiCard icon={UserCheck} label="Clientes (ganados)" value={ganados} color="text-emerald-600"
             sub="Prospectos ganados" />
         )}
-        <KpiCard icon={CalendarDays} label="Reservas" value={totalReservations} color="text-primary" />
-        <KpiCard icon={ClipboardList} label="Pendientes" value={reservasPendientes} color="text-amber-600"
-          sub={`${reservasCompletadas} completadas`} />
+        <KpiCard icon={CalendarDays} label="Citas" value={totalReservations} color="text-primary"
+          sub={`${reservasCompletadas} completadas · ${reservasCanceladas} canceladas`} />
+        <KpiCard icon={ClipboardList} label="Sin cerrar" value={reservasPendientes + reservasConfirmadas + reservasEnProceso} color="text-amber-600"
+          sub={`${reservasPendientes} pendientes · ${reservasConfirmadas} confirmadas · ${reservasEnProceso} en proceso`} />
       </div>
 
       {/* Prospect + Reservation pies */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className={cn("grid grid-cols-1 gap-4", canSeeProspects && "md:grid-cols-2")}>
+        {canSeeProspects && (
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
@@ -318,11 +333,12 @@ const DealershipDashboard = () => {
             )}
           </CardContent>
         </Card>
+        )}
 
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-muted-foreground" /> Reservas por Estado
+              <CalendarDays className="w-4 h-4 text-muted-foreground" /> Citas por Estado
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -376,7 +392,8 @@ const DealershipDashboard = () => {
       </Card>
 
       {/* Source bar + Salesperson ranking */}
-      <div className={cn("grid grid-cols-1 gap-4", !salespersonName && "md:grid-cols-2")}>
+      <div className={cn("grid grid-cols-1 gap-4", !salespersonName && canSeeProspects && "md:grid-cols-2")}>
+        {canSeeProspects && (
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
@@ -399,9 +416,10 @@ const DealershipDashboard = () => {
             )}
           </CardContent>
         </Card>
+        )}
 
         {/* Salesperson ranking — hidden in individual salesperson view */}
-        {!salespersonName && (
+        {!salespersonName && canSeeProspects && (
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
@@ -460,7 +478,7 @@ const DealershipDashboard = () => {
       </div>
 
       {/* Contact Type by Salesperson — hidden in individual salesperson view */}
-      {!salespersonName && contactTypeBySalesperson.data.length > 0 && (
+      {!salespersonName && canSeeProspects && contactTypeBySalesperson.data.length > 0 && (
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-display flex items-center gap-2">
@@ -486,7 +504,7 @@ const DealershipDashboard = () => {
       )}
 
       {/* Events Breakdown */}
-      {eventBreakdown.length > 0 && (
+      {canSeeProspects && eventBreakdown.length > 0 && (
         <Card className="gac-shadow">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between gap-3 flex-wrap">

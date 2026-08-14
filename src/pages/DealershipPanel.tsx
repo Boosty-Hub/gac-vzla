@@ -45,6 +45,8 @@ interface Reservation {
   current_mileage: number;
   status: string;
   notes: string | null;
+  /** Notas internas del equipo GAC. No visibles para el cliente. */
+  internal_notes: string | null;
   walkin_client_name: string | null;
   walkin_client_phone: string | null;
   walkin_plate: string | null;
@@ -514,7 +516,7 @@ const DealershipPanel = () => {
 
       const { data: history } = await supabase
         .from('reservations')
-        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, completed_at, dealerships(name)')
+        .select('id, reservation_date, reservation_time, service_type, current_mileage, status, notes, internal_notes, service_notes, completed_at, dealerships(name)')
         .eq('vehicle_id', r.vehicle_id)
         .neq('id', r.id)
         .order('reservation_date', { ascending: false })
@@ -1170,10 +1172,19 @@ const DealershipPanel = () => {
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
                     <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>
                   </div>
+                  {/* `notes` es el motivo del ingreso — lo que el cliente vino a resolver.
+                      Estaba rotulado "Notas Internas", que es otra columna y otra cosa: por eso
+                      el equipo daba por perdidas las notas internas, si acá nunca se mostraron. */}
                   {detailRes.notes && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
-                      <p className="font-semibold mb-1">Notas Internas</p>
+                      <p className="font-semibold mb-1">{serviceNotesLabel(detailRes.service_type)}</p>
                       <p className="text-muted-foreground whitespace-pre-wrap">{detailRes.notes}</p>
+                    </div>
+                  )}
+                  {detailRes.internal_notes && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-md p-2.5 text-xs">
+                      <p className="font-semibold text-amber-900 mb-1">Notas Internas</p>
+                      <p className="text-amber-800 whitespace-pre-wrap">{detailRes.internal_notes}</p>
                     </div>
                   )}
                   {detailRes.status === 'completada' && detailRes.service_notes && (
