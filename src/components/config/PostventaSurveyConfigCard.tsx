@@ -14,18 +14,20 @@ import { toast } from 'sonner';
  * Existe porque esta configuración vivía únicamente dentro del JSON de
  * `integration_configs` y sólo podía cambiarse por SQL.
  *
- * RUTEO: GAC confirmó que en Kommo sólo se reemplaza el campo del enlace — no hay objetos
- * dedicados a la encuesta de servicio. Se verificó contra la API de Kommo: la etapa
- * configurada, 109744268 "ENCUESTA ENVIADA", ya pertenece al pipeline de POST VENTA
- * (13151339) y no al de Ventas (13148719). Por eso la postventa sale por la misma etapa y el
- * mismo campo que la encuesta de compra.
+ * RUTEO — la etapa de postventa es OBLIGATORIA, no un override opcional.
  *
- * Lo que sí provocó el incidente del 2026-08-03 no era la etapa: el barrido mandaba
- * `reason: 'won'` fijo para toda encuesta, de modo que la postventa recorría el camino de
- * ventas. Corregido en 20260813130000; el origen real viaja en cada despacho.
+ * El sistema no manda el mensaje: escribe el enlace en el campo y rebota la etapa del lead.
+ * Quien manda el mensaje es el SalesBot enganchado a esa etapa. La etapa 109744268
+ * "ENCUESTA ENVIADA" (pipeline 13151339 "Servicio") tiene el bot de VENTAS, el que saluda
+ * por la entrega de un vehículo — así que compartirla mandaba ese texto a clientes de
+ * taller. Pasó: 30 entregas el 2026-08-14 antes de cortarlo.
  *
- * Los campos `*_service` quedan como override opcional por si algún día se crean objetos
- * dedicados: kommo-api ya los prefiere cuando están cargados.
+ * El CAMPO sí puede compartirse: cada entrega lo sobrescribe justo antes de mover la etapa,
+ * así que el bot siempre lee el enlace que le corresponde. Lo que no puede compartirse es la
+ * etapa, porque la etapa es el disparador.
+ *
+ * Mientras estos dos IDs estén vacíos, `fn_dispatch_eligible_surveys` no despacha postventa:
+ * las encuestas se siguen creando al completar el servicio y quedan en cola.
  */
 
 interface DeliveryConfig {
@@ -125,58 +127,55 @@ const PostventaSurveyConfigCard = () => {
                   Las encuestas se están generando, pero no se envían.
                 </p>
                 <p className="text-amber-800">
-                  Falta la etapa de encuesta, el campo del enlace, o el envío está apagado.
-                  Las encuestas quedan en cola sin perderse.
+                  Falta la etapa propia de postventa en Kommo. Las encuestas quedan en cola sin
+                  perderse y salen solas apenas se cargue el ID acá abajo.
                 </p>
               </div>
             )}
 
             <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-1">
-              <p className="font-medium">Ruteo actual</p>
+              <p className="font-medium">Por qué hace falta una etapa propia</p>
               <p className="text-muted-foreground">
-                La postventa usa la misma etapa y el mismo campo de enlace que la encuesta de
-                compra — sólo cambia el enlace que se escribe. Etapa{' '}
-                <code className="font-mono">{config?.survey_stage_id || '—'}</code>, campo{' '}
-                <code className="font-mono">{config?.survey_link_field_id || '—'}</code>.
+                El sistema escribe el enlace en el campo y mueve el lead de etapa. El mensaje lo
+                manda el bot que esté enganchado a esa etapa. La etapa de ventas{' '}
+                <code className="font-mono">{config?.survey_stage_id || '—'}</code> tiene el bot de
+                entrega de vehículo, así que un cliente de taller recibiría el texto de compra. El
+                campo del enlace <code className="font-mono">{config?.survey_link_field_id || '—'}</code>{' '}
+                sí puede ser el mismo: se sobrescribe justo antes de mover la etapa.
               </p>
             </div>
 
-            <details className="text-xs">
-              <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                Usar una etapa y un campo distintos para postventa (opcional)
-              </summary>
-              <div className="pt-3 space-y-3">
-                <p className="text-[11px] text-muted-foreground">
-                  Sólo si en Kommo se crean objetos dedicados a la encuesta de servicio. Vacíos,
-                  la postventa sigue el ruteo de arriba.
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="pv-stage">ID de etapa de postventa</Label>
-                    <Input
-                      id="pv-stage"
-                      value={stageId}
-                      onChange={e => setStageId(e.target.value)}
-                      placeholder="Vacío = usa la etapa de arriba"
-                      inputMode="numeric"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="pv-field">ID del campo del enlace</Label>
-                    <Input
-                      id="pv-field"
-                      value={fieldId}
-                      onChange={e => setFieldId(e.target.value)}
-                      placeholder="Vacío = usa el campo de arriba"
-                      inputMode="numeric"
-                    />
-                  </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="pv-stage">ID de la etapa de postventa</Label>
+                  <Input
+                    id="pv-stage"
+                    value={stageId}
+                    onChange={e => setStageId(e.target.value)}
+                    placeholder="Etapa nueva en el embudo Servicio"
+                    inputMode="numeric"
+                  />
                 </div>
-                <Button size="sm" onClick={handleSave} disabled={saving}>
-                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar override'}
-                </Button>
+                <div className="space-y-1.5">
+                  <Label htmlFor="pv-field">ID del campo del enlace</Label>
+                  <Input
+                    id="pv-field"
+                    value={fieldId}
+                    onChange={e => setFieldId(e.target.value)}
+                    placeholder="Puede ser el mismo de ventas"
+                    inputMode="numeric"
+                  />
+                </div>
               </div>
-            </details>
+              <p className="text-[11px] text-muted-foreground">
+                La etapa tiene que estar en el mismo embudo que las citas (Servicio). El lead que
+                llega ahí es el de conversación del cliente, no el de la reserva.
+              </p>
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Guardar y activar envío'}
+              </Button>
+            </div>
           </>
         )}
       </CardContent>

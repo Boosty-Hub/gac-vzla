@@ -129,6 +129,9 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   const [vehicles, setVehicles] = useState<DialogVehicle[]>([]);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [resending, setResending] = useState(false);
+  // Postventa sólo tiene ruteo propio cuando su etapa está cargada. Sin eso, reenviar una
+  // encuesta de servicio la manda por la etapa de ventas y despierta al bot equivocado.
+  const [postventaReady, setPostventaReady] = useState(true);
   const [repurchaseOpen, setRepurchaseOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
@@ -272,6 +275,23 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
     return () => { cancelled = true; };
   }, [open, client, isFleet, driversKey]);
 
+  // Estado del ruteo de postventa. Se consulta acá y no se asume, porque el botón de reenvío
+  // entrega la encuesta MÁS RECIENTE del cliente: si esa es de servicio y postventa todavía
+  // comparte la etapa de ventas, el reenvío le manda el mensaje de compra a alguien que sólo
+  // vino al taller.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase.rpc as any)('get_survey_delivery_config');
+      if (cancelled) return;
+      const row = (Array.isArray(data) ? data[0] : data) as { service_ready?: boolean } | undefined;
+      setPostventaReady(row?.service_ready ?? false);
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
   const handleAssignDriver = async (vehicleId: string, value: string) => {
     const nextDriverId = value === UNASSIGNED_DRIVER ? null : value;
     setAssigningVehicleId(vehicleId);
@@ -339,8 +359,13 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   // over the client's existing fleet.
   const canAddVehicle = hasPermission('vehiculos.create');
 
+  // El reenvío entrega la encuesta más reciente del cliente — el mismo criterio que usa
+  // kommo-api en su rama `client_id`. Si esa es de servicio, hay que saberlo ANTES de mandar.
+  const latestSurveyIsService = surveys[0]?.origin === 'service';
+  const resendBlocked = latestSurveyIsService && !postventaReady;
+
   const handleResend = async () => {
-    if (!client) return;
+    if (!client || resendBlocked) return;
     setResending(true);
     const outcome = await deliverSatisfactionSurvey({ client_id: client.id }, 'resend');
     setResending(false);
@@ -499,9 +524,15 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                   size="sm"
                   variant="outline"
                   className="h-7 text-xs shrink-0"
-                  disabled={resending || loading || surveys.length === 0}
+                  disabled={resending || loading || surveys.length === 0 || resendBlocked}
                   onClick={handleResend}
-                  title={surveys.length === 0 ? 'Este cliente no tiene ninguna encuesta para reenviar' : undefined}
+                  title={
+                    surveys.length === 0
+                      ? 'Este cliente no tiene ninguna encuesta para reenviar'
+                      : resendBlocked
+                        ? 'La última encuesta de este cliente es de servicio y la postventa todavía no tiene su etapa propia en Kommo. Reenviarla mandaría el mensaje de compra.'
+                        : undefined
+                  }
                 >
                   {resending ? (
                     <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin mr-1" />
