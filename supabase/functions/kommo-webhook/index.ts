@@ -421,6 +421,53 @@ Deno.serve(async (req) => {
       return new Response('OK', { status: 200 })
     }
 
+    // ── Payloads con varios eventos ───────────────────────────────────────────
+    //
+    // Kommo puede mandar MÁS DE UN evento en un solo POST: `leads[status][0]`,
+    // `leads[status][1]`, `leads[status][2]`... Pasa cuando alguien arrastra varios leads a
+    // la vez o hace una edición masiva. Todo el manejo de abajo lee el índice 0 y devuelve,
+    // así que del segundo evento en adelante se perdían en silencio: el lead cambiaba de
+    // etapa en Kommo y acá no pasaba nada, sin error ni log.
+    //
+    // En vez de reescribir ese manejo — que es el que sincroniza prospectos y reservas, y
+    // es el camino probado — los eventos extra se reenvían a esta misma función, uno por
+    // POST, renumerados al índice 0. El procesamiento queda exactamente igual.
+    //
+    // No hay recursión posible: lo reenviado trae un solo evento en el índice 0, así que
+    // nunca vuelve a entrar acá.
+    const EVENTOS = ['leads[status]', 'leads[update]']
+    const extras = new Map<string, Map<string, string>>()
+    for (const [clave, valor] of params.entries()) {
+      const m = clave.match(/^(leads\[(?:status|update)\])\[(\d+)\]\[(.+)\]$/)
+      if (!m) continue
+      const [, familia, indice, campo] = m
+      if (indice === '0') continue
+      const id = `${familia}|${indice}`
+      if (!extras.has(id)) extras.set(id, new Map())
+      extras.get(id)!.set(`${familia}[0][${campo}]`, valor)
+    }
+
+    if (extras.size > 0) {
+      const comunes = [...params.entries()].filter(([k]) => !EVENTOS.some(f => k.startsWith(f)))
+      const cabeceras: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' }
+      if (expectedSecret) cabeceras['x-webhook-secret'] = expectedSecret
+
+      for (const campos of extras.values()) {
+        const cuerpo = new URLSearchParams()
+        for (const [k, v] of comunes) cuerpo.append(k, v)
+        for (const [k, v] of campos) cuerpo.append(k, v)
+        // Secuencial a propósito: dos eventos del mismo lead tienen que aplicarse en orden,
+        // y un batch de Kommo trae unos pocos, no cientos.
+        await fetch(req.url, { method: 'POST', headers: cabeceras, body: cuerpo.toString() })
+          .catch(() => { /* el reenvío no debe tumbar el evento del índice 0 */ })
+      }
+
+      await supabase.from('integration_logs').insert({
+        integration_name: 'kommo', event_type: 'webhook_batch_fanout', status: 'success',
+        details: { extra_events: extras.size },
+      })
+    }
+
     const baseUrl = `https://${config.subdomain}.kommo.com/api/v4`
     const authHeaders = {
       Authorization: `Bearer ${config.access_token}`,

@@ -6,7 +6,20 @@ interface ProtectedRouteProps {
   children: React.ReactNode;
   allowedRoles?: UserRole[];
   allowedPortals?: string[];
+  /**
+   * Módulo que hay que poder ver para entrar. Se cumple con cualquiera de
+   * `<module>.view|create|edit|delete`, el mismo criterio con el que los menús deciden si
+   * muestran el ítem — así la barra lateral y la URL no pueden contradecirse.
+   *
+   * Existe porque hasta ahora las rutas sólo miraban el PORTAL. El menú escondía lo que no
+   * correspondía, pero escribir la dirección a mano entraba igual: un vendedor podía abrir
+   * /concesionario/roles y ver la matriz completa de roles y permisos, o /concesionario/
+   * concesionarios y ver todos los concesionarios del país.
+   */
+  requiredModule?: string;
 }
+
+const ACCIONES = ['view', 'create', 'edit', 'delete'];
 
 const portalPaths: Record<string, string> = {
   admin: '/admin',
@@ -20,8 +33,8 @@ function getRedirectPath(role: { name: string; redirect_portal?: string } | null
   return portalPaths[portal] || '/usuario';
 }
 
-export function ProtectedRoute({ children, allowedRoles, allowedPortals }: ProtectedRouteProps) {
-  const { user, role, loading } = useAuth();
+export function ProtectedRoute({ children, allowedRoles, allowedPortals, requiredModule }: ProtectedRouteProps) {
+  const { user, role, loading, hasPermission } = useAuth();
 
   if (loading) {
     return (
@@ -52,11 +65,31 @@ export function ProtectedRoute({ children, allowedRoles, allowedPortals }: Prote
 
     if (!hasAccess) {
       const redirect = getRedirectPath(role);
-      // Avoid redirect loop: if redirect path is the SAME route, just render to prevent infinite loop
-      if (typeof window !== 'undefined' && window.location.pathname.startsWith(redirect)) {
+      // Escape anti-bucle: si el destino del redirect ES esta misma ruta, redirigir la
+      // dejaría girando para siempre, así que se renderiza.
+      //
+      // La comparación tiene que ser EXACTA. Con `startsWith` alcanzaba con que la ruta
+      // empezara igual que el portal: un rol de portal admin sin `allowedRoles` entrando a
+      // /admin/configuracion/roles calculaba redirect='/admin', y como
+      // '/admin/configuracion/roles'.startsWith('/admin') da true, la página se renderizaba
+      // igual. Ese agujero abría las nueve pantallas de configuración — roles, usuarios,
+      // plantillas, automatizaciones — a cualquiera con portal admin.
+      const rutaActual = typeof window !== 'undefined' ? window.location.pathname : '';
+      const mismaRuta = rutaActual === redirect || rutaActual === `${redirect}/`;
+      if (mismaRuta) {
         return <>{children}</>;
       }
       return <Navigate to={redirect} replace />;
+    }
+
+    // Permiso de módulo. Va después del chequeo de portal para que quien no debería estar en
+    // este portal se vaya al suyo, en vez de rebotar contra un permiso que igual no tiene.
+    //
+    // No se aplica a la home de cada portal: ahí el layout ya manda al primer módulo
+    // disponible, y ponerle guarda acá crearía el bucle que el escape de arriba tapa
+    // renderizando — o sea, dejaría entrar igual.
+    if (requiredModule && !ACCIONES.some(a => hasPermission(`${requiredModule}.${a}`))) {
+      return <Navigate to={getRedirectPath(role)} replace />;
     }
   }
 

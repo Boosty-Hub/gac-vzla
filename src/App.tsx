@@ -42,14 +42,22 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-const AdminRoute = ({ children }: { children: React.ReactNode }) => (
-  <ProtectedRoute allowedPortals={['admin']}>
+/**
+ * `module` es el permiso que hace falta para entrar. Sin él, estas rutas sólo miraban el
+ * portal: el menú escondía el ítem, pero escribir la dirección a mano entraba igual. Un
+ * vendedor podía abrir /concesionario/roles y ver la matriz completa de roles y permisos.
+ *
+ * Las home de cada portal van sin `module` a propósito: ahí el layout ya redirige al primer
+ * módulo disponible.
+ */
+const AdminRoute = ({ children, module }: { children: React.ReactNode; module?: string }) => (
+  <ProtectedRoute allowedPortals={['admin']} requiredModule={module}>
     <AdminLayout>{children}</AdminLayout>
   </ProtectedRoute>
 );
 
-const DealershipRoute = ({ children }: { children: React.ReactNode }) => (
-  <ProtectedRoute allowedPortals={['concesionario', 'admin']}>
+const DealershipRoute = ({ children, module }: { children: React.ReactNode; module?: string }) => (
+  <ProtectedRoute allowedPortals={['concesionario', 'admin']} requiredModule={module}>
     <DealershipLayout>{children}</DealershipLayout>
   </ProtectedRoute>
 );
@@ -81,29 +89,29 @@ const App = () => (
 
             {/* Concesionario routes — ALL modules accessible; visibility controlled by permissions */}
             <Route path="/concesionario" element={<DealershipRoute><DealershipDashboard /></DealershipRoute>} />
-            <Route path="/concesionario/reservas" element={<DealershipRoute><DealershipReservas /></DealershipRoute>} />
-            <Route path="/concesionario/prospectos" element={<DealershipRoute><DealershipProspectos /></DealershipRoute>} />
-            <Route path="/concesionario/garantias" element={<DealershipRoute><AdminGarantias /></DealershipRoute>} />
-            <Route path="/concesionario/historial" element={<DealershipRoute><AdminHistorial /></DealershipRoute>} />
-            <Route path="/concesionario/vehiculos" element={<DealershipRoute><AdminVehiculos /></DealershipRoute>} />
-            <Route path="/concesionario/modelos" element={<DealershipRoute><AdminModelos /></DealershipRoute>} />
-            <Route path="/concesionario/clientes" element={<DealershipRoute><AdminClientes /></DealershipRoute>} />
-            <Route path="/concesionario/concesionarios" element={<DealershipRoute><AdminConcesionarios /></DealershipRoute>} />
-            <Route path="/concesionario/usuarios" element={<DealershipRoute><AdminUsuarios /></DealershipRoute>} />
-            <Route path="/concesionario/roles" element={<DealershipRoute><AdminRoles /></DealershipRoute>} />
-            <Route path="/concesionario/eventos" element={<DealershipRoute><AdminEventos /></DealershipRoute>} />
+            <Route path="/concesionario/reservas" element={<DealershipRoute module="reservas"><DealershipReservas /></DealershipRoute>} />
+            <Route path="/concesionario/prospectos" element={<DealershipRoute module="prospectos"><DealershipProspectos /></DealershipRoute>} />
+            <Route path="/concesionario/garantias" element={<DealershipRoute module="garantias"><AdminGarantias /></DealershipRoute>} />
+            <Route path="/concesionario/historial" element={<DealershipRoute module="historial"><AdminHistorial /></DealershipRoute>} />
+            <Route path="/concesionario/vehiculos" element={<DealershipRoute module="vehiculos"><AdminVehiculos /></DealershipRoute>} />
+            <Route path="/concesionario/modelos" element={<DealershipRoute module="modelos"><AdminModelos /></DealershipRoute>} />
+            <Route path="/concesionario/clientes" element={<DealershipRoute module="clientes"><AdminClientes /></DealershipRoute>} />
+            <Route path="/concesionario/concesionarios" element={<DealershipRoute module="concesionarios"><AdminConcesionarios /></DealershipRoute>} />
+            <Route path="/concesionario/usuarios" element={<DealershipRoute module="usuarios"><AdminUsuarios /></DealershipRoute>} />
+            <Route path="/concesionario/roles" element={<DealershipRoute module="roles"><AdminRoles /></DealershipRoute>} />
+            <Route path="/concesionario/eventos" element={<DealershipRoute module="eventos"><AdminEventos /></DealershipRoute>} />
 
             {/* Admin routes with sidebar layout */}
             <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
-            <Route path="/admin/reservas" element={<AdminRoute><AdminReservas /></AdminRoute>} />
-            <Route path="/admin/garantias" element={<AdminRoute><AdminGarantias /></AdminRoute>} />
-            <Route path="/admin/historial" element={<AdminRoute><AdminHistorial /></AdminRoute>} />
-            <Route path="/admin/concesionarios" element={<AdminRoute><AdminConcesionarios /></AdminRoute>} />
-            <Route path="/admin/vehiculos" element={<AdminRoute><AdminVehiculos /></AdminRoute>} />
-            <Route path="/admin/modelos" element={<AdminRoute><AdminModelos /></AdminRoute>} />
-            <Route path="/admin/clientes" element={<AdminRoute><AdminClientes /></AdminRoute>} />
-            <Route path="/admin/prospectos" element={<AdminRoute><AdminProspectos /></AdminRoute>} />
-            <Route path="/admin/eventos" element={<AdminRoute><AdminEventos /></AdminRoute>} />
+            <Route path="/admin/reservas" element={<AdminRoute module="reservas"><AdminReservas /></AdminRoute>} />
+            <Route path="/admin/garantias" element={<AdminRoute module="garantias"><AdminGarantias /></AdminRoute>} />
+            <Route path="/admin/historial" element={<AdminRoute module="historial"><AdminHistorial /></AdminRoute>} />
+            <Route path="/admin/concesionarios" element={<AdminRoute module="concesionarios"><AdminConcesionarios /></AdminRoute>} />
+            <Route path="/admin/vehiculos" element={<AdminRoute module="vehiculos"><AdminVehiculos /></AdminRoute>} />
+            <Route path="/admin/modelos" element={<AdminRoute module="modelos"><AdminModelos /></AdminRoute>} />
+            <Route path="/admin/clientes" element={<AdminRoute module="clientes"><AdminClientes /></AdminRoute>} />
+            <Route path="/admin/prospectos" element={<AdminRoute module="prospectos"><AdminProspectos /></AdminRoute>} />
+            <Route path="/admin/eventos" element={<AdminRoute module="eventos"><AdminEventos /></AdminRoute>} />
             <Route path="/admin/configuracion" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminGeneral /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/general" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminGeneral /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/usuarios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminUsuarios /></ConfigLayout></ProtectedRoute>} />
