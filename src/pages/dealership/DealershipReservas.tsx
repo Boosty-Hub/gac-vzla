@@ -1368,23 +1368,27 @@ const DealershipReservas = () => {
                   {isInc && (
                     <p className="text-[11px] text-muted-foreground">Registrado por: <span className="font-medium">{detailRes.created_by_name || 'Cliente'}</span>{` · ${detailRes.created_by_role || 'Portal'}`}</p>
                   )}
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center gap-2 flex-wrap"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
+                  {/* Dos columnas: eran ocho filas apiladas de un dato cada una, que es lo que
+                      empujaba el resto del contenido fuera de pantalla. */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                    <div className="flex items-center gap-2 flex-wrap sm:col-span-2"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
                       <ExternalClientBadge isExternal={detailRes.clients?.is_manual} source={detailRes.clients?.external_source} />
                       {detailRes.clients?.cedula && <span className="text-muted-foreground">· {detailRes.clients.cedula}</span>}
                       {detailRes.clients?.phone && <span className="text-muted-foreground">· {detailRes.clients.phone}</span>}
                     </div>
-                    {!detailRes.clients && detailRes.walkin_client_phone && <div className="flex items-center gap-2 text-muted-foreground"><span>Tel: {detailRes.walkin_client_phone}</span></div>}
-                    <div className="flex items-center gap-2"><Car className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    {!detailRes.clients && detailRes.walkin_client_phone && <div className="flex items-center gap-2 text-muted-foreground sm:col-span-2"><span>Tel: {detailRes.walkin_client_phone}</span></div>}
+                    <div className="flex items-center gap-2 sm:col-span-2"><Car className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                       <span>{detailRes.vehicles ? `${detailRes.vehicles.vehicle_models?.brand} ${detailRes.vehicles.vehicle_models?.name} ${detailRes.vehicles.year}` : detailRes.walkin_plate || '-'}</span>
                       <span className="text-muted-foreground">{detailRes.vehicles?.plate || detailRes.walkin_plate || ''}</span>
                     </div>
-                    <Separator />
+                    <div className="sm:col-span-2"><Separator /></div>
                     <div className="flex items-center gap-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_date}</span></div>
                     {!isInc && <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_time?.slice(0, 5)}</span></div>}
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
                     {detailRes.current_mileage > 0 && <div className="flex items-center gap-2"><Hash className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.current_mileage.toLocaleString()} km</span></div>}
                   </div>
+                  {/* Los bloques de texto también de a dos, por el mismo motivo. */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {/* Motivo del ingreso, para cualquier tipo de servicio. Ver serviceTypes.ts. */}
                   {detailRes.notes && (
                     <div className="bg-muted/50 rounded-md p-2.5 text-xs">
@@ -1411,6 +1415,9 @@ const DealershipReservas = () => {
                       {detailRes.completed_at && <p className="text-green-600 mt-1.5 text-[10px]">Completado: {new Date(detailRes.completed_at).toLocaleString('es-VE')}</p>}
                     </div>
                   )}
+                  </div>
+                  {/* Los adjuntos van a ancho completo: la zona de arrastrar archivos en media
+                      columna queda demasiado apretada para usarla. */}
                   {detailRes.technical_report_url && (
                     <div className="space-y-1">
                       <p className="text-xs font-semibold flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-blue-600" /> {isInc ? 'Archivos adjuntos' : 'Informe Técnico'}</p>
@@ -1481,7 +1488,9 @@ const DealershipReservas = () => {
                     </div>
                   )}
                 </TabsContent>
-                <TabsContent value="historial" className="space-y-3 mt-3">
+                {/* El historial tiene largo variable: se le da scroll propio en vez de estirar el
+                      diálogo, que si no cambia de alto cada vez que se toca una pestaña. */}
+                <TabsContent value="historial" className="space-y-3 mt-3 max-h-[55vh] overflow-y-auto pr-1">
                   {loadingDetail ? (
                     <div className="text-center py-6"><div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" /></div>
                   ) : !detailRes.vehicle_id ? (

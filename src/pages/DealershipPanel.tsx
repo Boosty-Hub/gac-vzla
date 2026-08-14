@@ -1160,19 +1160,20 @@ const DealershipPanel = () => {
                     <Badge className={cn("text-xs px-2 py-0.5", st.color)}>{st.label}</Badge>
                     <span className="text-[10px] text-muted-foreground">{detailRes.created_at ? new Date(detailRes.created_at).toLocaleDateString('es-VE') : ''}</span>
                   </div>
-                  <div className="space-y-2 text-xs">
-                    <div className="flex items-center gap-2"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
+                  {/* Dos columnas: eran ocho filas apiladas de un dato cada una. */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                    <div className="flex items-center gap-2 sm:col-span-2"><User className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span className="font-medium">{clientName}</span>
                       {detailRes.clients?.cedula && <span className="text-muted-foreground">· {detailRes.clients.cedula}</span>}
                       {detailRes.clients?.phone && <span className="text-muted-foreground">· {detailRes.clients.phone}</span>}
                     </div>
                     {!detailRes.clients && detailRes.walkin_client_phone && (
-                      <div className="flex items-center gap-2 text-muted-foreground"><span>Tel: {detailRes.walkin_client_phone}</span></div>
+                      <div className="flex items-center gap-2 text-muted-foreground sm:col-span-2"><span>Tel: {detailRes.walkin_client_phone}</span></div>
                     )}
-                    <div className="flex items-center gap-2"><Car className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <div className="flex items-center gap-2 sm:col-span-2"><Car className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                       <span>{detailRes.vehicles ? `${detailRes.vehicles.vehicle_models?.brand} ${detailRes.vehicles.vehicle_models?.name} ${detailRes.vehicles.year}` : detailRes.walkin_plate || '-'}</span>
                       <span className="text-muted-foreground">{detailRes.vehicles?.plate || detailRes.walkin_plate || ''}</span>
                     </div>
-                    <Separator />
+                    <div className="sm:col-span-2"><Separator /></div>
                     <div className="flex items-center gap-2"><CalendarDays className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_date}</span></div>
                     <div className="flex items-center gap-2"><Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.reservation_time?.slice(0, 5)}</span></div>
                     <div className="flex items-center gap-2"><Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" /><span>{detailRes.service_type}</span></div>
@@ -1263,7 +1264,9 @@ const DealershipPanel = () => {
                   )}
                 </TabsContent>
 
-                <TabsContent value="historial" className="space-y-3 mt-3">
+                {/* El historial tiene largo variable: se le da scroll propio en vez de estirar el
+                      diálogo, que si no cambia de alto cada vez que se toca una pestaña. */}
+                <TabsContent value="historial" className="space-y-3 mt-3 max-h-[55vh] overflow-y-auto pr-1">
                   {loadingDetail ? (
                     <div className="text-center py-6">
                       <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
