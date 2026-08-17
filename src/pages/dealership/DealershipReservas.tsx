@@ -1302,7 +1302,7 @@ const DealershipReservas = () => {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              {Object.entries(statusMap).map(([k, v]) => (
+                              {Object.entries(STATUS_CONFIG).map(([k, v]) => (
                                 <SelectItem key={k} value={k} className="text-xs">{v.label}</SelectItem>
                               ))}
                             </SelectContent>

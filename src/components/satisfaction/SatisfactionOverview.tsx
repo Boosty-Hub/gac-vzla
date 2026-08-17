@@ -317,7 +317,7 @@ const SatisfactionOverview = ({ compact, surveys: controlledSurveys, onSelectCli
                     variant="ghost"
                     size="sm"
                     className="h-8 text-xs shrink-0"
-                    onClick={() => setFilters(DEFAULT_RESPONDED_FILTERS)}
+                    onClick={() => setFilters(DEFAULT_TABLE_FILTERS)}
                   >
                     <X className="w-3.5 h-3.5 mr-1" /> Limpiar
                   </Button>
