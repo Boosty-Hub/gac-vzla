@@ -760,15 +760,23 @@ const UserPortal = () => {
     if (!cancelTarget || !clientData) return;
     setCancelling(true);
 
-    const { error, count } = await supabase
+    // El `.select()` de un UPDATE acepta UN solo argumento: las opciones `{ count, head }`
+    // sólo existen en el `.select()` de lectura. Acá se pasaban igual y JavaScript las
+    // ignoraba en silencio, así que `count` volvía siempre `null` — nunca `0`. Resultado: el
+    // guard de abajo no se disparó jamás. Si una política RLS rechazaba el UPDATE, PostgREST
+    // devolvía 204 sin error, el cliente veía "Cita cancelada" en verde y la cita seguía viva.
+    //
+    // Se cuentan las filas devueltas, que es el mismo criterio que ya usan AdminReservas y
+    // DealershipReservas para lo mismo.
+    const { data: updated, error } = await supabase
       .from('reservations')
       .update({ status: 'cancelada' })
       .eq('id', cancelTarget.id)
-      .select('id', { count: 'exact', head: true });
+      .select('id');
 
-    if (error || count === 0) {
+    if (error || !updated || updated.length === 0) {
       toast.error('No se pudo cancelar la cita. Por favor contacta al concesionario.');
-      console.error('Cancel error:', error, 'rows updated:', count);
+      console.error('Cancel error:', error, 'rows updated:', updated?.length ?? 0);
       setCancelling(false);
       return;
     }

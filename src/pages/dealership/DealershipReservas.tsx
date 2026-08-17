@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { TablesInsert } from '@/integrations/supabase/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -744,7 +745,9 @@ const DealershipReservas = () => {
         incPayload.created_by_name = creatorName;
         incPayload.created_by_role = creatorRole;
         incPayload.created_by_profile_id = profile?.id || null;
-        const { data: incInserted, error } = await supabase.from('reservations').insert(incPayload).select('id').single();
+        // `incPayload` se arma dinámicamente, así que no calza con el tipo generado de la fila.
+        // El cast es sólo de tipos: las columnas que se escriben son las de arriba.
+        const { data: incInserted, error } = await supabase.from('reservations').insert(incPayload as TablesInsert<'reservations'>).select('id').single();
         if (error) { toast.error('Error al crear incidencia'); console.error(error); }
         else {
           toast.success('Incidencia creada exitosamente'); setCreateOpen(false); fetchReservations();

@@ -146,6 +146,10 @@ interface Prospect {
   payment_modality: string | null;
   company_name: string | null;
   created_at: string;
+  // Se leen en pantalla (badge "falta placa", fecha de actualización) y el fetch trae `*`,
+  // así que llegan siempre; faltaban sólo en esta interfaz.
+  sold_plate: string | null;
+  updated_at: string;
   // re3: units embedded from prospect_vehicles (types.ts not regenerated → optional/any-shaped).
   prospect_vehicles?: { brand: string | null; model: string | null; sort_order: number | null }[] | null;
 }
@@ -927,7 +931,7 @@ const DealershipProspectos = () => {
     setDialogOpenRaw(true);
     try {
       const { data: vehicles } = await supabase
-        .from('prospect_vehicles' as any)
+        .from('prospect_vehicles')
         .select('brand, model, sort_order')
         .eq('prospect_id', p.id)
         .order('sort_order');

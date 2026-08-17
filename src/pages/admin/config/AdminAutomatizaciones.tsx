@@ -61,7 +61,7 @@ export default function AdminAutomatizaciones() {
   const fetchLogs = async () => {
     setLoadingLogs(true);
     const { data } = await supabase
-      .from('integration_logs' as any)
+      .from('integration_logs')
       .select('*')
       .eq('integration_name', 'kommo')
       .order('created_at', { ascending: false })

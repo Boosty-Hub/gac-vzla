@@ -495,7 +495,7 @@ const AdminProspectos = () => {
     setDialogOpen(true);
     try {
       const { data: vehicles } = await supabase
-        .from('prospect_vehicles' as any)
+        .from('prospect_vehicles')
         .select('brand, model, sort_order')
         .eq('prospect_id', p.id)
         .order('sort_order');

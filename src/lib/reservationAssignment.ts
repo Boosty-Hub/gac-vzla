@@ -149,8 +149,11 @@ interface ManualEntitiesClient {
    * SECURITY DEFINER RPCs see the whole table and are gated to staff roles.
    * See supabase/migrations/20260806120000_staff_client_search_cedula_phone.sql.
    */
+  // `PromiseLike`, no `Promise`: supabase `.rpc()` devuelve un PostgrestFilterBuilder, que es
+  // "thenable" pero no una Promise. Con `Promise` el cliente real no calzaba y las dos
+  // pantallas que llaman acá no compilaban. `await` funciona igual con los dos.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  rpc: (fn: string, params: Record<string, unknown>) => Promise<QueryResult<any>>;
+  rpc: (fn: string, params: Record<string, unknown>) => PromiseLike<QueryResult<any>>;
 }
 
 /**

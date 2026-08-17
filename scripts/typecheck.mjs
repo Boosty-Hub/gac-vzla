@@ -16,23 +16,26 @@
  * (esbuild no chequea tipos ni nombres libres) y salieron a producción: el concesionario
  * abría la lista de citas y la pantalla se caía entera con "statusMap is not defined".
  *
- * QUÉ CORTA Y QUÉ NO
- * ------------------
- * Falla SOLO con la familia "no existe este nombre" (TS2304/TS2551/TS2552). Esos son
- * ReferenceError garantizados apenas se ejecute la línea: no hay forma de que anden.
+ * QUÉ CORTA
+ * ---------
+ * Cualquier error de tipos. La deuda arrancó en 25 y quedó en CERO: 12 salían de
+ * `src/integrations/supabase/types.ts` desactualizado (columnas que SÍ están en la base pero
+ * faltaban en los tipos generados) y se fueron al regenerarlo contra producción; los otros 13
+ * se arreglaron uno por uno.
  *
- * El resto se lista como deuda conocida y no frena nada. Hoy son ~25 y casi todos salen de
- * `src/integrations/supabase/types.ts` desactualizado: columnas que SÍ están en la base
- * (`kommo_lead_id`, `internal_notes`, `sold_plate`, `google_maps_url`...) pero que faltan en
- * los tipos generados. Se arreglan regenerando ese archivo, no tocando las pantallas.
+ * MANTENERLO EN CERO. Si aparece un error nuevo, se arregla — no se agrega a una lista de
+ * tolerados. La lista de tolerados es exactamente cómo `statusMap` llegó a producción.
  *
- * Cuando esa deuda llegue a cero, cambiar FATALES por "cualquier error" y esto pasa a ser un
- * gate completo.
+ * Si algún día `types.ts` vuelve a quedar viejo, se regenera así:
+ *   curl -s "https://api.supabase.com/v1/projects/<ref>/types/typescript" \
+ *     -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" | node -e "..."
+ * Es un archivo SOLO de tipos: se borra entero al compilar, así que regenerarlo no puede
+ * cambiar el comportamiento. Verificado — el bundle salió idéntico byte por byte.
  */
 import { execSync } from 'node:child_process';
 
-/** Familia "cannot find name": el único error de tipos que rompe la pantalla en runtime. */
-const FATALES = /error (TS2304|TS2551|TS2552):/;
+/** Familia "cannot find name": ReferenceError seguro en runtime. Se destaca aparte. */
+const REVIENTA_EN_RUNTIME = /error (TS2304|TS2551|TS2552):/;
 
 let salida = '';
 try {
@@ -43,19 +46,23 @@ try {
 }
 
 const errores = salida.split(/\r?\n/).filter(l => /error TS\d+:/.test(l));
-const fatales = errores.filter(l => FATALES.test(l));
-const deuda = errores.filter(l => !FATALES.test(l));
 
-if (deuda.length > 0) {
-  console.log(`\nDeuda de tipos conocida: ${deuda.length} (no frena el build)`);
-  for (const linea of deuda) console.log(`  · ${linea.slice(0, 140)}`);
+if (errores.length === 0) {
+  console.log('\nTipos OK — 0 errores.');
+  process.exit(0);
 }
 
-if (fatales.length > 0) {
-  console.error(`\n${fatales.length} nombre(s) que no existen — esto revienta en runtime:\n`);
-  for (const linea of fatales) console.error(`  ✗ ${linea}`);
-  console.error('');
-  process.exit(1);
+const revientan = errores.filter(l => REVIENTA_EN_RUNTIME.test(l));
+const resto = errores.filter(l => !REVIENTA_EN_RUNTIME.test(l));
+
+if (revientan.length > 0) {
+  console.error(`\n${revientan.length} nombre(s) que no existen — esto revienta en runtime:\n`);
+  for (const linea of revientan) console.error(`  ✗ ${linea}`);
+}
+if (resto.length > 0) {
+  console.error(`\n${resto.length} error(es) de tipos:\n`);
+  for (const linea of resto) console.error(`  · ${linea.slice(0, 160)}`);
 }
 
-console.log('\nSin nombres indefinidos.');
+console.error('');
+process.exit(1);
