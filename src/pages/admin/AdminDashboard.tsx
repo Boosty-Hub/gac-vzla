@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
   MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
-  Star, Wrench, Building2, BarChart2, LayoutGrid, Sparkles, Smile, RotateCcw,
+  Wrench, Building2, BarChart2, LayoutGrid, Sparkles, Smile, RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -37,7 +37,6 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 const DASHBOARD_CHART_KEYS = [
   'citas_concesionario',
   'tipos_servicio',
-  'satisfaccion_concesionario',
   'prospectos_conversion',
   'ranking_vendedores',
   'prospectos_canal',
@@ -58,7 +57,6 @@ const DASHBOARD_CHART_KEYS = [
 const DASHBOARD_CHART_PERMISSIONS: Record<string, string> = {
   citas_concesionario: 'reservas.view',
   tipos_servicio: 'reservas.view',
-  satisfaccion_concesionario: 'reservas.view',
   prospectos_conversion: 'prospectos.view',
   ranking_vendedores: 'prospectos.view',
   prospectos_canal: 'prospectos.view',
@@ -85,7 +83,6 @@ interface Reservation {
   service_type: string;
   dealership_id: string;
   created_at: string;
-  satisfaction_rating: number | null;
 }
 
 interface Dealership {
@@ -139,7 +136,7 @@ const AdminDashboard = () => {
         }),
         fetchAllRows<unknown>((from, to) => {
           let q: any = supabase.from('reservations')
-            .select('id, status, reservation_date, service_type, dealership_id, created_at, satisfaction_rating');
+            .select('id, status, reservation_date, service_type, dealership_id, created_at');
           // El rango se aplica sobre `reservation_date`, la fecha DE LA CITA, no sobre
           // `created_at`, que es cuándo se cargó. Con `created_at` una cita agendada para
           // el mes que viene contaba en el mes actual: 17 citas completadas tienen esas dos
@@ -209,36 +206,15 @@ const AdminDashboard = () => {
       .sort((a, b) => b.value - a.value);
   }, [reservations]);
 
-  // ─── 3. Satisfacción del cliente por concesionario ───
-  const satisfactionByDealership = useMemo(() => {
-    const map: Record<string, { sum: number; count: number }> = {};
-    reservations.forEach(r => {
-      if (r.satisfaction_rating) {
-        if (!map[r.dealership_id]) map[r.dealership_id] = { sum: 0, count: 0 };
-        map[r.dealership_id].sum += r.satisfaction_rating;
-        map[r.dealership_id].count++;
-      }
-    });
-    const ratedAll = reservations.filter(r => r.satisfaction_rating).length;
-    const avgAll = ratedAll > 0
-      ? (reservations.reduce((s, r) => s + (r.satisfaction_rating || 0), 0) / ratedAll)
-      : 0;
-    const byDealer = dealerships
-      .filter(d => map[d.id])
-      .map(d => {
-        const avg = Math.round((map[d.id].sum / map[d.id].count) * 10) / 10;
-        return {
-          name: d.name,
-          avg,
-          count: map[d.id].count,
-          pct: Math.round(avg / 5 * 100),
-        };
-      })
-      .sort((a, b) => b.avg - a.avg);
-    return { byDealer, avgAll: Math.round(avgAll * 10) / 10, ratedAll };
-  }, [reservations, dealerships]);
+  // Acá iba "Satisfacción del Cliente por Concesionario", promediando
+  // `reservations.satisfaction_rating`: una nota del 1 al 5 que ponía el propio taller sobre
+  // el cliente al cerrar la cita. No era satisfacción medida, era autoevaluación — de ahí los
+  // 5/5 al 100%. La reemplaza la encuesta real, que responde el cliente por WhatsApp.
+  //
+  // La columna y sus 36 calificaciones históricas siguen en la base; lo que se sacó es el
+  // campo que las producía y el reporte que las promediaba.
 
-  // ─── 4. Prospectos por concesionario ───
+  // ─── 3. Prospectos por concesionario ───
   const prospectsByDealership = useMemo(() => {
     const map: Record<string, { total: number; ganados: number }> = {};
     prospects.forEach(p => {
@@ -428,44 +404,6 @@ const AdminDashboard = () => {
                 <Bar dataKey="value" name="Citas" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          )}
-        </ChartCard>
-      ),
-    },
-
-    satisfaccion_concesionario: {
-      span: 'full',
-      node: (
-        <ChartCard
-          chartKey="satisfaccion_concesionario" title="Satisfacción del Cliente por Concesionario"
-          icon={Star} iconClass="text-amber-500" layout={layout} allKeys={DASHBOARD_CHART_KEYS}
-          series={satisfactionByDealership.byDealer.map(d => ({ name: d.name, value: d.avg }))}
-          showPercent={false} unit="/5" color="hsl(45, 90%, 45%)"
-          emptyText="Sin calificaciones registradas"
-        >
-          {satisfactionByDealership.byDealer.length === 0 ? (
-            <div className="text-center py-8 space-y-1">
-              <p className="text-xs text-muted-foreground">Sin calificaciones registradas</p>
-              <p className="text-[10px] text-muted-foreground/70">Las calificaciones se registran al completar una reserva (campo satisfacción 1–5)</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {satisfactionByDealership.byDealer.map(d => (
-                <div key={d.name} className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="truncate font-medium">{d.name}</span>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-muted-foreground text-[10px]">{d.count} resp.</span>
-                      <span className={cn("font-bold", d.avg >= 4 ? "text-green-600" : d.avg >= 3 ? "text-amber-600" : "text-red-500")}>{d.avg}/5</span>
-                      <span className="text-muted-foreground">{d.pct}%</span>
-                    </div>
-                  </div>
-                  <div className="h-2 bg-muted rounded-full overflow-hidden">
-                    <div className={cn("h-full rounded-full transition-all", d.avg >= 4 ? "bg-green-500" : d.avg >= 3 ? "bg-amber-400" : "bg-red-400")} style={{ width: `${d.pct}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
           )}
         </ChartCard>
       ),
@@ -807,7 +745,7 @@ const AdminDashboard = () => {
 
       {/* KPI Cards — cada uno detrás de su permiso: un asesor de servicio no ve indicadores
           de ventas. Ver DASHBOARD_CHART_PERMISSIONS para los reportes de abajo. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         {canSeeReservations && (
           <KpiCard icon={CalendarDays} label="Citas Reservadas" value={totalReservations} color="text-primary" sub={`${reservasCompletadas} completadas · ${reservasAbiertas} abiertas · ${reservasCanceladas} canceladas`} />
         )}
@@ -816,9 +754,6 @@ const AdminDashboard = () => {
         )}
         {canSeeProspects && (
           <KpiCard icon={Target} label="Tasa Conversión" value={`${conversionRate}%`} color="text-green-600" sub={`${ganados} ganados de ${totalProspects}`} />
-        )}
-        {canSeeReservations && (
-          <KpiCard icon={Star} label="Satisfacción Gral." value={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.avgAll}/5` : 'N/A'} color="text-amber-500" sub={satisfactionByDealership.ratedAll > 0 ? `${satisfactionByDealership.ratedAll} respuestas` : 'Sin calificaciones'} />
         )}
       </div>
 

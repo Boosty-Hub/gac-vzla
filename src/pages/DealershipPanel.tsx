@@ -169,7 +169,6 @@ const DealershipPanel = () => {
   const [completeOpen, setCompleteOpen] = useState(false);
   const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
   const [serviceNotes, setServiceNotes] = useState('');
-  const [satisfactionRating, setSatisfactionRating] = useState<number | null>(null);
   const [completing, setCompleting] = useState(false);
   const [reportFile, setReportFile] = useState<File | null>(null);
   const reportInputRef = useRef<HTMLInputElement>(null);
@@ -536,7 +535,6 @@ const DealershipPanel = () => {
   const openCompleteDialog = (r: Reservation) => {
     setCompletingRes(r);
     setServiceNotes(r.service_notes || '');
-    setSatisfactionRating((r as any).satisfaction_rating || null);
     setReportFile(null);
     setCompleteOpen(true);
   };
@@ -594,7 +592,6 @@ const DealershipPanel = () => {
       service_notes: serviceNotes.trim(),
       completed_at: new Date().toISOString(),
       technical_report_url: reportUrl,
-      satisfaction_rating: satisfactionRating,
     }).eq('id', completingRes.id).select('id');
     if (error) { toast.error('Error al completar'); console.error(error); }
     else if (!updated || updated.length === 0) {
@@ -1396,23 +1393,6 @@ const DealershipPanel = () => {
                     <p className="text-[10px] text-muted-foreground">Arrastra y suelta o haz clic · Máx. 40 MB</p>
                   </div>
                 )}
-              </div>
-              <div className="space-y-2">
-                <Label>Satisfacción del Cliente (1–5)</Label>
-                <div className="flex items-center gap-2">
-                  {[1, 2, 3, 4, 5].map(star => (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setSatisfactionRating(satisfactionRating === star ? null : star)}
-                      className={cn(
-                        'text-2xl transition-transform hover:scale-110',
-                        satisfactionRating !== null && star <= satisfactionRating ? 'text-amber-400' : 'text-muted-foreground/30'
-                      )}
-                    >★</button>
-                  ))}
-                  {satisfactionRating && <span className="text-xs text-muted-foreground ml-1">{satisfactionRating}/5</span>}
-                </div>
               </div>
             </div>
           )}

@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, Star, X, Clock, UserPlus } from 'lucide-react';
+import { Search, CalendarDays, LayoutGrid, List, ChevronLeft, ChevronRight, Plus, Pencil, AlertCircle, MessageCircle, ClipboardCheck, Settings, Trash2, Car, User, FileText, MapPin, Gauge, StickyNote, X, Clock, UserPlus } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { WarrantyChip } from '@/components/WarrantyChip';
 import ExternalClientBadge from '@/components/ExternalClientBadge';
@@ -87,7 +87,6 @@ interface Reservation {
   internal_notes: string | null;
   service_notes: string | null;
   technical_report_url: string | null;
-  satisfaction_rating: number | null;
   /** Client-visible follow-up recommendation, filled when the service is completed. Not in generated Supabase types yet. */
   recommendation: string | null;
   // Legacy walk-in fields: some older dealership reservations stored client/vehicle
@@ -187,7 +186,6 @@ const AdminReservas = () => {
   const [completingRes, setCompletingRes] = useState<Reservation | null>(null);
   const [serviceNotes, setServiceNotes] = useState('');
   const [technicalReportUrl, setTechnicalReportUrl] = useState<string | null>(null);
-  const [satisfactionRating, setSatisfactionRating] = useState<number | null>(null);
   const [completeInternalNotes, setCompleteInternalNotes] = useState('');
   /** Valores que tenía la cita al abrir "Completar servicio". Ver handleComplete. */
   const [completeSnapshot, setCompleteSnapshot] = useState({ internal_notes: '', recommendation: '' });
@@ -875,7 +873,6 @@ const AdminReservas = () => {
     setCompletingRes(r);
     setServiceNotes(r.service_notes || '');
     setTechnicalReportUrl(r.technical_report_url || null);
-    setSatisfactionRating(r.satisfaction_rating || null);
     setCompleteInternalNotes(r.internal_notes || '');
     setCompleteRecommendation(r.recommendation || '');
     // Snapshot de lo que había al abrir. Ver handleComplete: sirve para no reescribir campos
@@ -907,7 +904,6 @@ const AdminReservas = () => {
       status: 'completada',
       service_notes: serviceNotes.trim(),
       technical_report_url: technicalReportUrl || null,
-      satisfaction_rating: satisfactionRating,
       completed_at: new Date().toISOString(),
     };
     if (completeInternalNotes.trim() !== completeSnapshot.internal_notes.trim()) {
@@ -1921,23 +1917,10 @@ const AdminReservas = () => {
                   onChange={setTechnicalReportUrl}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Satisfacción del Cliente (1–5)</Label>
-                <div className="flex items-center gap-2">
-                  {[1, 2, 3, 4, 5].map(star => (
-                    <button
-                      key={star}
-                      type="button"
-                      onClick={() => setSatisfactionRating(satisfactionRating === star ? null : star)}
-                      className={cn(
-                        'text-2xl transition-transform hover:scale-110',
-                        satisfactionRating !== null && star <= satisfactionRating ? 'text-amber-400' : 'text-muted-foreground/30'
-                      )}
-                    >★</button>
-                  ))}
-                  {satisfactionRating && <span className="text-xs text-muted-foreground ml-1">{satisfactionRating}/5</span>}
-                </div>
-              </div>
+              {/* Acá iba "Satisfacción del Cliente (1–5)": una calificación que ponía el propio
+                  taller sobre el cliente. La reemplaza la encuesta real, que la responde el
+                  cliente por WhatsApp y se ve en el historial del vehículo. Se sacó el campo,
+                  no la columna: las 36 calificaciones viejas siguen en la base. */}
               <div className="space-y-2">
                 <Label>Recomendación (opcional)</Label>
                 <Textarea
@@ -2114,18 +2097,6 @@ const AdminReservas = () => {
                   </div>
                 </div>
 
-                {/* Satisfaction */}
-                {detailRes.satisfaction_rating && (
-                  <div className="space-y-0.5">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Satisfacción</p>
-                    <div className="flex items-center gap-0.5">
-                      {[1,2,3,4,5].map(i => (
-                        <Star key={i} className={cn('w-3.5 h-3.5', i <= (detailRes.satisfaction_rating ?? 0) ? 'text-yellow-400 fill-yellow-400' : 'text-muted-foreground')} />
-                      ))}
-                      <span className="text-xs text-muted-foreground ml-1">{detailRes.satisfaction_rating}/5</span>
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Los cuatro bloques de texto van de a dos por fila. Apilados a ancho completo
