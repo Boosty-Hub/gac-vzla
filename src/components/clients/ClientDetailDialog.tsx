@@ -540,7 +540,7 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                       : resendBlocked
                         ? postventaEnabled
                           ? 'La última encuesta de este cliente es de servicio y la postventa todavía no tiene su campo propio en Kommo. Reenviarla mandaría el mensaje de compra.'
-                          : 'La última encuesta de este cliente es de servicio y la encuesta de postservicio está desactivada en Configuración → Automatizaciones.'
+                          : 'La última encuesta de este cliente es de servicio y la encuesta de postventa / servicio está desactivada en Configuración → Automatizaciones.'
                         : undefined
                   }
                 >

@@ -47,8 +47,20 @@ interface DeliveryConfig {
   service_ready: boolean;
 }
 
+/**
+ * `supabase.rpc` es un MÉTODO de clase y usa `this` adentro. Guardarlo suelto en una
+ * constante — `const rpc = supabase.rpc` — lo desprende del cliente, y al llamarlo revienta
+ * con `TypeError: Cannot read properties of undefined (reading 'rest')` ANTES de salir a la
+ * red. Como el throw ocurría dentro de un `async` sin `catch`, la promesa quedaba rechazada,
+ * el `setLoading(false)` del final nunca corría y la tarjeta se quedaba en "Cargando..."
+ * para siempre. El `as any` de la versión anterior era justamente lo que tapaba el error.
+ *
+ * Se envuelve en una función que llama sobre `supabase`, así el `this` viaja siempre.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const rpc = supabase.rpc as any;
+const rpc = (fn: string, params?: Record<string, unknown>): Promise<any> =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (supabase.rpc as any)(fn, params);
 
 const PostventaSurveyConfigCard = () => {
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
@@ -57,62 +69,69 @@ const PostventaSurveyConfigCard = () => {
   const [toggling, setToggling] = useState(false);
   const [fieldId, setFieldId] = useState('');
 
+  // `finally`, no un `setLoading(false)` al final del camino feliz: si la llamada falla de
+  // una forma no prevista, la tarjeta tiene que mostrar el error, no quedarse girando.
   const load = async () => {
     setLoading(true);
-    const { data, error } = await rpc('get_survey_delivery_config');
-    if (error) {
-      console.error(error);
+    try {
+      const { data, error } = await rpc('get_survey_delivery_config');
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : data) as DeliveryConfig | undefined;
+      if (row) {
+        setConfig(row);
+        setFieldId(row.survey_link_field_id_service ?? '');
+      }
+    } catch (e) {
+      console.error(e);
       toast.error('No se pudo cargar la configuración de encuestas');
+    } finally {
       setLoading(false);
-      return;
     }
-    const row = (Array.isArray(data) ? data[0] : data) as DeliveryConfig | undefined;
-    if (row) {
-      setConfig(row);
-      setFieldId(row.survey_link_field_id_service ?? '');
-    }
-    setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
   const handleToggle = async (next: boolean) => {
     setToggling(true);
-    const { error } = await rpc('set_service_survey_enabled', { p_enabled: next });
-    setToggling(false);
-    if (error) {
-      console.error(error);
-      const msg = String(error.message || '');
+    try {
+      const { error } = await rpc('set_service_survey_enabled', { p_enabled: next });
+      if (error) throw error;
+      toast.success(
+        next
+          ? 'Encuesta de postventa / servicio activada'
+          : 'Encuesta de postventa / servicio desactivada — no se crea ni se envía ninguna',
+      );
+      load();
+    } catch (e) {
+      console.error(e);
+      const msg = String((e as { message?: string })?.message || '');
       if (msg.includes('not_authorized')) toast.error('No tenés permiso para cambiar esta configuración');
       else toast.error('No se pudo cambiar el estado de la encuesta');
-      return;
+    } finally {
+      setToggling(false);
     }
-    toast.success(
-      next
-        ? 'Encuesta de postservicio activada'
-        : 'Encuesta de postservicio desactivada — no se crea ni se envía ninguna',
-    );
-    load();
   };
 
   const handleSave = async () => {
     setSaving(true);
-    const { error } = await rpc('set_postventa_survey_config', {
-      // Postventa ya no usa etapa: su disparador es la escritura del campo.
-      p_stage_id: null,
-      p_link_field_id: fieldId.trim() || null,
-    });
-    setSaving(false);
-    if (error) {
-      console.error(error);
-      const msg = String(error.message || '');
+    try {
+      const { error } = await rpc('set_postventa_survey_config', {
+        // Postventa / servicio ya no usa etapa: su disparador es la escritura del campo.
+        p_stage_id: null,
+        p_link_field_id: fieldId.trim() || null,
+      });
+      if (error) throw error;
+      toast.success('Configuración de postventa / servicio guardada');
+      load();
+    } catch (e) {
+      console.error(e);
+      const msg = String((e as { message?: string })?.message || '');
       if (msg.includes('field_id_invalido')) toast.error('El ID del campo debe ser numérico');
       else if (msg.includes('not_authorized')) toast.error('No tenés permiso para cambiar esta configuración');
       else toast.error('No se pudo guardar');
-      return;
+    } finally {
+      setSaving(false);
     }
-    toast.success('Configuración de postventa guardada');
-    load();
   };
 
   const enabled = config?.service_enabled ?? true;
@@ -123,8 +142,12 @@ const PostventaSurveyConfigCard = () => {
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Star className="w-4 h-4" />
-          Encuesta de Postventa
+          Encuesta de Postventa / Servicio
         </CardTitle>
+        <p className="text-xs text-muted-foreground pt-1">
+          Es la del taller, la que se manda al completar una cita. No es la de entrega de
+          vehículo, que sale cuando se gana una venta y se configura sola más abajo.
+        </p>
       </CardHeader>
       <CardContent className="space-y-4">
         {loading ? (
@@ -137,7 +160,7 @@ const PostventaSurveyConfigCard = () => {
             <div className="flex items-start justify-between gap-4 rounded-md border p-3">
               <div className="space-y-0.5">
                 <Label htmlFor="pv-enabled" className="text-sm">
-                  Enviar encuesta de postservicio
+                  Enviar encuesta de postventa / servicio
                 </Label>
                 <p className="text-xs text-muted-foreground">
                   Apagado no se crea ni se envía ninguna encuesta de taller. La encuesta de
@@ -175,7 +198,7 @@ const PostventaSurveyConfigCard = () => {
 
             {!enabled && (
               <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-1">
-                <p className="font-semibold">La encuesta de taller está apagada.</p>
+                <p className="font-semibold">La encuesta de postventa / servicio está apagada.</p>
                 <p className="text-muted-foreground">
                   No se está creando ni enviando ninguna. El ID del campo de Kommo queda
                   guardado acá abajo, así que volver a prenderla es sólo mover el interruptor.
@@ -221,7 +244,7 @@ const PostventaSurveyConfigCard = () => {
 
             <div className="space-y-3">
               <div className="space-y-1.5 max-w-xs">
-                <Label htmlFor="pv-field">ID del campo del enlace de postventa</Label>
+                <Label htmlFor="pv-field">ID del campo del enlace de postventa / servicio</Label>
                 <Input
                   id="pv-field"
                   value={fieldId}

@@ -138,7 +138,7 @@ const AdminServicios = () => {
 
       {!surveyEnabled && (
         <div className="rounded-md border bg-muted/40 p-3 text-xs">
-          <p className="font-semibold">La encuesta de postservicio está desactivada.</p>
+          <p className="font-semibold">La encuesta de postventa / servicio está desactivada.</p>
           <p className="text-muted-foreground">
             La columna "Encuesta postventa" de acá abajo sigue siendo la preferencia de cada
             servicio, pero mientras el interruptor general esté apagado no se envía ninguna. Se
@@ -165,7 +165,7 @@ const AdminServicios = () => {
                 <TableHead>Nombre</TableHead>
                 <TableHead>Duración</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead>Encuesta postventa</TableHead>
+                <TableHead>Encuesta postventa / servicio</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>

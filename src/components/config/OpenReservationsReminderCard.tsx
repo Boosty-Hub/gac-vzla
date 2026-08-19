@@ -25,8 +25,20 @@ interface ReminderSettings {
   open_reservations_hour: number;
 }
 
+/**
+ * `supabase.rpc` es un MÉTODO de clase y usa `this` adentro. Guardarlo suelto en una
+ * constante — `const rpc = supabase.rpc` — lo desprende del cliente, y al llamarlo revienta
+ * con `TypeError: Cannot read properties of undefined (reading 'rest')` ANTES de salir a la
+ * red. Como el throw ocurría dentro de un `async` sin `catch`, la promesa quedaba rechazada,
+ * el `setLoading(false)` del final nunca corría y la tarjeta se quedaba en "Cargando..."
+ * para siempre. El `as any` de la versión anterior era justamente lo que tapaba el error.
+ *
+ * Se envuelve en una función que llama sobre `supabase`, así el `this` viaja siempre.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const rpc = supabase.rpc as any;
+const rpc = (fn: string, params?: Record<string, unknown>): Promise<any> =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (supabase.rpc as any)(fn, params);
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
@@ -43,40 +55,45 @@ const OpenReservationsReminderCard = () => {
   const [hour, setHour] = useState(16);
   const [saved, setSaved] = useState<ReminderSettings | null>(null);
 
+  // `finally`, no un `setLoading(false)` al final del camino feliz: si la llamada falla de
+  // una forma no prevista, la tarjeta tiene que mostrar el error, no quedarse girando.
   const load = async () => {
     setLoading(true);
-    const { data, error } = await rpc('get_reminder_settings');
-    if (error) {
-      console.error(error);
+    try {
+      const { data, error } = await rpc('get_reminder_settings');
+      if (error) throw error;
+      const row = (Array.isArray(data) ? data[0] : data) as ReminderSettings | undefined;
+      if (row) {
+        setSaved(row);
+        setEnabled(row.open_reservations_enabled);
+        setHour(row.open_reservations_hour);
+      }
+    } catch (e) {
+      console.error(e);
       toast.error('No se pudo cargar la configuración del recordatorio');
+    } finally {
       setLoading(false);
-      return;
     }
-    const row = (Array.isArray(data) ? data[0] : data) as ReminderSettings | undefined;
-    if (row) {
-      setSaved(row);
-      setEnabled(row.open_reservations_enabled);
-      setHour(row.open_reservations_hour);
-    }
-    setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
 
   const handleSave = async () => {
     setSaving(true);
-    const { error } = await rpc('set_open_reservations_reminder', { p_enabled: enabled, p_hour: hour });
-    setSaving(false);
-    if (error) {
-      console.error(error);
-      const msg = String(error.message || '');
+    try {
+      const { error } = await rpc('set_open_reservations_reminder', { p_enabled: enabled, p_hour: hour });
+      if (error) throw error;
+      toast.success('Recordatorio actualizado');
+      load();
+    } catch (e) {
+      console.error(e);
+      const msg = String((e as { message?: string })?.message || '');
       if (msg.includes('not_authorized')) toast.error('No tenés permiso para cambiar esta configuración');
       else if (msg.includes('hora_invalida')) toast.error('La hora debe estar entre 0 y 23');
       else toast.error('No se pudo guardar');
-      return;
+    } finally {
+      setSaving(false);
     }
-    toast.success('Recordatorio actualizado');
-    load();
   };
 
   const dirty = !saved || saved.open_reservations_enabled !== enabled || saved.open_reservations_hour !== hour;
