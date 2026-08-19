@@ -33,6 +33,10 @@ const AdminServicios = () => {
   const [formDuration, setFormDuration] = useState('60');
   const [formIsActive, setFormIsActive] = useState(true);
   const [formSendsSurvey, setFormSendsSurvey] = useState(true);
+  // La columna "Encuesta postventa" es por tipo de servicio, pero hay un interruptor general
+  // arriba de ella en Configuración → Automatizaciones. Con ese apagado, un "Sí" en esta
+  // tabla no envía nada. Se consulta para avisarlo y no dejar la pantalla mintiendo.
+  const [surveyEnabled, setSurveyEnabled] = useState(true);
 
   const fetchServices = async () => {
     setLoading(true);
@@ -50,7 +54,15 @@ const AdminServicios = () => {
     setLoading(false);
   };
 
-  useEffect(() => { fetchServices(); }, []);
+  useEffect(() => {
+    fetchServices();
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase.rpc as any)('get_survey_delivery_config');
+      const row = (Array.isArray(data) ? data[0] : data) as { service_enabled?: boolean } | undefined;
+      setSurveyEnabled(row?.service_enabled ?? true);
+    })();
+  }, []);
 
   const openCreate = () => {
     setEditing(null);
@@ -123,6 +135,17 @@ const AdminServicios = () => {
           <Plus className="w-3.5 h-3.5 mr-1" /> Nuevo
         </Button>
       </div>
+
+      {!surveyEnabled && (
+        <div className="rounded-md border bg-muted/40 p-3 text-xs">
+          <p className="font-semibold">La encuesta de postservicio está desactivada.</p>
+          <p className="text-muted-foreground">
+            La columna "Encuesta postventa" de acá abajo sigue siendo la preferencia de cada
+            servicio, pero mientras el interruptor general esté apagado no se envía ninguna. Se
+            prende en Configuración → Automatizaciones.
+          </p>
+        </div>
+      )}
 
       <Card className="gac-shadow">
         {loading ? (

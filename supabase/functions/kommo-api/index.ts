@@ -2196,6 +2196,22 @@ Deno.serve(async (req) => {
 
         // El camino se elige recién ahora, cuando ya sabemos el origen de esta encuesta.
         const isServiceSurvey = survey.origin === 'service'
+
+        // Interruptor propio de la encuesta de POSTSERVICIO (2026-08-19). Es el tercer punto
+        // de corte, y el único que cubre el reenvío manual desde la ficha del cliente: el
+        // trigger y el barrido no intervienen en ese camino.
+        //
+        // Ausente = prendida, para no cambiarle el significado a una config vieja.
+        //
+        // La pausa del 2026-08-04 falló justamente por depender de un solo punto: el flag
+        // global estaba apagado, se prendió para las encuestas de venta, y la de servicio se
+        // coló. Por eso este chequeo existe además de los dos de la base.
+        const serviceSurveyEnabled = config.service_survey_enabled !== false
+        if (isServiceSurvey && !serviceSurveyEnabled) {
+          await logDelivery('info', { skipped: 'service_survey_disabled', survey_id: survey.id })
+          return jsonResponse({ delivered: false, skipped: 'service_survey_disabled' })
+        }
+
         const useServiceRouting = isServiceSurvey && hasServiceRouting
 
         // Una encuesta de postventa sin campo propio configurado NO se entrega por el camino

@@ -129,9 +129,14 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   const [vehicles, setVehicles] = useState<DialogVehicle[]>([]);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [resending, setResending] = useState(false);
-  // Postventa sólo tiene ruteo propio cuando su etapa está cargada. Sin eso, reenviar una
-  // encuesta de servicio la manda por la etapa de ventas y despierta al bot equivocado.
+  // Postventa sólo tiene ruteo propio cuando su campo está cargado. Sin eso, reenviar una
+  // encuesta de servicio la manda por el camino de ventas y despierta al bot equivocado.
   const [postventaReady, setPostventaReady] = useState(true);
+  // Y además puede estar apagada a propósito desde Configuración → Automatizaciones. Se
+  // guarda aparte de `postventaReady` sólo para poder decir cuál de los dos motivos es: un
+  // "falta configurar" sobre algo configurado y apagado manda a buscar un problema que no
+  // existe.
+  const [postventaEnabled, setPostventaEnabled] = useState(true);
   const [repurchaseOpen, setRepurchaseOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
@@ -286,8 +291,11 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data } = await (supabase.rpc as any)('get_survey_delivery_config');
       if (cancelled) return;
-      const row = (Array.isArray(data) ? data[0] : data) as { service_ready?: boolean } | undefined;
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | { service_ready?: boolean; service_enabled?: boolean }
+        | undefined;
       setPostventaReady(row?.service_ready ?? false);
+      setPostventaEnabled(row?.service_enabled ?? true);
     })();
     return () => { cancelled = true; };
   }, [open]);
@@ -530,7 +538,9 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                     surveys.length === 0
                       ? 'Este cliente no tiene ninguna encuesta para reenviar'
                       : resendBlocked
-                        ? 'La última encuesta de este cliente es de servicio y la postventa todavía no tiene su etapa propia en Kommo. Reenviarla mandaría el mensaje de compra.'
+                        ? postventaEnabled
+                          ? 'La última encuesta de este cliente es de servicio y la postventa todavía no tiene su campo propio en Kommo. Reenviarla mandaría el mensaje de compra.'
+                          : 'La última encuesta de este cliente es de servicio y la encuesta de postservicio está desactivada en Configuración → Automatizaciones.'
                         : undefined
                   }
                 >

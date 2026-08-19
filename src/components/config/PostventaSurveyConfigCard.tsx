@@ -5,7 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Star, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Star, CheckCircle2, AlertTriangle, Loader2, PowerOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 /**
@@ -29,8 +30,11 @@ import { toast } from 'sonner';
  * de compra dispararía también al bot de taller. Fue el error del 2026-08-14: 30 clientes de
  * taller recibieron el mensaje de entrega de vehículo.
  *
- * Con el campo vacío no se despacha nada: las encuestas se siguen creando al completar el
- * servicio y quedan en cola.
+ * INTERRUPTOR (2026-08-19) — el switch de abajo apaga la encuesta de postservicio SIN tocar
+ * la de postentrega de vehículo, y sin borrar el id del campo. Apagada no se crea ni se envía
+ * nada: no queda cola escondida esperando para salir toda junta al reactivar. Es una llave
+ * propia, `service_survey_enabled`, distinta de `survey_delivery_enabled`, que es global y
+ * apagaría también las encuestas de compra.
  */
 
 interface DeliveryConfig {
@@ -39,6 +43,7 @@ interface DeliveryConfig {
   survey_link_field_id: string | null;
   survey_stage_id_service: string | null;
   survey_link_field_id_service: string | null;
+  service_enabled: boolean;
   service_ready: boolean;
 }
 
@@ -49,6 +54,7 @@ const PostventaSurveyConfigCard = () => {
   const [config, setConfig] = useState<DeliveryConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [fieldId, setFieldId] = useState('');
 
   const load = async () => {
@@ -70,6 +76,25 @@ const PostventaSurveyConfigCard = () => {
 
   useEffect(() => { load(); }, []);
 
+  const handleToggle = async (next: boolean) => {
+    setToggling(true);
+    const { error } = await rpc('set_service_survey_enabled', { p_enabled: next });
+    setToggling(false);
+    if (error) {
+      console.error(error);
+      const msg = String(error.message || '');
+      if (msg.includes('not_authorized')) toast.error('No tenés permiso para cambiar esta configuración');
+      else toast.error('No se pudo cambiar el estado de la encuesta');
+      return;
+    }
+    toast.success(
+      next
+        ? 'Encuesta de postservicio activada'
+        : 'Encuesta de postservicio desactivada — no se crea ni se envía ninguna',
+    );
+    load();
+  };
+
   const handleSave = async () => {
     setSaving(true);
     const { error } = await rpc('set_postventa_survey_config', {
@@ -90,6 +115,7 @@ const PostventaSurveyConfigCard = () => {
     load();
   };
 
+  const enabled = config?.service_enabled ?? true;
   const ready = config?.service_ready ?? false;
 
   return (
@@ -107,8 +133,31 @@ const PostventaSurveyConfigCard = () => {
           </div>
         ) : (
           <>
+            {/* El interruptor va primero: es la decisión más grande de esta tarjeta. */}
+            <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="pv-enabled" className="text-sm">
+                  Enviar encuesta de postservicio
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Apagado no se crea ni se envía ninguna encuesta de taller. La encuesta de
+                  entrega de vehículo no se ve afectada: sigue saliendo igual.
+                </p>
+              </div>
+              <Switch
+                id="pv-enabled"
+                checked={enabled}
+                disabled={toggling}
+                onCheckedChange={handleToggle}
+              />
+            </div>
+
             <div className="flex items-center gap-3 flex-wrap">
-              {ready ? (
+              {!enabled ? (
+                <Badge className="bg-slate-200 text-slate-800 border-0 gap-1">
+                  <PowerOff className="w-3.5 h-3.5" /> Desactivada
+                </Badge>
+              ) : ready ? (
                 <Badge className="bg-green-100 text-green-800 border-0 gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Enviando
                 </Badge>
@@ -118,11 +167,25 @@ const PostventaSurveyConfigCard = () => {
                 </Badge>
               )}
               <span className="text-sm text-muted-foreground">
-                Se genera al marcar una cita como Completada.
+                {enabled
+                  ? 'Se genera al marcar una cita como Completada.'
+                  : 'Marcar una cita como Completada no genera ninguna encuesta.'}
               </span>
             </div>
 
-            {!ready && (
+            {!enabled && (
+              <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-1">
+                <p className="font-semibold">La encuesta de taller está apagada.</p>
+                <p className="text-muted-foreground">
+                  No se está creando ni enviando ninguna. El ID del campo de Kommo queda
+                  guardado acá abajo, así que volver a prenderla es sólo mover el interruptor.
+                  Las citas que se completen mientras esté apagada no generan encuesta ni
+                  quedan en cola.
+                </p>
+              </div>
+            )}
+
+            {enabled && !ready && (
               <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs space-y-1">
                 <p className="font-semibold text-amber-900">
                   Las encuestas se están generando, pero no se envían.
@@ -142,7 +205,8 @@ const PostventaSurveyConfigCard = () => {
                 <code className="font-mono">{config?.survey_link_field_id || '—'}</code> del lead de
                 conversación y lo mueve a la etapa{' '}
                 <code className="font-mono">{config?.survey_stage_id || '—'}</code>. El bot arranca
-                al entrar a esa etapa, 20 horas después de la compra.
+                al entrar a esa etapa, 20 horas después de la compra. El interruptor de arriba no
+                la toca.
               </p>
               <p className="text-muted-foreground">
                 <span className="font-medium text-foreground">Servicio:</span> escribe el enlace en
