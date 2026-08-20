@@ -156,6 +156,10 @@ export default function RepurchaseDialog({ client, open, onOpenChange, models, o
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formInfo, setFormInfo] = useState<string | null>(null);
+  // La encuesta de entrega de vehículo se puede apagar desde Configuración →
+  // Automatizaciones. Apagada, la RPC no crea la encuesta, así que el botón "Registrar y
+  // enviar encuesta" prometería algo que no va a pasar. Se consulta para no ofrecerlo.
+  const [salesSurveyOn, setSalesSurveyOn] = useState(true);
 
   // Reset the form every time the dialog is (re)opened for a client.
   useEffect(() => {
@@ -164,6 +168,19 @@ export default function RepurchaseDialog({ client, open, onOpenChange, models, o
     setFormError(null);
     setFormInfo(null);
   }, [open, client?.id]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data } = await (supabase.rpc as any)('get_survey_delivery_config');
+      if (cancelled) return;
+      const row = (Array.isArray(data) ? data[0] : data) as { sales_enabled?: boolean } | undefined;
+      setSalesSurveyOn(row?.sales_enabled ?? true);
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
 
   const brands = Array.from(new Set(models.map(m => m.brand)));
   const duplicatePlates = hasDuplicatePlates(rows);
@@ -382,23 +399,44 @@ export default function RepurchaseDialog({ client, open, onOpenChange, models, o
           {formError && <p className="text-xs text-destructive">{formError}</p>}
         </div>
         <DialogFooter className="flex-col gap-2 sm:flex-col">
-          <Button
-            size="sm"
-            className="w-full gac-gradient"
-            disabled={!canSubmit}
-            onClick={() => handleSubmit(true)}
-          >
-            {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Registrar y enviar encuesta'}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="w-full"
-            disabled={!canSubmit}
-            onClick={() => handleSubmit(false)}
-          >
-            Registrar sin enviar encuesta
-          </Button>
+          {salesSurveyOn ? (
+            <>
+              <Button
+                size="sm"
+                className="w-full gac-gradient"
+                disabled={!canSubmit}
+                onClick={() => handleSubmit(true)}
+              >
+                {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Registrar y enviar encuesta'}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full"
+                disabled={!canSubmit}
+                onClick={() => handleSubmit(false)}
+              >
+                Registrar sin enviar encuesta
+              </Button>
+            </>
+          ) : (
+            // Con la encuesta apagada se ofrece un solo botón. Dejar el de "y enviar encuesta"
+            // sería mentirle al vendedor: registraría los vehículos y no saldría nada.
+            <>
+              <Button
+                size="sm"
+                className="w-full gac-gradient"
+                disabled={!canSubmit}
+                onClick={() => handleSubmit(false)}
+              >
+                {saving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Registrar vehículo(s)'}
+              </Button>
+              <p className="text-[11px] text-muted-foreground text-center">
+                La encuesta de entrega de vehículo está desactivada, así que no se enviará
+                ninguna. Se prende en Configuración → Automatizaciones.
+              </p>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

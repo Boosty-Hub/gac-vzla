@@ -67,6 +67,13 @@ export function describeSkippedDelivery(reason: string): string {
   switch (reason) {
     case 'disabled':
       return 'El envío automático de encuestas está desactivado por ahora.';
+    // Los dos interruptores por encuesta (Configuración → Automatizaciones). No son fallas:
+    // alguien las apagó a propósito, y decir "no se pudo" mandaría a buscar un problema
+    // técnico que no existe.
+    case 'service_survey_disabled':
+      return 'La encuesta de postventa / servicio está desactivada en Configuración → Automatizaciones.';
+    case 'sales_survey_disabled':
+      return 'La encuesta de entrega de vehículo está desactivada en Configuración → Automatizaciones.';
     case 'rate_limited_24h':
       return 'Este cliente ya recibió una encuesta en las últimas 24 horas; no se envió otra.';
     case 'shared_conversation_lead':

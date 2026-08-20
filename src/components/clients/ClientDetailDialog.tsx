@@ -137,6 +137,10 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   // "falta configurar" sobre algo configurado y apagado manda a buscar un problema que no
   // existe.
   const [postventaEnabled, setPostventaEnabled] = useState(true);
+  // Y la de entrega de vehículo tiene su propio interruptor desde 2026-08-20. Apagada, el
+  // reenvío de una encuesta de venta tampoco sale: kommo-api la rechaza. Se bloquea acá para
+  // no ofrecer un botón que no va a hacer nada.
+  const [salesEnabled, setSalesEnabled] = useState(true);
   const [repurchaseOpen, setRepurchaseOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
@@ -292,10 +296,11 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
       const { data } = await (supabase.rpc as any)('get_survey_delivery_config');
       if (cancelled) return;
       const row = (Array.isArray(data) ? data[0] : data) as
-        | { service_ready?: boolean; service_enabled?: boolean }
+        | { service_ready?: boolean; service_enabled?: boolean; sales_enabled?: boolean }
         | undefined;
       setPostventaReady(row?.service_ready ?? false);
       setPostventaEnabled(row?.service_enabled ?? true);
+      setSalesEnabled(row?.sales_enabled ?? true);
     })();
     return () => { cancelled = true; };
   }, [open]);
@@ -370,7 +375,11 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   // El reenvío entrega la encuesta más reciente del cliente — el mismo criterio que usa
   // kommo-api en su rama `client_id`. Si esa es de servicio, hay que saberlo ANTES de mandar.
   const latestSurveyIsService = surveys[0]?.origin === 'service';
-  const resendBlocked = latestSurveyIsService && !postventaReady;
+  const hasSurvey = surveys.length > 0;
+  const resendBlocked = latestSurveyIsService
+    ? !postventaReady
+    // La más reciente es de venta ('won' o 'repurchase'): la bloquea su propio interruptor.
+    : hasSurvey && !salesEnabled;
 
   const handleResend = async () => {
     if (!client || resendBlocked) return;
@@ -538,9 +547,11 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                     surveys.length === 0
                       ? 'Este cliente no tiene ninguna encuesta para reenviar'
                       : resendBlocked
-                        ? postventaEnabled
-                          ? 'La última encuesta de este cliente es de servicio y la postventa todavía no tiene su campo propio en Kommo. Reenviarla mandaría el mensaje de compra.'
-                          : 'La última encuesta de este cliente es de servicio y la encuesta de postventa / servicio está desactivada en Configuración → Automatizaciones.'
+                        ? !latestSurveyIsService
+                          ? 'La última encuesta de este cliente es de entrega de vehículo y esa encuesta está desactivada en Configuración → Automatizaciones.'
+                          : postventaEnabled
+                            ? 'La última encuesta de este cliente es de servicio y la postventa todavía no tiene su campo propio en Kommo. Reenviarla mandaría el mensaje de compra.'
+                            : 'La última encuesta de este cliente es de servicio y la encuesta de postventa / servicio está desactivada en Configuración → Automatizaciones.'
                         : undefined
                   }
                 >

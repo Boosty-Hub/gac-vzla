@@ -2212,6 +2212,18 @@ Deno.serve(async (req) => {
           return jsonResponse({ delivered: false, skipped: 'service_survey_disabled' })
         }
 
+        // Interruptor propio de la encuesta de ENTREGA DE VEHÍCULO (2026-08-20). Simétrico al
+        // de arriba: cada encuesta manda sobre sí misma, y `survey_delivery_enabled` sigue
+        // siendo el maestro que las apaga a las dos.
+        //
+        // Cubre el reenvío manual desde la ficha del cliente, que no pasa ni por el trigger de
+        // "ganado" ni por el barrido.
+        const salesSurveyEnabled = config.sales_survey_enabled !== false
+        if (!isServiceSurvey && !salesSurveyEnabled) {
+          await logDelivery('info', { skipped: 'sales_survey_disabled', survey_id: survey.id })
+          return jsonResponse({ delivered: false, skipped: 'sales_survey_disabled' })
+        }
+
         const useServiceRouting = isServiceSurvey && hasServiceRouting
 
         // Una encuesta de postventa sin campo propio configurado NO se entrega por el camino

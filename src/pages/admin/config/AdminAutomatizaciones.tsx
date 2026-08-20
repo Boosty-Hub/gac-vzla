@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import SalesSurveyConfigCard from '@/components/config/SalesSurveyConfigCard';
 import PostventaSurveyConfigCard from '@/components/config/PostventaSurveyConfigCard';
 import OpenReservationsReminderCard from '@/components/config/OpenReservationsReminderCard';
 import { Badge } from '@/components/ui/badge';
@@ -160,6 +161,10 @@ export default function AdminAutomatizaciones() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Venta primero y postventa después: es el orden en que las vive el cliente, y deja
+          claro de un vistazo que son dos encuestas distintas con dos interruptores. */}
+      <SalesSurveyConfigCard />
 
       <PostventaSurveyConfigCard />
 
