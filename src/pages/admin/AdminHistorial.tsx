@@ -38,6 +38,7 @@ interface ServiceEntry {
   status: string;
   notes: string | null;
   service_notes: string | null;
+  cancellation_reason: string | null;
   recommendation: string | null;
   internal_notes: string | null;
   technical_report_url: string | null;
@@ -120,6 +121,7 @@ const AdminHistorial = () => {
   const [editStatus, setEditStatus] = useState('');
   const [editMileage, setEditMileage] = useState('');
   const [editServiceNotes, setEditServiceNotes] = useState('');
+  const [editCancelReason, setEditCancelReason] = useState('');
   const [editRecommendation, setEditRecommendation] = useState('');
   const [editInternalNotes, setEditInternalNotes] = useState('');
 
@@ -160,7 +162,7 @@ const AdminHistorial = () => {
     let query = supabase
       .from('reservations')
       .select(
-        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, recommendation, internal_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual))',
+        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, cancellation_reason, recommendation, internal_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual))',
         { count: 'exact' }
       )
       // Was `.eq('status','completada')`, which made cancelled appointments unfindable:
@@ -223,6 +225,7 @@ const AdminHistorial = () => {
     setEditStatus(detail.status);
     setEditMileage(String(detail.current_mileage ?? ''));
     setEditServiceNotes(detail.service_notes || '');
+    setEditCancelReason(detail.cancellation_reason || '');
     setEditRecommendation(detail.recommendation || '');
     setEditInternalNotes(detail.internal_notes || '');
     setEditOpen(true);
@@ -235,6 +238,14 @@ const AdminHistorial = () => {
       toast.error('El kilometraje del servicio tiene que ser un número válido');
       return;
     }
+    // Mismo criterio que el dialogo de cancelar en Reservas: si queda cancelada, el motivo
+    // es obligatorio. Un motivo opcional se deja vacio casi siempre, y entonces la columna
+    // existe pero no sirve -- peor que no tenerla, porque aparenta que el dato esta.
+    if (editStatus === 'cancelada' && !editCancelReason.trim()) {
+      toast.error('Escribi el motivo de cancelacion para poder guardar');
+      return;
+    }
+
     setEditSaving(true);
 
     const payload: Record<string, unknown> = {
@@ -243,6 +254,9 @@ const AdminHistorial = () => {
       service_notes: editServiceNotes.trim() || null,
       recommendation: editRecommendation.trim() || null,
       internal_notes: editInternalNotes.trim() || null,
+      // Deja de estar cancelada -> el motivo deja de tener sentido y se borra. Conservarlo
+      // dejaria una cita completada con un motivo de cancelacion colgado.
+      cancellation_reason: editStatus === 'cancelada' ? editCancelReason.trim() : null,
     };
 
     // Pasar a completada sin fecha de cierre deja un registro que dice "completado" y no
@@ -642,6 +656,22 @@ const AdminHistorial = () => {
                   </>
                 )}
 
+                {/* Una cita cancelada sin motivo a la vista obliga a abrir Editar para saber
+                    qué pasó. Es el dato que alguien viene a buscar acá. */}
+                {e.status === 'cancelada' && (
+                  <>
+                    <Separator />
+                    <div className="bg-red-50 border border-red-200 rounded-md p-3 text-xs">
+                      <p className="font-semibold text-red-800 mb-1 flex items-center gap-1">
+                        <X className="w-3 h-3" /> Motivo de cancelación
+                      </p>
+                      <p className="text-red-700 whitespace-pre-wrap">
+                        {e.cancellation_reason || 'Sin motivo registrado (cancelada antes del 24/08/2026).'}
+                      </p>
+                    </div>
+                  </>
+                )}
+
                 {e.service_notes && (
                   <>
                     <Separator />
@@ -763,6 +793,18 @@ const AdminHistorial = () => {
                   </p>
                 )}
               </div>
+
+              {editStatus === 'cancelada' && (
+                <div className="space-y-2">
+                  <Label className="text-sm">Motivo de cancelación *</Label>
+                  <Textarea
+                    rows={3}
+                    value={editCancelReason}
+                    onChange={ev => setEditCancelReason(ev.target.value)}
+                    placeholder="Por qué se canceló la cita: el cliente reagendó, no se presentó, falta de repuesto..."
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label className="text-sm">Km del servicio</Label>

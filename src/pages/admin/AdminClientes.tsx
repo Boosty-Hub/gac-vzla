@@ -2010,7 +2010,8 @@ const AdminClientes = () => {
             <SatisfactionOverview onSelectClient={openClientFromSurvey} />
           </TabsContent>
           <TabsContent value="postservicio">
-            <ServiceSatisfactionOverview />
+            {/* Mismo handler que la tabla de ventas: la fila abre la ficha del cliente. */}
+            <ServiceSatisfactionOverview onSelectClient={openClientFromSurvey} />
           </TabsContent>
         </Tabs>
       </TabsContent>
@@ -2032,7 +2033,15 @@ const AdminClientes = () => {
           }
         }}
         models={models}
-        defaultTab={surveyTabOnOpen ? 'encuesta' : tabParam === 'encuestas' ? 'encuesta' : undefined}
+        // `tab=postservicio` abre la ficha en Encuestas con la sub-pestaña de taller ya
+        // seleccionada: es adonde apunta el listado del panel Post Servicio.
+        defaultTab={
+          tabParam === 'postservicio'
+            ? 'postservicio'
+            : surveyTabOnOpen || tabParam === 'encuestas'
+              ? 'encuesta'
+              : undefined
+        }
       />
     </Tabs>
   );

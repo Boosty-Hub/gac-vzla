@@ -33,6 +33,7 @@ import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservatio
 import { isPartsRequest, PLANT_DEALERSHIP_ID, serviceNotesLabel } from '@/lib/serviceTypes';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import ServiceSurveyDecision, { type ServiceSurveyChoice } from '@/components/reservations/ServiceSurveyDecision';
+import CancelReservationDialog from '@/components/reservations/CancelReservationDialog';
 import { sendServiceSurveyNow } from '@/components/clients/manualSurveySend';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
@@ -63,6 +64,8 @@ interface Reservation {
   walkin_client_phone: string | null;
   walkin_plate: string | null;
   service_notes: string | null;
+  /** Por que se cancelo la cita. Solo se llena al pasar a 'cancelada'. */
+  cancellation_reason: string | null;
   technical_report_url: string | null;
   completed_at: string | null;
   created_at: string;
@@ -131,6 +134,8 @@ interface HistoryRecord {
   notes: string | null;
   internal_notes: string | null;
   service_notes: string | null;
+  /** Por que se cancelo la cita. Solo se llena al pasar a 'cancelada'. */
+  cancellation_reason: string | null;
   technical_report_url: string | null;
   completed_at: string | null;
   dealerships: { name: string } | null;
@@ -232,6 +237,11 @@ const DealershipReservas = () => {
   const [surveyChoice, setSurveyChoice] = useState<ServiceSurveyChoice>(null);
   // Sólo para avisar en el diálogo que hoy está apagada; el corte real vive en la base.
   const [serviceSurveyEnabled, setServiceSurveyEnabled] = useState(true);
+  // Si este tipo de servicio lleva encuesta de postventa. Sale de `service_types`.
+  const [askSurvey, setAskSurvey] = useState(true);
+  // Cancelacion con motivo obligatorio. `cancelingRes` null = dialogo cerrado.
+  const [cancelingRes, setCancelingRes] = useState<Reservation | null>(null);
+  const [cancelSaving, setCancelSaving] = useState(false);
 
   // Create dialog (initialized from localStorage to survive page refresh)
   const [createOpen, setCreateOpenRaw] = useState<boolean>(() => getDrLS().createOpen === true);
@@ -853,6 +863,31 @@ const DealershipReservas = () => {
     setSaving(false);
   };
 
+  const handleCancelConfirm = async (reason: string) => {
+    if (!cancelingRes) return;
+    setCancelSaving(true);
+    // `.select('id')` para distinguir "RLS lo rechazo en silencio" de "se guardo".
+    const { data: updated, error } = await supabase
+      .from('reservations')
+      .update({ status: 'cancelada', cancellation_reason: reason })
+      .eq('id', cancelingRes.id)
+      .select('id');
+    setCancelSaving(false);
+
+    if (error) { toast.error('No se pudo cancelar la cita'); console.error(error); return; }
+    if (!updated || updated.length === 0) {
+      toast.error('No se pudo cancelar: tu usuario no tiene permisos sobre esta cita.');
+      return;
+    }
+
+    toast.success('Cita cancelada. El motivo queda en el historial.');
+    const res = cancelingRes;
+    setCancelingRes(null);
+    fetchReservations();
+    if (res.kommo_lead_id) updateKommoReservationStage(res.id, res.kommo_lead_id, 'cancelada').catch(console.error);
+    else createKommoReservation(res.id).catch(console.error);
+  };
+
   const updateStatus = async (id: string, newStatus: string) => {
     const { error } = await supabase.from('reservations').update({ status: newStatus }).eq('id', id);
     if (error) { toast.error('Error al actualizar estado'); console.error(error); }
@@ -1014,13 +1049,31 @@ const DealershipReservas = () => {
       const row = (Array.isArray(data) ? data[0] : data) as { service_enabled?: boolean } | undefined;
       setServiceSurveyEnabled(row?.service_enabled ?? true);
     }).catch(() => setServiceSurveyEnabled(true));
+    // Hay tipos de servicio que no llevan encuesta: "Falla o Desperfecto" y "Solicitud de
+    // Repuestos". Preguntar ahi obliga a decidir algo que la base va a ignorar igual.
+    //
+    // Se lee `service_types.sends_postventa_survey` y NO una lista de nombres en el codigo:
+    // esa columna ya se administra desde Configuracion -> Servicios y es la MISMA que corta
+    // del lado de la base. Con una lista aparte, apagarle la encuesta a un servicio desde el
+    // panel seguiria mostrando la pregunta.
+    setAskSurvey(true);
+    supabase
+      .from('service_types')
+      .select('sends_postventa_survey')
+      .eq('name', r.service_type)
+      .maybeSingle()
+      .then(({ data }) => {
+        // Tipo desconocido -> se pregunta. Es el mismo default que usa el trigger.
+        setAskSurvey((data as { sends_postventa_survey?: boolean } | null)?.sends_postventa_survey ?? true);
+      });
     setCompleteOpen(true);
   };
 
   const handleComplete = async () => {
     if (!completingRes) return;
     if (!serviceNotes.trim()) { toast.error('Describe lo que se realizó en el servicio'); return; }
-    if (surveyChoice === null) {
+    // Solo es obligatorio decidir cuando este servicio efectivamente lleva encuesta.
+    if (askSurvey && surveyChoice === null) {
       toast.error('Elegí si se le envía o no la encuesta de satisfacción postservicio al cliente');
       return;
     }
@@ -1328,6 +1381,9 @@ const DealershipReservas = () => {
                             value={r.status}
                             onValueChange={val => {
                               if (!isInc && val === 'completada') { openComplete(r); }
+                              // Cancelar exige motivo desde 2026-08-24, y el motivo no cabe
+                              // en un selector: va por dialogo.
+                              else if (val === 'cancelada') { setCancelingRes(r); }
                               else { updateStatus(r.id, val); }
                             }}
                           >
@@ -1441,6 +1497,15 @@ const DealershipReservas = () => {
                       <p className="text-muted-foreground min-w-0 break-words whitespace-pre-wrap">{detailRes.internal_notes}</p>
                     </div>
                   )}
+                  {detailRes.status === 'cancelada' && (
+                    <div className="bg-red-50 border border-red-200 rounded-md p-2.5 text-xs">
+                      <p className="font-semibold text-red-800 mb-1">Motivo de cancelación</p>
+                      <p className="text-red-700 min-w-0 break-words whitespace-pre-wrap">
+                        {detailRes.cancellation_reason || 'Sin motivo registrado (cancelada antes del 24/08/2026).'}
+                      </p>
+                    </div>
+                  )}
+
                   {detailRes.status === 'completada' && detailRes.service_notes && (
                     <div className="bg-green-50 border border-green-200 rounded-md p-2.5 text-xs">
                       <p className="font-semibold text-green-800 mb-1 flex items-center gap-1"><ClipboardCheck className="w-3.5 h-3.5" /> Trabajo realizado</p>
@@ -1588,6 +1653,24 @@ const DealershipReservas = () => {
       </AlertDialog>
 
       {/* COMPLETE SERVICE DIALOG */}
+      {/* CANCEL DIALOG — `key` fuerza un montaje nuevo por cita, asi el textarea nunca
+          arrastra el motivo de la cancelacion anterior. */}
+      {cancelingRes && (
+        <CancelReservationDialog
+          key={cancelingRes.id}
+          open
+          onOpenChange={o => { if (!o) setCancelingRes(null); }}
+          saving={cancelSaving}
+          initialReason={cancelingRes.cancellation_reason ?? ''}
+          summary={
+            `Cliente: ${cancelingRes.clients?.full_name || cancelingRes.walkin_client_name || '-'}` + String.fromCharCode(10) +
+            `Placa: ${cancelingRes.vehicles?.plate || cancelingRes.walkin_plate || '-'}` + String.fromCharCode(10) +
+            `Servicio: ${cancelingRes.service_type}`
+          }
+          onConfirm={handleCancelConfirm}
+        />
+      )}
+
       <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><ClipboardCheck className="w-4 h-4" /> Completar Servicio</DialogTitle></DialogHeader>
@@ -1604,11 +1687,13 @@ const DealershipReservas = () => {
               <div className="space-y-2"><Label>Recomendación (opcional)</Label><Textarea value={completeRecommendation} onChange={e => setCompleteRecommendation(e.target.value)} rows={3} placeholder="Recomendaciones de seguimiento visibles para el cliente..." /></div>
               <div className="space-y-2"><Label>Notas internas (solo equipo GAC)</Label><Textarea value={completeInternalNotes} onChange={e => setCompleteInternalNotes(e.target.value)} rows={3} placeholder="Observaciones internas, no visibles para el cliente..." /></div>
 
-              <ServiceSurveyDecision
-                value={surveyChoice}
-                onChange={setSurveyChoice}
-                disabledNotice={surveyChoice === 'si' && !serviceSurveyEnabled}
-              />
+              {askSurvey && (
+                <ServiceSurveyDecision
+                  value={surveyChoice}
+                  onChange={setSurveyChoice}
+                  disabledNotice={surveyChoice === 'si' && !serviceSurveyEnabled}
+                />
+              )}
             </div>
           )}
           <DialogFooter>

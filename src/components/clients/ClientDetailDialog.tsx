@@ -9,7 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus, User } from 'lucide-react';
+import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus, User, Wrench } from 'lucide-react';
 import { phoneMatchSuffix } from '@/lib/phone';
 import { normalizeSoldPlate } from '@/lib/plate';
 import {
@@ -85,6 +85,8 @@ interface SurveyRow {
   // history mixes the two kinds, and `resolveResponse` picks whichever is present.
   response: SurveyResponseRow | null;
   service_response: SurveyResponseRow | null;
+  /** Sólo en las de postventa: la cita que la originó. */
+  reservations: { service_type: string | null; reservation_date: string | null } | null;
 }
 
 /** The answers for this survey, whichever table they landed in. */
@@ -102,7 +104,7 @@ interface ClientDetailDialogProps {
   models: RepurchaseVehicleModelOption[];
   /** Opens the dialog directly on a given tab (deep link from the Satisfacción
    *  dashboard: `?client=<id>&tab=encuestas`). Undefined = default "Info" tab. */
-  defaultTab?: 'info' | 'vehiculos' | 'encuesta';
+  defaultTab?: 'info' | 'vehiculos' | 'encuesta' | 'postservicio';
 }
 
 // Radix Select cannot hold an empty-string value, so "no driver" needs a sentinel that can
@@ -144,6 +146,12 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   // reenvío de una encuesta de venta tampoco sale: kommo-api la rechaza. Se bloquea acá para
   // no ofrecer un botón que no va a hacer nada.
   const [salesEnabled, setSalesEnabled] = useState(true);
+  // Sub-pestaña dentro de "Encuestas". Las dos encuestas no son la misma cosa: la de venta
+  // pregunta por la compra y la de postventa por el taller. Mezcladas en una lista, la única
+  // diferencia visible era una etiqueta chica y se leían como si fueran comparables.
+  const [surveyTab, setSurveyTab] = useState<'venta' | 'postservicio'>(
+    defaultTab === 'postservicio' ? 'postservicio' : 'venta',
+  );
   const [repurchaseOpen, setRepurchaseOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
@@ -158,7 +166,10 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
     if (!open || !client) return;
 
     let cancelled = false;
-    const SURVEY_SELECT = 'id, salesperson, sold_plate, status, origin, suppressed_reason, created_at, responded_at, dealerships(name), response:satisfaction_responses(*), service_response:service_survey_responses(*)';
+    // `reservations(...)` es lo que le da identidad a una encuesta de postventa: sin el
+    // tipo de servicio y la fecha de la cita, dos encuestas de taller del mismo cliente se
+    // ven idénticas y no hay forma de saber a qué visita corresponde cada una.
+    const SURVEY_SELECT = 'id, salesperson, sold_plate, status, origin, suppressed_reason, created_at, responded_at, dealerships(name), reservations(service_type, reservation_date), response:satisfaction_responses(*), service_response:service_survey_responses(*)';
 
     // Every survey linked to this client (repurchases can add more than one over
     // time), newest first. Falls back to the legacy best-effort match cascade only
@@ -377,6 +388,10 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
 
   const canSendSurvey = hasPermission('encuestas.send');
 
+  const salesSurveys = surveys.filter(s => s.origin !== 'service');
+  const serviceSurveys = surveys.filter(s => s.origin === 'service');
+  const shownSurveys = surveyTab === 'postservicio' ? serviceSurveys : salesSurveys;
+
   // ENVÍO MANUAL (2026-08-24). Este botón es el disparador de la encuesta de ENTREGA DE
   // VEHÍCULO, y sólo de ésa. La de postventa / servicio se decide al cerrar la cita, en
   // "Completar Servicio".
@@ -458,7 +473,14 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
         </DialogHeader>
 
         {client && (
-          <Tabs key={`${client.id}-${defaultTab ?? 'info'}`} defaultValue={defaultTab ?? 'info'} className="space-y-3">
+          <Tabs
+            key={`${client.id}-${defaultTab ?? 'info'}`}
+            // 'postservicio' no es una pestaña propia: es la de encuestas con su sub-pestaña
+            // de taller abierta. Así el deep link del panel Post Servicio cae donde tiene que
+            // caer sin partir en dos la ficha del cliente.
+            defaultValue={defaultTab === 'postservicio' ? 'encuesta' : defaultTab ?? 'info'}
+            className="space-y-3"
+          >
             <TabsList>
               <TabsTrigger value="info">Info</TabsTrigger>
               <TabsTrigger value="vehiculos">Vehículos</TabsTrigger>
@@ -608,18 +630,33 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                 </Button>
               </div>
 
+              <Tabs value={surveyTab} onValueChange={v => setSurveyTab(v as 'venta' | 'postservicio')}>
+                <TabsList className="h-8">
+                  <TabsTrigger value="venta" className="text-xs">
+                    Entrega de Vehículo{salesSurveys.length > 0 ? ` (${salesSurveys.length})` : ''}
+                  </TabsTrigger>
+                  <TabsTrigger value="postservicio" className="text-xs">
+                    Post Servicio{serviceSurveys.length > 0 ? ` (${serviceSurveys.length})` : ''}
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
               {loading ? (
                 <div className="text-center py-6">
                   <div className="w-6 h-6 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-2" />
                   <p className="text-xs text-muted-foreground">Cargando encuesta...</p>
                 </div>
-              ) : surveys.length === 0 ? (
+              ) : shownSurveys.length === 0 ? (
                 <div className="text-center py-6">
                   <Smile className="w-10 h-10 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-xs text-muted-foreground">Este cliente no tiene encuestas asociadas.</p>
+                  <p className="text-xs text-muted-foreground">
+                    {surveyTab === 'postservicio'
+                      ? 'Este cliente no tiene encuestas de postventa / servicio.'
+                      : 'Este cliente no tiene encuestas de entrega de vehículo.'}
+                  </p>
                 </div>
               ) : (
-                surveys.map(survey => {
+                shownSurveys.map(survey => {
                   const response = resolveResponse(survey);
                   const surveyAspects = getAspectsForOrigin(survey.origin);
                   const overallScore = response ? Number(response.overall_score) : null;
@@ -631,7 +668,9 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                       <CardContent className="p-3 space-y-3">
                         <div className="flex items-center justify-between gap-2">
                           <Badge variant="outline" className="text-[10px]">
-                            {SURVEY_ORIGIN_LABEL[survey.origin] || survey.origin}
+                            {isServiceSurvey(survey.origin)
+                              ? 'Postventa / Servicio'
+                              : SURVEY_ORIGIN_LABEL[survey.origin] || survey.origin}
                           </Badge>
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] text-muted-foreground">
@@ -659,6 +698,22 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                             </Button>
                           </div>
                         </div>
+
+                        {/* Sin esto, dos encuestas de taller del mismo cliente se ven
+                            iguales: misma placa, misma etiqueta, y nada que diga a qué
+                            visita corresponde cada una. */}
+                        {isServiceSurvey(survey.origin) && survey.reservations && (
+                          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground bg-muted/40 rounded p-1.5">
+                            <Wrench className="w-3 h-3 shrink-0" />
+                            <span className="font-medium text-foreground">
+                              {survey.reservations.service_type || 'Servicio'}
+                            </span>
+                            {survey.reservations.reservation_date && (
+                              <span>· cita del {survey.reservations.reservation_date}</span>
+                            )}
+                            {survey.sold_plate && <span>· placa {survey.sold_plate}</span>}
+                          </div>
+                        )}
 
                         {!response ? (
                           <div className="text-center py-3">

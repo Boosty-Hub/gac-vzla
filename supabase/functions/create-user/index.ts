@@ -51,7 +51,10 @@ Deno.serve(async (req) => {
     }
 
     // Parse request body
-    const { email, password, full_name, role_id, dealership_id } = await req.json();
+    // `pin_code` y `phone` NO se leian aca. El panel los mandaba, esta funcion los
+    // descartaba en silencio y el perfil quedaba sin telefono y sin PIN: por eso habia que
+    // crear el usuario, volver a entrar y cargarlos otra vez a mano.
+    const { email, password, full_name, role_id, dealership_id, pin_code, phone } = await req.json();
     if (!email || !password) {
       return new Response(JSON.stringify({ error: 'Email and password are required' }), {
         status: 400,
@@ -73,13 +76,32 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Update profile with full_name and role_id
+    // Update profile with full_name, role_id, pin_code and phone
     if (newUser?.user) {
       const updates: Record<string, unknown> = {};
       if (full_name) updates.full_name = full_name;
       if (role_id) updates.role_id = role_id;
+      if (pin_code) updates.pin_code = pin_code;
+      if (phone) updates.phone = phone;
       if (Object.keys(updates).length > 0) {
-        await adminClient.from('profiles').update(updates).eq('id', newUser.user.id);
+        const { error: profileError } = await adminClient
+          .from('profiles').update(updates).eq('id', newUser.user.id);
+        // El usuario de auth YA existe en este punto. Borrarlo por un PIN repetido seria
+        // peor: el admin perderia la contrasena que acaba de definir. Se devuelve 200 con
+        // un aviso para que el panel diga que falta corregir, no que fallo todo.
+        if (profileError) {
+          const duplicatePin = String(profileError.code) === '23505';
+          return new Response(JSON.stringify({
+            user: newUser.user,
+            user_id: newUser.user.id,
+            warning: duplicatePin
+              ? 'El usuario se creo, pero el PIN ya lo tiene otro usuario y no se guardo. Edita el usuario y elige otro PIN.'
+              : 'El usuario se creo, pero no se pudieron guardar todos sus datos. Revisalos desde Editar.',
+          }), {
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
       }
       // If dealership_id is provided, create dealership_users link
       if (dealership_id) {
@@ -90,7 +112,10 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ user: newUser.user }), {
+    // `user_id` en la raiz: el panel lo usa para enlazar los concesionarios extra de un
+    // vendedor. Antes solo se devolvia `user`, asi que ese `data?.user_id` era undefined y
+    // los concesionarios a partir del segundo se perdian sin avisar.
+    return new Response(JSON.stringify({ user: newUser.user, user_id: newUser.user?.id ?? null }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });

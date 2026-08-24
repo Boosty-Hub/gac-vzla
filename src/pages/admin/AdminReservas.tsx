@@ -30,6 +30,7 @@ import { computeSlotOccupancy, formatMinuteLabel, type CapacityReservation } fro
 import { isPartsRequest, PLANT_DEALERSHIP_ID, serviceNotesLabel } from '@/lib/serviceTypes';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import ServiceSurveyDecision, { type ServiceSurveyChoice } from '@/components/reservations/ServiceSurveyDecision';
+import CancelReservationDialog from '@/components/reservations/CancelReservationDialog';
 import { sendServiceSurveyNow } from '@/components/clients/manualSurveySend';
 import {
   RESERVATION_STATUS_LABELS as STATUS_LABELS,
@@ -88,6 +89,8 @@ interface Reservation {
   notes: string | null;
   internal_notes: string | null;
   service_notes: string | null;
+  /** Por que se cancelo la cita. Solo se llena al pasar a 'cancelada'. */
+  cancellation_reason: string | null;
   technical_report_url: string | null;
   /** Client-visible follow-up recommendation, filled when the service is completed. Not in generated Supabase types yet. */
   recommendation: string | null;
@@ -198,6 +201,11 @@ const AdminReservas = () => {
   const [surveyChoice, setSurveyChoice] = useState<ServiceSurveyChoice>(null);
   // Sólo para avisar en el diálogo que hoy está apagada; el corte real vive en la base.
   const [serviceSurveyEnabled, setServiceSurveyEnabled] = useState(true);
+  // Si este tipo de servicio lleva encuesta de postventa. Sale de `service_types`.
+  const [askSurvey, setAskSurvey] = useState(true);
+  // Cancelacion con motivo obligatorio. `cancelingRes` null = dialogo cerrado.
+  const [cancelingRes, setCancelingRes] = useState<Reservation | null>(null);
+  const [cancelSaving, setCancelSaving] = useState(false);
 
   // Service manager dialog
   const [svcOpen, setSvcOpen] = useState(false);
@@ -876,6 +884,50 @@ const AdminReservas = () => {
     else { toast.success('Servicio eliminado'); fetchServiceTypes(); }
   };
 
+  /**
+   * Cambio de estado desde la lista. Existe para que las dos vistas (tabla y movil) no
+   * repitan el mismo UPDATE con el mismo olvido: antes cada una lo escribia por su cuenta.
+   *
+   * 'completada' abre el dialogo de cierre y 'cancelada' el de motivo. El resto pasa
+   * directo, que es como venia funcionando.
+   */
+  const changeStatus = (r: Reservation, val: string) => {
+    if (val === 'completada') { openComplete(r); return; }
+    if (val === 'cancelada') { setCancelingRes(r); return; }
+    supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => {
+      fetchReservations();
+      if (r.kommo_lead_id) updateKommoReservationStage(r.id, r.kommo_lead_id, val).catch(console.error);
+      else createKommoReservation(r.id).catch(console.error);
+    });
+  };
+
+  const handleCancelConfirm = async (reason: string) => {
+    if (!cancelingRes) return;
+    setCancelSaving(true);
+    // `.select('id')` para distinguir "RLS lo rechazo en silencio" de "se guardo": un
+    // UPDATE rechazado por politica devuelve 204 sin error y cero filas.
+    const { data: updated, error } = await supabase
+      .from('reservations')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update({ status: 'cancelada', cancellation_reason: reason } as any)
+      .eq('id', cancelingRes.id)
+      .select('id');
+    setCancelSaving(false);
+
+    if (error) { toast.error('No se pudo cancelar la cita'); console.error(error); return; }
+    if (!updated || updated.length === 0) {
+      toast.error('No se pudo cancelar: tu usuario no tiene permisos sobre este concesionario.');
+      return;
+    }
+
+    toast.success('Cita cancelada. El motivo queda en el historial.');
+    const res = cancelingRes;
+    setCancelingRes(null);
+    fetchReservations();
+    if (res.kommo_lead_id) updateKommoReservationStage(res.id, res.kommo_lead_id, 'cancelada').catch(console.error);
+    else createKommoReservation(res.id).catch(console.error);
+  };
+
   const openComplete = (r: Reservation) => {
     setCompletingRes(r);
     setServiceNotes(r.service_notes || '');
@@ -890,6 +942,23 @@ const AdminReservas = () => {
       const row = (Array.isArray(data) ? data[0] : data) as { service_enabled?: boolean } | undefined;
       setServiceSurveyEnabled(row?.service_enabled ?? true);
     }).catch(() => setServiceSurveyEnabled(true));
+    // Hay tipos de servicio que no llevan encuesta: "Falla o Desperfecto" y "Solicitud de
+    // Repuestos". Preguntar ahi obliga a decidir algo que la base va a ignorar igual.
+    //
+    // Se lee `service_types.sends_postventa_survey` y NO una lista de nombres en el codigo:
+    // esa columna ya se administra desde Configuracion -> Servicios y es la MISMA que corta
+    // del lado de la base. Con una lista aparte, apagarle la encuesta a un servicio desde el
+    // panel seguiria mostrando la pregunta.
+    setAskSurvey(true);
+    supabase
+      .from('service_types')
+      .select('sends_postventa_survey')
+      .eq('name', r.service_type)
+      .maybeSingle()
+      .then(({ data }) => {
+        // Tipo desconocido -> se pregunta. Es el mismo default que usa el trigger.
+        setAskSurvey((data as { sends_postventa_survey?: boolean } | null)?.sends_postventa_survey ?? true);
+      });
     // Snapshot de lo que había al abrir. Ver handleComplete: sirve para no reescribir campos
     // que este diálogo no tocó.
     setCompleteSnapshot({ internal_notes: r.internal_notes || '', recommendation: r.recommendation || '' });
@@ -899,7 +968,8 @@ const AdminReservas = () => {
   const handleComplete = async () => {
     if (!completingRes) return;
     if (!serviceNotes.trim()) { toast.error('Describe lo que se realizó en el servicio'); return; }
-    if (surveyChoice === null) {
+    // Solo es obligatorio decidir cuando este servicio efectivamente lleva encuesta.
+    if (askSurvey && surveyChoice === null) {
       toast.error('Elegí si se le envía o no la encuesta de satisfacción postservicio al cliente');
       return;
     }
@@ -1176,16 +1246,7 @@ const AdminReservas = () => {
                       </div>
                     </div>
                     {canEdit ? (
-                      <Select value={r.status} onValueChange={val => {
-                        if (val === 'completada') { openComplete(r); }
-                        else {
-                          supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => {
-                            fetchReservations();
-                            if (r.kommo_lead_id) updateKommoReservationStage(r.id, r.kommo_lead_id, val).catch(console.error);
-                            else createKommoReservation(r.id).catch(console.error);
-                          });
-                        }
-                      }}>
+                      <Select value={r.status} onValueChange={val => changeStatus(r, val)}>
                         <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[108px] shrink-0', STATUS_COLORS[r.status] || 'bg-muted')}>
                           <SelectValue />
                         </SelectTrigger>
@@ -1324,16 +1385,7 @@ const AdminReservas = () => {
                         {canEdit ? (
                           <Select
                             value={r.status}
-                            onValueChange={val => {
-                              if (val === 'completada') { openComplete(r); }
-                              else {
-                                supabase.from('reservations').update({ status: val }).eq('id', r.id).then(() => {
-                                  fetchReservations();
-                                  if (r.kommo_lead_id) updateKommoReservationStage(r.id, r.kommo_lead_id, val).catch(console.error);
-                            else createKommoReservation(r.id).catch(console.error);
-                                });
-                              }
-                            }}
+                            onValueChange={val => changeStatus(r, val)}
                           >
                             <SelectTrigger className={cn('h-6 text-[10px] px-1.5 py-0 border-0 font-medium w-[110px]', STATUS_COLORS[r.status] || 'bg-muted')}>
                               <SelectValue />
@@ -1914,6 +1966,25 @@ const AdminReservas = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* CANCEL DIALOG — `key` fuerza un montaje nuevo por cita, asi el textarea nunca
+          arrastra el motivo de la cancelacion anterior. */}
+      {cancelingRes && (
+        <CancelReservationDialog
+          key={cancelingRes.id}
+          open
+          onOpenChange={o => { if (!o) setCancelingRes(null); }}
+          saving={cancelSaving}
+          initialReason={cancelingRes.cancellation_reason ?? ''}
+          summary={
+            `Cliente: ${cancelingRes.clients?.full_name || cancelingRes.walkin_client_name || '-'}\n` +
+            `Placa: ${cancelingRes.vehicles?.plate || cancelingRes.walkin_plate || '-'}\n` +
+            `Servicio: ${cancelingRes.service_type}\n` +
+            `Fecha: ${formatDate(cancelingRes.reservation_date)} ${formatTime(cancelingRes.reservation_time)}`
+          }
+          onConfirm={handleCancelConfirm}
+        />
+      )}
+
       {/* COMPLETE SERVICE DIALOG */}
       <Dialog open={completeOpen} onOpenChange={setCompleteOpen}>
         <DialogContent className="max-w-md">
@@ -1971,11 +2042,13 @@ const AdminReservas = () => {
                 />
               </div>
 
-              <ServiceSurveyDecision
-                value={surveyChoice}
-                onChange={setSurveyChoice}
-                disabledNotice={surveyChoice === 'si' && !serviceSurveyEnabled}
-              />
+              {askSurvey && (
+                <ServiceSurveyDecision
+                  value={surveyChoice}
+                  onChange={setSurveyChoice}
+                  disabledNotice={surveyChoice === 'si' && !serviceSurveyEnabled}
+                />
+              )}
             </div>
           )}
           <DialogFooter>
@@ -2135,6 +2208,19 @@ const AdminReservas = () => {
                 </div>
 
               </div>
+
+              {/* Cancelada sin motivo a la vista obliga a ir al historial para saber que
+                  paso. Se muestra donde ya se esta mirando la cita. */}
+              {detailRes.status === 'cancelada' && (
+                <div className="bg-red-50 border border-red-200 rounded-md p-2.5 text-xs">
+                  <p className="font-semibold text-red-800 mb-1 flex items-center gap-1">
+                    <X className="w-3 h-3" /> Motivo de cancelación
+                  </p>
+                  <p className="text-red-700 whitespace-pre-wrap break-words">
+                    {detailRes.cancellation_reason || 'Sin motivo registrado (cancelada antes del 24/08/2026).'}
+                  </p>
+                </div>
+              )}
 
               {/* Los cuatro bloques de texto van de a dos por fila. Apilados a ancho completo
                   eran los que obligaban a scrollear para llegar al motivo del ingreso. */}

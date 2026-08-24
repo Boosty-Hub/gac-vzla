@@ -245,22 +245,26 @@ const AdminUsuarios = () => {
       } else if (data?.error) {
         toast.error(data.error);
       } else {
-        // Save pin_code after user creation if provided
-        if (pinValue && data?.user_id) {
-          await supabase
-            .from('profiles')
-            .update({ pin_code: pinValue } as any)
-            .eq('id', data.user_id);
-        }
+        // `create-user` ya guarda PIN y telefono desde 2026-08-24. Antes los descartaba en
+        // silencio y este bloque intentaba salvarlos, pero apuntaba a `data.user_id` cuando
+        // la funcion solo devolvia `data.user`: nunca corrio. Ese es el reporte de "cada vez
+        // que creo un usuario tengo que volver a entrar y poner el numero y el pin".
+        const newUserId = data?.user_id ?? data?.user?.id ?? null;
         // Insert additional dealership links for vendedor
-        if (createRoleName2 === 'vendedor' && data?.user_id && createDealershipIds.length > 1) {
-          const extras = createDealershipIds.slice(1).map(did => ({ dealership_id: did, profile_id: data.user_id }));
+        if (createRoleName2 === 'vendedor' && newUserId && createDealershipIds.length > 1) {
+          const extras = createDealershipIds.slice(1).map(did => ({ dealership_id: did, profile_id: newUserId }));
           await supabase.from('dealership_users').insert(extras);
         }
-        toast.success('Usuario creado exitosamente');
+        // El usuario se creo igual, pero algo de su perfil no se pudo guardar (tipicamente
+        // un PIN repetido). Decirlo es la diferencia entre corregirlo y no enterarse.
+        if (data?.warning) toast.warning(data.warning);
+        else toast.success('Usuario creado exitosamente');
         setCreateDialogOpen(false);
         setCreateDealershipIds([]);
         setCreatePhone('');
+        // El PIN tambien: dejarlo cargado hacia que la siguiente creacion arrastrara el PIN
+        // del usuario anterior y chocara contra `profiles_pin_code_unique`.
+        setCreatePinCode('');
         fetchUsers();
         fetchLinkedProfiles();
       }
@@ -318,7 +322,10 @@ const AdminUsuarios = () => {
       return;
     }
 
-    const { error } = await supabase
+    // `.select('id')` no es cosmetico: cuando una politica RLS rechaza la fila, PostgREST
+    // actualiza cero filas y devuelve 204 SIN error, y el panel mostraba un cartel verde
+    // sobre un cambio que nunca ocurrio.
+    const { data: updated, error } = await supabase
       .from('profiles')
       .update({
         full_name: editFullName,
@@ -327,11 +334,23 @@ const AdminUsuarios = () => {
         pin_code: pinValue || null,
         phone: editPhone.trim() || null,
       } as any)
-      .eq('id', editingUser.id);
+      .eq('id', editingUser.id)
+      .select('id');
 
     if (error) {
-      toast.error('Error al actualizar usuario');
+      // `profiles_pin_code_unique` es un indice unico parcial sobre `pin_code`. Chocarlo
+      // devuelve 23505, y hasta hoy el panel lo mostraba como "Error al actualizar
+      // usuario" a secas: el admin no tenia forma de saber que el problema era el PIN.
+      const code = String((error as { code?: string }).code || '');
+      const msg = String(error.message || '');
+      if (code === '23505' || msg.includes('profiles_pin_code_unique')) {
+        toast.error('Ese PIN ya lo tiene otro usuario. Elegi uno distinto.');
+      } else {
+        toast.error(`No se pudo actualizar el usuario: ${msg || 'error desconocido'}`);
+      }
       console.error(error);
+    } else if (!updated || updated.length === 0) {
+      toast.error('No se pudo actualizar: tu usuario no tiene permisos sobre este perfil.');
     } else {
       // Delete all existing links then re-insert
       await supabase.from('dealership_users').delete().eq('profile_id', editingUser.id);

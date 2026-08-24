@@ -1075,6 +1075,7 @@ export type Database = {
       }
       reservations: {
         Row: {
+          cancellation_reason: string | null
           client_id: string | null
           completed_at: string | null
           created_at: string | null
@@ -1105,6 +1106,7 @@ export type Database = {
           walkin_plate: string | null
         }
         Insert: {
+          cancellation_reason?: string | null
           client_id?: string | null
           completed_at?: string | null
           created_at?: string | null
@@ -1135,6 +1137,7 @@ export type Database = {
           walkin_plate?: string | null
         }
         Update: {
+          cancellation_reason?: string | null
           client_id?: string | null
           completed_at?: string | null
           created_at?: string | null
@@ -1836,6 +1839,20 @@ export type Database = {
           name: string
         }[]
       }
+      ensure_sales_survey: {
+        Args: { p_client_id: string }
+        Returns: {
+          reason: string
+          survey_id: string
+        }[]
+      }
+      ensure_service_survey: {
+        Args: { p_reservation_id: string }
+        Returns: {
+          reason: string
+          survey_id: string
+        }[]
+      }
       external_portal_client: { Args: { p_token: string }; Returns: string }
       external_portal_fleet: {
         Args: { p_token: string }
@@ -1937,6 +1954,11 @@ export type Database = {
         Args: never
         Returns: {
           delivery_enabled: boolean
+          sales_auto_send: boolean
+          sales_enabled: boolean
+          sales_ready: boolean
+          service_auto_send: boolean
+          service_enabled: boolean
           service_ready: boolean
           survey_base_url: string
           survey_link_field_id: string
@@ -2031,6 +2053,22 @@ export type Database = {
       }
       set_postventa_survey_config: {
         Args: { p_link_field_id: string; p_stage_id: string }
+        Returns: boolean
+      }
+      set_sales_survey_auto_send: {
+        Args: { p_enabled: boolean }
+        Returns: boolean
+      }
+      set_sales_survey_enabled: {
+        Args: { p_enabled: boolean }
+        Returns: boolean
+      }
+      set_service_survey_auto_send: {
+        Args: { p_enabled: boolean }
+        Returns: boolean
+      }
+      set_service_survey_enabled: {
+        Args: { p_enabled: boolean }
         Returns: boolean
       }
       staff_lookup_client_vehicles: {

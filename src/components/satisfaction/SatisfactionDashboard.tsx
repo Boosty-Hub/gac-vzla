@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SatisfactionOverview from './SatisfactionOverview';
 import SatisfactionFilters from './SatisfactionFilters';
@@ -28,6 +29,11 @@ import {
  * snapshot on each row, so no `clients` read is needed at all.
  */
 const SatisfactionDashboard = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const clientesBasePath = location.pathname.startsWith('/concesionario')
+    ? '/concesionario/clientes'
+    : '/admin/clientes';
   const [rows, setRows] = useState<SatisfactionSurveyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<SatisfactionFilterState>(DEFAULT_FILTERS);
@@ -108,7 +114,12 @@ const SatisfactionDashboard = () => {
       </TabsContent>
 
       <TabsContent value="postservicio">
-        <ServiceSatisfactionOverview />
+        {/* Mismo contrato de deep link que SatisfactionClientList: `?client=<id>&tab=...`
+            contra el portal activo, nunca contra `/admin` fijo — esta pantalla también se
+            sirve en `/concesionario`. */}
+        <ServiceSatisfactionOverview
+          onSelectClient={clientId => navigate(`${clientesBasePath}?client=${clientId}&tab=postservicio`)}
+        />
       </TabsContent>
     </Tabs>
   );

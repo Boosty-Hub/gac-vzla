@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Wrench, ClipboardList, AlertTriangle, Gauge, MessageSquare, Search } from 'lucide-react';
+import { Wrench, ClipboardList, AlertTriangle, Gauge, MessageSquare, Search, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getSatisfactionLevel } from '@/lib/satisfaction';
 import {
@@ -32,6 +32,9 @@ import {
 
 interface ServiceSurveyRow extends ServiceSurveyLike {
   id: string;
+  /** Null en encuestas viejas creadas antes de que esta tabla tuviera `client_id`. Esas
+   *  filas se listan igual pero no se pueden abrir: no hay a quien abrir. */
+  client_id: string | null;
   client_name: string | null;
   sold_plate: string | null;
   created_at: string | null;
@@ -43,7 +46,16 @@ interface ServiceSurveyRow extends ServiceSurveyLike {
 
 const ALL = '__all__';
 
-const ServiceSatisfactionOverview = () => {
+interface ServiceSatisfactionOverviewProps {
+  /**
+   * Se llama con el `client_id` de la fila cliqueada. Sin esta prop las filas quedan
+   * inertes, asi que el componente sirve igual donde no haya una ficha de cliente que
+   * abrir. Es el mismo contrato que `SatisfactionOverview`.
+   */
+  onSelectClient?: (clientId: string) => void;
+}
+
+const ServiceSatisfactionOverview = ({ onSelectClient }: ServiceSatisfactionOverviewProps) => {
   const [rows, setRows] = useState<ServiceSurveyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -59,7 +71,7 @@ const ServiceSatisfactionOverview = () => {
       const { data, error } = await (supabase as any)
         .from('satisfaction_surveys')
         .select(
-          'id, client_name, sold_plate, status, suppressed_reason, created_at, responded_at, ' +
+          'id, client_id, client_name, sold_plate, status, suppressed_reason, created_at, responded_at, ' +
           'dealership_id, dealerships(name), reservations(service_type, reservation_date), ' +
           'response:service_survey_responses(*)',
         )
@@ -283,9 +295,23 @@ const ServiceSatisfactionOverview = () => {
                       ? getSatisfactionLevel(Math.round(score))
                       : null;
                     const when = r.responded_at || r.created_at;
+                    const clickable = Boolean(onSelectClient && r.client_id);
                     return (
-                      <TableRow key={r.id}>
-                        <TableCell className="text-xs font-medium">{r.client_name || '—'}</TableCell>
+                      <TableRow
+                        key={r.id}
+                        className={clickable ? 'cursor-pointer hover:bg-muted/50' : undefined}
+                        onClick={clickable ? () => onSelectClient!(r.client_id!) : undefined}
+                      >
+                        <TableCell className="text-xs font-medium">
+                          {clickable ? (
+                            <span className="inline-flex items-center gap-1 text-primary hover:underline">
+                              {r.client_name || 'Sin nombre'}
+                              <ChevronRight className="w-3 h-3" />
+                            </span>
+                          ) : (
+                            r.client_name || '—'
+                          )}
+                        </TableCell>
                         <TableCell className="text-xs">{r.sold_plate || '—'}</TableCell>
                         <TableCell className="text-xs">{r.reservations?.service_type || '—'}</TableCell>
                         <TableCell className="text-xs">{r.dealerships?.name || '—'}</TableCell>
