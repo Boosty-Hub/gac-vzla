@@ -81,11 +81,13 @@ export function describeSkippedDelivery(reason: string): string {
     // Only ever returned for the automatic reasons ('won' / 'repurchase'). A human-initiated
     // 'resend' is the deliberate escape hatch and is always allowed through.
     case 'already_delivered':
-      return 'Esta encuesta ya se había enviado; no se envió de nuevo. Usá "Reenviar encuesta" si querés mandarla otra vez.';
+      return 'Esta encuesta ya se había enviado; no se envió de nuevo. Usá "Reenviar" en la tarjeta de esa encuesta si querés mandarla otra vez.';
     // The survey is scheduled, not refused: pg_cron's dispatcher picks it up once
     // `eligible_at` passes (20 hours after the win by default).
+    // Sólo puede aparecer en modo AUTOMÁTICO: el envío manual usa `reason: 'resend'`, que
+    // saltea esta espera a propósito (ver kommo-api, guard 5c).
     case 'not_yet_eligible':
-      return 'La encuesta quedó programada y se enviará automáticamente 20 horas después de marcar la venta. Usá "Reenviar encuesta" si necesitás mandarla ahora.';
+      return 'La encuesta quedó programada y se enviará automáticamente 20 horas después de marcar la venta. Usá "Enviar encuesta" si necesitás mandarla ahora.';
     default:
       return `No se envió la encuesta (motivo: ${reason}).`;
   }

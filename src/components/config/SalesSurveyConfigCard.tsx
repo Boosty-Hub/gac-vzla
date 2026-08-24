@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Car, CheckCircle2, AlertTriangle, Loader2, PowerOff } from 'lucide-react';
 import { toast } from 'sonner';
+import SurveyAutoSendRow from './SurveyAutoSendRow';
 
 /**
  * Interruptor de la encuesta de ENTREGA DE VEHÍCULO (origin 'won' y 'repurchase').
@@ -34,6 +35,8 @@ interface DeliveryConfig {
   survey_link_field_id: string | null;
   sales_enabled: boolean;
   sales_ready: boolean;
+  /** false = la manda una persona desde la ficha del cliente. Ver SurveyAutoSendRow. */
+  sales_auto_send: boolean;
 }
 
 /**
@@ -91,6 +94,7 @@ const SalesSurveyConfigCard = () => {
 
   const enabled = config?.sales_enabled ?? true;
   const ready = config?.sales_ready ?? false;
+  const autoSend = config?.sales_auto_send ?? false;
 
   return (
     <Card>
@@ -150,6 +154,15 @@ const SalesSurveyConfigCard = () => {
               </span>
             </div>
 
+            <SurveyAutoSendRow
+              id="sales-auto-send"
+              rpcName="set_sales_survey_auto_send"
+              autoSend={autoSend}
+              disabled={!enabled}
+              manualHint='Se manda desde la ficha del cliente, pestaña "Encuestas" → "Enviar encuesta".'
+              onChanged={load}
+            />
+
             {!enabled && (
               <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-1">
                 <p className="font-semibold">La encuesta de entrega de vehículo está apagada.</p>
@@ -169,7 +182,10 @@ const SalesSurveyConfigCard = () => {
                 <code className="font-mono">{config?.survey_link_field_id || '—'}</code> del lead
                 de conversación del cliente y lo mueve a la etapa{' '}
                 <code className="font-mono">{config?.survey_stage_id || '—'}</code>. El bot
-                arranca al entrar a esa etapa, 20 horas después de la compra.
+                arranca al entrar a esa etapa.{' '}
+                {autoSend
+                  ? 'En modo automático eso pasa 20 horas después de la compra.'
+                  : 'En modo manual eso pasa en el momento en que alguien aprieta "Enviar encuesta".'}
               </p>
               <p className="text-muted-foreground">
                 La etapa y el campo no se editan desde acá a propósito: equivocarlos es lo que

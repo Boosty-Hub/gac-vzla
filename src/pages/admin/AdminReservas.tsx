@@ -29,6 +29,8 @@ import { MonthlyReservationsCalendar } from '@/components/MonthlyReservationsCal
 import { computeSlotOccupancy, formatMinuteLabel, type CapacityReservation } from '@/lib/reservationCapacity';
 import { isPartsRequest, PLANT_DEALERSHIP_ID, serviceNotesLabel } from '@/lib/serviceTypes';
 import { fetchAllRows } from '@/lib/fetchAllRows';
+import ServiceSurveyDecision, { type ServiceSurveyChoice } from '@/components/reservations/ServiceSurveyDecision';
+import { sendServiceSurveyNow } from '@/components/clients/manualSurveySend';
 import {
   RESERVATION_STATUS_LABELS as STATUS_LABELS,
   RESERVATION_STATUS_COLORS as STATUS_COLORS,
@@ -191,6 +193,11 @@ const AdminReservas = () => {
   const [completeSnapshot, setCompleteSnapshot] = useState({ internal_notes: '', recommendation: '' });
   const [completeRecommendation, setCompleteRecommendation] = useState('');
   const [completing, setCompleting] = useState(false);
+  // Decisión obligatoria sobre la encuesta de postventa. `null` = todavía no eligió, y con
+  // `null` no se puede cerrar el servicio. Ver ServiceSurveyDecision.
+  const [surveyChoice, setSurveyChoice] = useState<ServiceSurveyChoice>(null);
+  // Sólo para avisar en el diálogo que hoy está apagada; el corte real vive en la base.
+  const [serviceSurveyEnabled, setServiceSurveyEnabled] = useState(true);
 
   // Service manager dialog
   const [svcOpen, setSvcOpen] = useState(false);
@@ -875,6 +882,14 @@ const AdminReservas = () => {
     setTechnicalReportUrl(r.technical_report_url || null);
     setCompleteInternalNotes(r.internal_notes || '');
     setCompleteRecommendation(r.recommendation || '');
+    // Sin elegir. Se resetea en CADA apertura: arrastrar la decisión de la cita anterior es
+    // exactamente cómo se manda una encuesta que nadie pidió.
+    setSurveyChoice(null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.rpc as any)('get_survey_delivery_config').then(({ data }: { data: unknown }) => {
+      const row = (Array.isArray(data) ? data[0] : data) as { service_enabled?: boolean } | undefined;
+      setServiceSurveyEnabled(row?.service_enabled ?? true);
+    }).catch(() => setServiceSurveyEnabled(true));
     // Snapshot de lo que había al abrir. Ver handleComplete: sirve para no reescribir campos
     // que este diálogo no tocó.
     setCompleteSnapshot({ internal_notes: r.internal_notes || '', recommendation: r.recommendation || '' });
@@ -884,6 +899,10 @@ const AdminReservas = () => {
   const handleComplete = async () => {
     if (!completingRes) return;
     if (!serviceNotes.trim()) { toast.error('Describe lo que se realizó en el servicio'); return; }
+    if (surveyChoice === null) {
+      toast.error('Elegí si se le envía o no la encuesta de satisfacción postservicio al cliente');
+      return;
+    }
     setCompleting(true);
     // `.select()` is required, not cosmetic: when an RLS policy rejects the row PostgREST
     // updates zero rows and returns 204 with no error. Without reading the affected rows
@@ -926,6 +945,18 @@ const AdminReservas = () => {
       if (completingRes.kommo_lead_id)
         updateKommoReservationStage(completingRes.id, completingRes.kommo_lead_id, 'completada').catch(console.error);
       else createKommoReservation(completingRes.id).catch(console.error);
+
+      // La encuesta va DESPUÉS de que la cita quedó cerrada y sólo si la pidieron. Va sin
+      // await y sin bloquear el diálogo: si Kommo tarda o falla, el servicio ya está
+      // completado igual — que es lo que importa. El resultado se cuenta por toast.
+      if (surveyChoice === 'si') {
+        sendServiceSurveyNow(completingRes.id)
+          .then(result => (result.ok ? toast.success(result.message) : toast.warning(result.message)))
+          .catch(err => {
+            console.error(err);
+            toast.warning('El servicio se cerró, pero no se pudo enviar la encuesta.');
+          });
+      }
     }
     setCompleting(false);
   };
@@ -1939,6 +1970,12 @@ const AdminReservas = () => {
                   placeholder="Observaciones internas, no visibles para el cliente..."
                 />
               </div>
+
+              <ServiceSurveyDecision
+                value={surveyChoice}
+                onChange={setSurveyChoice}
+                disabledNotice={surveyChoice === 'si' && !serviceSurveyEnabled}
+              />
             </div>
           )}
           <DialogFooter>

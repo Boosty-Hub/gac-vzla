@@ -21,6 +21,7 @@ import DriversManager from './DriversManager';
 import type { SurveyResponsePdfProps } from '@/components/satisfaction/SurveyResponsePdf';
 import RepurchaseDialog, { type RepurchaseVehicleModelOption } from './RepurchaseDialog';
 import { deliverSatisfactionSurvey, describeSkippedDelivery } from './surveyDelivery';
+import { sendSalesSurveyNow } from './manualSurveySend';
 
 // Code-split @react-pdf/renderer out of the main bundle — only loaded when the
 // "Encuesta" tab is opened for a client with an answered survey.
@@ -129,6 +130,8 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   const [vehicles, setVehicles] = useState<DialogVehicle[]>([]);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
   const [resending, setResending] = useState(false);
+  /** Id de la encuesta puntual que se está reenviando desde su propia tarjeta. */
+  const [resendingId, setResendingId] = useState<string | null>(null);
   // Postventa sólo tiene ruteo propio cuando su campo está cargado. Sin eso, reenviar una
   // encuesta de servicio la manda por el camino de ventas y despierta al bot equivocado.
   const [postventaReady, setPostventaReady] = useState(true);
@@ -372,20 +375,68 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   // over the client's existing fleet.
   const canAddVehicle = hasPermission('vehiculos.create');
 
-  // El reenvío entrega la encuesta más reciente del cliente — el mismo criterio que usa
-  // kommo-api en su rama `client_id`. Si esa es de servicio, hay que saberlo ANTES de mandar.
-  const latestSurveyIsService = surveys[0]?.origin === 'service';
-  const hasSurvey = surveys.length > 0;
-  const resendBlocked = latestSurveyIsService
-    ? !postventaReady
-    // La más reciente es de venta ('won' o 'repurchase'): la bloquea su propio interruptor.
-    : hasSurvey && !salesEnabled;
+  const canSendSurvey = hasPermission('encuestas.send');
 
-  const handleResend = async () => {
-    if (!client || resendBlocked) return;
+  // ENVÍO MANUAL (2026-08-24). Este botón es el disparador de la encuesta de ENTREGA DE
+  // VEHÍCULO, y sólo de ésa. La de postventa / servicio se decide al cerrar la cita, en
+  // "Completar Servicio".
+  //
+  // Antes entregaba "la encuesta más reciente del cliente", fuera del tipo que fuera. Eso
+  // volvía impredecible qué mensaje salía: en un cliente que compró y después vino al taller,
+  // el mismo botón mandaba una cosa u otra según la fecha. Ahora el botón dice qué manda, y
+  // cada encuesta ya respondida o pendiente tiene su propio "Reenviar" en su tarjeta.
+  //
+  // Ya no exige que la encuesta exista: `ensure_sales_survey` la crea a partir del prospecto
+  // ganado del cliente si hace falta. Sin eso el botón quedaba muerto para toda venta
+  // registrada mientras el interruptor estuvo apagado — es decir, todas las de hoy.
+  const sendBlocked = !canSendSurvey || !salesEnabled;
+
+  const sendBlockedReason = !canSendSurvey
+    ? 'Tu usuario no tiene permiso para enviar encuestas. Se otorga en Configuración → Roles.'
+    : !salesEnabled
+      ? 'La encuesta de entrega de vehículo está desactivada. Actívala en Configuración → Automatizaciones para poder usar este botón.'
+      : undefined;
+
+  const handleSend = async () => {
+    if (!client) return;
+    if (sendBlocked) {
+      toast.warning(sendBlockedReason!);
+      return;
+    }
     setResending(true);
-    const outcome = await deliverSatisfactionSurvey({ client_id: client.id }, 'resend');
+    const result = await sendSalesSurveyNow(client.id);
     setResending(false);
+    if (result.ok) {
+      toast.success(result.message);
+      setReloadKey(k => k + 1);
+    } else {
+      toast.warning(result.message);
+    }
+  };
+
+  // Reenvío de UNA encuesta puntual, la de esta tarjeta. Es el reemplazo exacto de lo que
+  // hacía el botón de arriba, pero sin adivinar cuál: acá el usuario ya eligió.
+  const handleResendOne = async (survey: SurveyRow) => {
+    if (!canSendSurvey) {
+      toast.warning('Tu usuario no tiene permiso para enviar encuestas. Se otorga en Configuración → Roles.');
+      return;
+    }
+    if (survey.origin === 'service' && !postventaEnabled) {
+      toast.warning('La encuesta de postventa / servicio está desactivada. Actívala en Configuración → Automatizaciones para poder reenviarla.');
+      return;
+    }
+    if (survey.origin === 'service' && !postventaReady) {
+      toast.warning('La postventa todavía no tiene su campo propio en Kommo. Reenviarla mandaría el mensaje de compra.');
+      return;
+    }
+    if (survey.origin !== 'service' && !salesEnabled) {
+      toast.warning('La encuesta de entrega de vehículo está desactivada. Actívala en Configuración → Automatizaciones para poder reenviarla.');
+      return;
+    }
+
+    setResendingId(survey.id);
+    const outcome = await deliverSatisfactionSurvey({ survey_id: survey.id }, 'resend');
+    setResendingId(null);
 
     if (outcome.kind === 'delivered') {
       toast.success('Encuesta reenviada correctamente.');
@@ -541,26 +592,19 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                   size="sm"
                   variant="outline"
                   className="h-7 text-xs shrink-0"
-                  disabled={resending || loading || surveys.length === 0 || resendBlocked}
-                  onClick={handleResend}
-                  title={
-                    surveys.length === 0
-                      ? 'Este cliente no tiene ninguna encuesta para reenviar'
-                      : resendBlocked
-                        ? !latestSurveyIsService
-                          ? 'La última encuesta de este cliente es de entrega de vehículo y esa encuesta está desactivada en Configuración → Automatizaciones.'
-                          : postventaEnabled
-                            ? 'La última encuesta de este cliente es de servicio y la postventa todavía no tiene su campo propio en Kommo. Reenviarla mandaría el mensaje de compra.'
-                            : 'La última encuesta de este cliente es de servicio y la encuesta de postventa / servicio está desactivada en Configuración → Automatizaciones.'
-                        : undefined
-                  }
+                  // A propósito NO se deshabilita cuando la encuesta está apagada: apretarlo
+                  // tiene que EXPLICAR que hay que prenderla en Configuración →
+                  // Automatizaciones. Un botón gris no explica nada y manda a adivinar.
+                  disabled={resending || loading}
+                  onClick={handleSend}
+                  title={sendBlockedReason ?? 'Envía ahora la encuesta de entrega de vehículo a este cliente'}
                 >
                   {resending ? (
                     <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin mr-1" />
                   ) : (
                     <Send className="w-3.5 h-3.5 mr-1" />
                   )}
-                  Reenviar encuesta
+                  Enviar encuesta
                 </Button>
               </div>
 
@@ -589,10 +633,31 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                           <Badge variant="outline" className="text-[10px]">
                             {SURVEY_ORIGIN_LABEL[survey.origin] || survey.origin}
                           </Badge>
-                          <span className="text-[10px] text-muted-foreground">
-                            {format(new Date(survey.created_at), 'dd/MM/yyyy')}
-                            {survey.sold_plate ? ` · ${survey.sold_plate}` : ''}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-muted-foreground">
+                              {format(new Date(survey.created_at), 'dd/MM/yyyy')}
+                              {survey.sold_plate ? ` · ${survey.sold_plate}` : ''}
+                            </span>
+                            {/* Reenvío de ESTA encuesta. Es lo que antes hacía el botón de
+                                arriba adivinando cuál era "la más reciente"; acá el usuario
+                                ya eligió, así que no hay forma de mandar la equivocada. */}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-6 px-1.5 text-[10px]"
+                              disabled={resendingId === survey.id}
+                              onClick={() => handleResendOne(survey)}
+                              title="Volver a enviarle esta encuesta al cliente"
+                            >
+                              {resendingId === survey.id ? (
+                                <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                              ) : (
+                                <>
+                                  <Send className="w-3 h-3 mr-1" /> Reenviar
+                                </>
+                              )}
+                            </Button>
+                          </div>
                         </div>
 
                         {!response ? (

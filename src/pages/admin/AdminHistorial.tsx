@@ -8,12 +8,20 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText, X } from 'lucide-react';
+import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText, X, Pencil, AlertTriangle } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
-import { ARCHIVED_RESERVATION_STATUSES, reservationStatusStyle } from '@/lib/reservationStatus';
+import {
+  ARCHIVED_RESERVATION_STATUSES,
+  RESERVATION_STATUSES,
+  RESERVATION_STATUS_LABELS,
+  reservationStatusStyle,
+} from '@/lib/reservationStatus';
+import { Textarea } from '@/components/ui/textarea';
+import { toast } from 'sonner';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 import { serviceNotesLabel } from '@/lib/serviceTypes';
@@ -30,6 +38,8 @@ interface ServiceEntry {
   status: string;
   notes: string | null;
   service_notes: string | null;
+  recommendation: string | null;
+  internal_notes: string | null;
   technical_report_url: string | null;
   completed_at: string | null;
   created_at: string;
@@ -71,13 +81,17 @@ const statusBadge = reservationStatusStyle;
 const HISTORY_STATUSES = [...ARCHIVED_RESERVATION_STATUSES];
 
 const AdminHistorial = () => {
-  const { profile, role, getModuleScope } = useAuth();
+  const { profile, role, getModuleScope, hasPermission } = useAuth();
   const { selectedDealership: myDealershipId } = useDealershipAccess();
   const roleName = role?.name?.toLowerCase() ?? '';
   const isAdmin = roleName === 'superadmin' || roleName === 'admin';
   const isVendedor = roleName === 'vendedor';
   // enforceScope: si el scope es 'own' y no es admin → forzar filtro por su concesionario
   const enforceScope = !isAdmin && getModuleScope('historial') === 'own';
+  // `historial.edit` ya existia en la tabla de permisos desde antes de esta pantalla; hoy lo
+  // tienen admin y superadmin. Se otorga o se quita desde Configuracion -> Roles, sin tocar
+  // codigo, que es la regla para todo modulo nuevo de este proyecto.
+  const canEditHistory = hasPermission('historial.edit');
 
   const [entries, setEntries] = useState<ServiceEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -97,6 +111,17 @@ const AdminHistorial = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detail, setDetail] = useState<ServiceEntry | null>(null);
   const [vehServiceCount, setVehServiceCount] = useState(0);
+
+  // Edición del registro histórico. Nació de un reporte concreto: una cita quedó marcada
+  // como cancelada por error y esta pantalla, que es donde vive el registro, era 100% de
+  // sólo lectura. No había ninguna forma de corregirlo sin SQL.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editStatus, setEditStatus] = useState('');
+  const [editMileage, setEditMileage] = useState('');
+  const [editServiceNotes, setEditServiceNotes] = useState('');
+  const [editRecommendation, setEditRecommendation] = useState('');
+  const [editInternalNotes, setEditInternalNotes] = useState('');
 
   // Encuesta de postventa del servicio abierto en el detalle. Se pide sólo para esa cita:
   // traerlas para las 100 filas de la página cargaría datos que nadie va a mirar.
@@ -135,7 +160,7 @@ const AdminHistorial = () => {
     let query = supabase
       .from('reservations')
       .select(
-        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual))',
+        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, recommendation, internal_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual))',
         { count: 'exact' }
       )
       // Was `.eq('status','completada')`, which made cancelled appointments unfindable:
@@ -191,6 +216,79 @@ const AdminHistorial = () => {
         .eq('status', 'completada');
       setVehServiceCount(count || 0);
     }
+  };
+
+  const openEdit = () => {
+    if (!detail) return;
+    setEditStatus(detail.status);
+    setEditMileage(String(detail.current_mileage ?? ''));
+    setEditServiceNotes(detail.service_notes || '');
+    setEditRecommendation(detail.recommendation || '');
+    setEditInternalNotes(detail.internal_notes || '');
+    setEditOpen(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!detail) return;
+    const km = Number(editMileage);
+    if (!Number.isFinite(km) || km < 0) {
+      toast.error('El kilometraje del servicio tiene que ser un número válido');
+      return;
+    }
+    setEditSaving(true);
+
+    const payload: Record<string, unknown> = {
+      status: editStatus,
+      current_mileage: km,
+      service_notes: editServiceNotes.trim() || null,
+      recommendation: editRecommendation.trim() || null,
+      internal_notes: editInternalNotes.trim() || null,
+    };
+
+    // Pasar a completada sin fecha de cierre deja un registro que dice "completado" y no
+    // sabe cuándo. Al revés, sacarla de completada y dejarle la fecha es peor todavía.
+    if (editStatus === 'completada' && !detail.completed_at) {
+      payload.completed_at = new Date().toISOString();
+    } else if (editStatus !== 'completada') {
+      payload.completed_at = null;
+    }
+
+    // `.select()` no es cosmético: cuando una política RLS rechaza la fila, PostgREST
+    // actualiza cero filas y devuelve 204 SIN error. Sin leer las filas afectadas, un
+    // usuario sin permisos vería un cartel verde sobre un cambio que nunca ocurrió.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: updated, error } = await supabase
+      .from('reservations')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .update(payload as any)
+      .eq('id', detail.id)
+      .select('id');
+
+    setEditSaving(false);
+
+    if (error) {
+      console.error(error);
+      toast.error('No se pudo guardar el cambio');
+      return;
+    }
+    if (!updated || updated.length === 0) {
+      toast.error('No se pudo guardar: tu usuario no tiene permisos sobre este concesionario.');
+      return;
+    }
+
+    // Si el nuevo estado ya no es de archivo, la cita vuelve al listado de Reservas y sale
+    // de esta pantalla. Se dice explícitamente para que no parezca que se borró.
+    const leavesHistory = !ARCHIVED_RESERVATION_STATUSES.has(editStatus);
+    toast.success(
+      leavesHistory
+        ? 'Servicio actualizado. Como ya no está completado ni cancelado, vuelve al módulo de Reservas.'
+        : 'Servicio actualizado',
+    );
+
+    setEditOpen(false);
+    setDetailOpen(false);
+    setDetail(null);
+    fetchEntries();
   };
 
   const evaluateWarranty = useCallback((entry: ServiceEntry): { active: boolean; reason: string | null } => {
@@ -430,12 +528,22 @@ const AdminHistorial = () => {
             const sc = statusBadge(e.status);
             return (
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <div>
                     <h3 className="font-display font-bold text-sm">{e.service_type}</h3>
                     <p className="text-xs text-muted-foreground">{e.reservation_date} a las {e.reservation_time?.slice(0, 5)}</p>
                   </div>
-                  <Badge className={cn("text-xs", sc.color)}>{sc.label}</Badge>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge className={cn("text-xs", sc.color)}>{sc.label}</Badge>
+                    {/* Corrige el registro sin salir de donde se lo esta mirando. Gated por
+                        `historial.edit`, que ya existia en la tabla de permisos y hoy tienen
+                        solo admin y superadmin - se ajusta desde Configuracion -> Roles. */}
+                    {canEditHistory && (
+                      <Button size="sm" variant="outline" className="h-7 text-xs" onClick={openEdit}>
+                        <Pencil className="w-3 h-3 mr-1" /> Editar
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 {e.vehicles && (
@@ -614,6 +722,97 @@ const AdminHistorial = () => {
               </div>
             );
           })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* EDIT DIALOG */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display flex items-center gap-2">
+              <Pencil className="w-4 h-4" /> Editar Servicio
+            </DialogTitle>
+          </DialogHeader>
+          {detail && (
+            <div className="space-y-4 py-1">
+              <div className="rounded-md border p-3 bg-muted/30 text-xs space-y-1">
+                <p><span className="font-semibold">Cliente:</span> {detail.clients?.full_name || '-'}</p>
+                <p><span className="font-semibold">Placa:</span> {detail.vehicles?.plate || '-'}</p>
+                <p><span className="font-semibold">Servicio:</span> {detail.service_type}</p>
+                <p><span className="font-semibold">Fecha:</span> {detail.reservation_date}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Estado</Label>
+                <Select value={editStatus} onValueChange={setEditStatus}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {RESERVATION_STATUSES.map(st => (
+                      <SelectItem key={st} value={st}>{RESERVATION_STATUS_LABELS[st]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* La lista sale de RESERVATION_STATUSES, que espeja el CHECK de la base.
+                    Ofrecer un estado que la base rechaza fue exactamente el bug de
+                    "Culminada" del 2026-08-13. */}
+                {!ARCHIVED_RESERVATION_STATUSES.has(editStatus) && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md p-2 flex items-start gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    Con este estado la cita deja de ser historial y vuelve al módulo de
+                    Reservas. No se borra: se la busca allá.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Km del servicio</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={editMileage}
+                  onChange={ev => setEditMileage(ev.target.value)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Trabajo realizado</Label>
+                <Textarea
+                  rows={4}
+                  value={editServiceNotes}
+                  onChange={ev => setEditServiceNotes(ev.target.value)}
+                  placeholder="Trabajos realizados, repuestos cambiados, observaciones..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Recomendación (visible para el cliente)</Label>
+                <Textarea
+                  rows={3}
+                  value={editRecommendation}
+                  onChange={ev => setEditRecommendation(ev.target.value)}
+                  placeholder="Recomendaciones de seguimiento..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm">Notas internas (solo equipo GAC)</Label>
+                <Textarea
+                  rows={3}
+                  value={editInternalNotes}
+                  onChange={ev => setEditInternalNotes(ev.target.value)}
+                  placeholder="Observaciones internas, no visibles para el cliente..."
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancelar</Button>
+            <Button onClick={handleEditSave} disabled={editSaving} className="gac-gradient">
+              {editSaving
+                ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                : 'Guardar cambios'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

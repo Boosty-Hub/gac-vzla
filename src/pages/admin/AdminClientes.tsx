@@ -18,6 +18,7 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SatisfactionOverview from '@/components/satisfaction/SatisfactionOverview';
+import ServiceSatisfactionOverview from '@/components/satisfaction/ServiceSatisfactionOverview';
 import ClientDetailDialog from '@/components/clients/ClientDetailDialog';
 import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
@@ -1993,7 +1994,25 @@ const AdminClientes = () => {
       )}
 
       <TabsContent value="satisfaccion">
-        <SatisfactionOverview onSelectClient={openClientFromSurvey} />
+        {/* Dos encuestas distintas, dos paneles distintos, y por una razón que no es de
+            estilo: los números no son sumables. La de venta son cinco aspectos con escala
+            1..5 y sus respuestas viven en `satisfaction_responses`; la de postventa son ocho
+            preguntas cerradas y las suyas viven en `service_survey_responses`. Mezclarlas en
+            una sola vista es lo que hacía que la de postventa apareciera como "enviada y
+            nunca respondida" — por eso hasta hoy estaba filtrada afuera y no se veía en
+            ningún lado. */}
+        <Tabs defaultValue="venta" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="venta">Entrega de Vehículo</TabsTrigger>
+            <TabsTrigger value="postservicio">Post Servicio</TabsTrigger>
+          </TabsList>
+          <TabsContent value="venta">
+            <SatisfactionOverview onSelectClient={openClientFromSurvey} />
+          </TabsContent>
+          <TabsContent value="postservicio">
+            <ServiceSatisfactionOverview />
+          </TabsContent>
+        </Tabs>
       </TabsContent>
 
       {/* Client Detail Preview Dialog (Info / Vehículos / Choferes / Encuestas).

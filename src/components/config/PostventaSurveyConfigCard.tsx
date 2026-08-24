@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Star, CheckCircle2, AlertTriangle, Loader2, PowerOff } from 'lucide-react';
 import { toast } from 'sonner';
+import SurveyAutoSendRow from './SurveyAutoSendRow';
 
 /**
  * Configuración de entrega de la encuesta de POSTVENTA.
@@ -45,6 +46,8 @@ interface DeliveryConfig {
   survey_link_field_id_service: string | null;
   service_enabled: boolean;
   service_ready: boolean;
+  /** false = la manda una persona desde "Completar Servicio". Ver SurveyAutoSendRow. */
+  service_auto_send: boolean;
 }
 
 /**
@@ -136,6 +139,7 @@ const PostventaSurveyConfigCard = () => {
 
   const enabled = config?.service_enabled ?? true;
   const ready = config?.service_ready ?? false;
+  const autoSend = config?.service_auto_send ?? false;
 
   return (
     <Card>
@@ -195,6 +199,15 @@ const PostventaSurveyConfigCard = () => {
                   : 'Marcar una cita como Completada no genera ninguna encuesta.'}
               </span>
             </div>
+
+            <SurveyAutoSendRow
+              id="pv-auto-send"
+              rpcName="set_service_survey_auto_send"
+              autoSend={autoSend}
+              disabled={!enabled}
+              manualHint="Al cerrar una cita, el diálogo de Completar Servicio pregunta si se envía."
+              onChanged={load}
+            />
 
             {!enabled && (
               <div className="rounded-md border bg-muted/40 p-3 text-xs space-y-1">

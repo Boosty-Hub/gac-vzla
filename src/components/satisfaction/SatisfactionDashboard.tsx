@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SatisfactionOverview from './SatisfactionOverview';
 import SatisfactionFilters from './SatisfactionFilters';
 import SatisfactionClientList from './SatisfactionClientList';
+import ServiceSatisfactionOverview from './ServiceSatisfactionOverview';
 import {
   DEFAULT_FILTERS,
   filterSurveys,
@@ -81,19 +83,34 @@ const SatisfactionDashboard = () => {
   }
 
   return (
-    <div className="space-y-4">
-      {/* Facets always derived from the full RLS-scoped fetch, not the
-          filtered set, so switching one filter never hides another's options. */}
-      <SatisfactionFilters rows={rows} filters={filters} onChange={setFilters} />
-      {/* Reuses the existing metrics component (design.md D8) instead of a
-          parallel KPI/aspect-breakdown implementation — `compact` hides its
-          own header + "Encuestas respondidas" table (this tab has its own
-          client list below instead), `surveys` hands it the already
-          brand/model/month-filtered rows so it renders controlled, with no
-          fetch of its own. */}
-      <SatisfactionOverview compact surveys={filteredRows} />
-      <SatisfactionClientList rows={clientRows} />
-    </div>
+    // Las dos encuestas se separan en pestañas porque sus métricas no son sumables: la de
+    // venta puntúa cinco aspectos del 1 al 5, la de postventa responde ocho preguntas
+    // cerradas, y cada una guarda sus respuestas en su propia tabla. Antes de esta pestaña,
+    // la de postventa no se veía agregada en NINGUNA pantalla.
+    <Tabs defaultValue="venta" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="venta">Entrega de Vehículo</TabsTrigger>
+        <TabsTrigger value="postservicio">Post Servicio</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="venta" className="space-y-4">
+        {/* Facets always derived from the full RLS-scoped fetch, not the
+            filtered set, so switching one filter never hides another's options. */}
+        <SatisfactionFilters rows={rows} filters={filters} onChange={setFilters} />
+        {/* Reuses the existing metrics component (design.md D8) instead of a
+            parallel KPI/aspect-breakdown implementation — `compact` hides its
+            own header + "Encuestas respondidas" table (this tab has its own
+            client list below instead), `surveys` hands it the already
+            brand/model/month-filtered rows so it renders controlled, with no
+            fetch of its own. */}
+        <SatisfactionOverview compact surveys={filteredRows} />
+        <SatisfactionClientList rows={clientRows} />
+      </TabsContent>
+
+      <TabsContent value="postservicio">
+        <ServiceSatisfactionOverview />
+      </TabsContent>
+    </Tabs>
   );
 };
 
