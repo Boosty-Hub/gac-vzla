@@ -22,11 +22,28 @@ export const isPartsRequest = (serviceType: string | null | undefined): boolean 
   serviceType === PARTS_REQUEST_TYPE;
 
 /**
- * Service types that must be hidden from client-facing booking flows
- * (public reservation + user portal). Staff-only.
+ * Nombres de los servicios marcados como internos en `service_types.is_internal`.
+ *
+ * La verdad vive en la base y se administra desde Configuración → Servicios, NO en una
+ * lista de nombres acá: agregar otro servicio interno no debe requerir tocar código.
+ *
+ * Recibe TODAS las filas de `service_types` (activas e inactivas). Una lista vacía sólo
+ * puede significar que la consulta falló — la tabla nunca está vacía en producción — y en
+ * ese caso se cae a esconder el interno conocido. Con la consulta OK se confía en el flag,
+ * así apagar `is_internal` desde el panel realmente vuelve a mostrar el servicio.
  */
-export const isInternalServiceType = (serviceType: string | null | undefined): boolean =>
-  serviceType === PARTS_REQUEST_TYPE;
+export const collectInternalServiceNames = (
+  rows: ReadonlyArray<{ name: string; is_internal?: boolean | null }> | null | undefined,
+): ReadonlySet<string> => {
+  if (!rows || rows.length === 0) return new Set([PARTS_REQUEST_TYPE]);
+  return new Set(rows.filter(r => r.is_internal).map(r => r.name));
+};
+
+/** True cuando el servicio de una cita es interno y no debe llegar al cliente. */
+export const isInternalServiceName = (
+  serviceType: string | null | undefined,
+  internalNames: ReadonlySet<string>,
+): boolean => internalNames.has(serviceType ?? '');
 
 /** Service types whose `notes` field describes a reported fault rather than a request. */
 const FAULT_TYPES = new Set(['Incidencia', 'Falla o Desperfecto']);

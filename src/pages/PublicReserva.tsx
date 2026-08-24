@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { createKommoReservation } from '@/lib/kommo';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
-import { isInternalServiceType } from '@/lib/serviceTypes';
 
 interface VehicleResult {
   vehicle_id: string;
@@ -47,6 +46,7 @@ interface ServiceType {
   id: number;
   name: string;
   duration_minutes: number;
+  is_internal: boolean | null;
 }
 
 const TIME_SLOTS = Array.from({ length: 19 }, (_, i) => {
@@ -160,10 +160,12 @@ const PublicReserva = () => {
       // Load dealerships and service types
       const [{ data: deals }, { data: stData }] = await Promise.all([
         supabase.from('dealerships').select('id, name, city, state, phone, address, google_maps_url, is_service_center, bays').eq('is_active', true).eq('is_service_center', true),
-        supabase.from('service_types').select('id, name, duration_minutes').eq('is_active', true).order('name'),
+        // `is_internal` esconde las gestiones internas (hoy "Solicitud de Repuestos") de
+        // la reserva pública. Se administra desde Configuración → Servicios.
+        supabase.from('service_types').select('id, name, duration_minutes, is_internal').eq('is_active', true).order('name'),
       ]);
       setDealerships(sortDealerships((deals || []) as Dealership[]));
-      setServiceTypes(((stData || []) as ServiceType[]).filter(s => !isInternalServiceType(s.name)));
+      setServiceTypes(((stData || []) as ServiceType[]).filter(s => !s.is_internal));
       setMileage(String(data[0].mileage || ''));
       setStep('form');
     }

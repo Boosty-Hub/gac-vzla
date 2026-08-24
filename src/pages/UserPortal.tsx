@@ -26,7 +26,7 @@ import { toast } from 'sonner';
 import { createKommoReservation } from '@/lib/kommo';
 import { resolveWarrantyCondition, evaluateWarranty, formatServiceCount, type WarrantyConditionRef } from '@/lib/warranty';
 import { computeSlotOccupancy, type CapacityReservation } from '@/lib/reservationCapacity';
-import { isInternalServiceType } from '@/lib/serviceTypes';
+import { collectInternalServiceNames, isInternalServiceName } from '@/lib/serviceTypes';
 import { RESERVATION_STATUS_CONFIG } from '@/lib/reservationStatus';
 
 // Radix Select cannot hold an empty value, so "no driver" needs a sentinel that can never
@@ -95,6 +95,8 @@ interface ServiceType {
   name: string;
   duration_minutes: number;
   requires_description: boolean;
+  is_active: boolean;
+  is_internal: boolean | null;
 }
 
 interface Reservation {
@@ -187,6 +189,11 @@ const UserPortal = () => {
   const [dealerships, setDealerships] = useState<Dealership[]>([]);
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  // Servicios que el cliente no debe ver. Arranca con el interno conocido ya adentro
+  // para que el primer render no muestre por un instante lo que después esconde.
+  const [internalServiceNames, setInternalServiceNames] = useState<ReadonlySet<string>>(
+    () => collectInternalServiceNames(null),
+  );
   const [loading, setLoading] = useState(true);
   const [detailRes, setDetailRes] = useState<Reservation | null>(null);
 
@@ -377,13 +384,19 @@ const UserPortal = () => {
         .eq('is_service_center', true);
       setDealerships(sortDealerships((deals || []) as Dealership[]));
 
-      // Fetch service types
+      // Fetch service types — activos e inactivos.
+      //
+      // `is_internal` marca las gestiones internas (hoy "Solicitud de Repuestos"): el
+      // cliente no las reserva ni las ve. El filtro `is_active` pasó al cliente porque
+      // un servicio interno desactivado sigue teniendo citas viejas que esconder, y
+      // filtrando en el servidor esas quedaban fuera del set de nombres internos.
       const { data: stData } = await supabase
         .from('service_types')
-        .select('id, name, duration_minutes, requires_description')
-        .eq('is_active', true)
+        .select('id, name, duration_minutes, requires_description, is_active, is_internal')
         .order('name');
-      setServiceTypes(((stData || []) as unknown as ServiceType[]).filter(s => !isInternalServiceType(s.name)));
+      const allServiceTypes = (stData || []) as unknown as ServiceType[];
+      setInternalServiceNames(collectInternalServiceNames(allServiceTypes));
+      setServiceTypes(allServiceTypes.filter(s => s.is_active && !s.is_internal));
 
       // Fetch warranty conditions (full active set for the shared warranty lib)
       const { data: wcData } = await supabase
@@ -440,14 +453,18 @@ const UserPortal = () => {
     (async () => {
       const { data } = await supabase
         .from('reservations')
-        .select('vehicle_id')
+        .select('vehicle_id, service_type')
         .eq('status', 'completada')
         .in('vehicle_id', vehicles.map(v => v.id));
       const counts: Record<string, number> = {};
-      (data || []).forEach((r: any) => { counts[r.vehicle_id] = (counts[r.vehicle_id] || 0) + 1; });
+      // Una gestión interna completada no es un servicio hecho al vehículo. Contarla
+      // corría el próximo mantenimiento proyectado y ensuciaba la cuenta de garantía.
+      ((data || []) as { vehicle_id: string | null; service_type: string | null }[])
+        .filter(r => !isInternalServiceName(r.service_type, internalServiceNames))
+        .forEach(r => { if (r.vehicle_id) counts[r.vehicle_id] = (counts[r.vehicle_id] || 0) + 1; });
       setVehServiceCounts(counts);
     })();
-  }, [vehicles]);
+  }, [vehicles, internalServiceNames]);
 
   // Warranty evaluation delegates to the shared @/lib/warranty module (same logic
   // as WarrantyChip). Service count is informational only and no longer voids the
@@ -474,9 +491,18 @@ const UserPortal = () => {
     };
   };
 
+  // Citas que el cliente puede ver. La RLS ya esconde las internas del lado del
+  // servidor; esto mantiene coherente la pantalla para un usuario que además sea
+  // admin (para él la RLS no filtra) y evita depender de una sola capa.
+  const visibleReservations = reservations.filter(
+    r => !isInternalServiceName(r.service_type, internalServiceNames),
+  );
+
   // Plates of vehicles that already have an open service reservation.
+  // Un pedido de repuestos no es un servicio agendado: no debe marcar el vehículo
+  // como "próximo servicio".
   const pendingServicePlates = new Set(
-    reservations
+    visibleReservations
       .filter(r => ['pendiente', 'confirmada', 'en_proceso'].includes(r.status))
       .map(r => (r.vehicles?.plate || '').toLowerCase())
       .filter(Boolean),
@@ -636,7 +662,13 @@ const UserPortal = () => {
       .eq('vehicle_id', v.id)
       .order('reservation_date', { ascending: false })
       .limit(50);
-    setVehHistory((data || []) as unknown as VehicleServiceRecord[]);
+    // Filtra por vehículo, no por cliente: un pedido de repuestos del taller sobre este
+    // mismo vehículo entraba acá aunque no fuera un servicio que el cliente pidió.
+    setVehHistory(
+      ((data || []) as unknown as VehicleServiceRecord[]).filter(
+        r => !isInternalServiceName(r.service_type, internalServiceNames),
+      ),
+    );
     setLoadingVehHistory(false);
   };
 
@@ -1241,13 +1273,13 @@ const UserPortal = () => {
         {vista === 'mis-reservas' && (
           <div className="space-y-4">
             <h2 className="text-xl font-display font-bold">Mis Citas</h2>
-            {reservations.length === 0 ? (
+            {visibleReservations.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <CalendarDays className="w-12 h-12 mx-auto mb-3 opacity-40" />
                 <p>No tienes citas aún</p>
               </div>
             ) : (
-              reservations.map(r => {
+              visibleReservations.map(r => {
                 const st = STATUS_CONFIG[r.status] || STATUS_CONFIG.pendiente;
                 return (
                   <Card key={r.id} className="gac-shadow cursor-pointer hover:shadow-md transition-shadow" onClick={() => setDetailRes(r)}>

@@ -1557,6 +1557,7 @@ export type Database = {
           duration_minutes: number
           id: number
           is_active: boolean
+          is_internal: boolean
           name: string
           requires_description: boolean
           sends_postventa_survey: boolean
@@ -1567,6 +1568,7 @@ export type Database = {
           duration_minutes?: number
           id?: never
           is_active?: boolean
+          is_internal?: boolean
           name: string
           requires_description?: boolean
           sends_postventa_survey?: boolean
@@ -1577,6 +1579,7 @@ export type Database = {
           duration_minutes?: number
           id?: never
           is_active?: boolean
+          is_internal?: boolean
           name?: string
           requires_description?: boolean
           sends_postventa_survey?: boolean
@@ -1977,6 +1980,10 @@ export type Database = {
       get_user_role: { Args: never; Returns: string }
       has_permission: { Args: { perm_name: string }; Returns: boolean }
       is_admin_user: { Args: never; Returns: boolean }
+      is_internal_service_type: {
+        Args: { p_service_type: string }
+        Returns: boolean
+      }
       lookup_vehicle_by_plate: {
         Args: { p_plate: string }
         Returns: {

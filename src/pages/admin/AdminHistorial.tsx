@@ -24,7 +24,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
-import { serviceNotesLabel } from '@/lib/serviceTypes';
+import { isInternalServiceName, serviceNotesLabel } from '@/lib/serviceTypes';
+import { useInternalServiceTypes } from '@/hooks/useInternalServiceTypes';
 
 interface ServiceEntry {
   id: string;
@@ -83,6 +84,7 @@ const HISTORY_STATUSES = [...ARCHIVED_RESERVATION_STATUSES];
 
 const AdminHistorial = () => {
   const { profile, role, getModuleScope, hasPermission } = useAuth();
+  const internalServiceNames = useInternalServiceTypes();
   const { selectedDealership: myDealershipId } = useDealershipAccess();
   const roleName = role?.name?.toLowerCase() ?? '';
   const isAdmin = roleName === 'superadmin' || roleName === 'admin';
@@ -207,16 +209,24 @@ const AdminHistorial = () => {
     setDetailOpen(true);
     setVehServiceCount(0);
     if (entry.vehicle_id) {
-      const { count } = await supabase
+      const { data } = await supabase
         .from('reservations')
-        .select('id', { count: 'exact', head: true })
+        .select('service_type')
         .eq('vehicle_id', entry.vehicle_id)
         // DELIBERATELY still only 'completada' — do NOT widen this to HISTORY_STATUSES.
         // This is the count of services actually PERFORMED on the vehicle and it feeds the
         // warranty evaluation. A cancelled appointment is not a service; counting it would
         // corrupt the warranty math.
         .eq('status', 'completada');
-      setVehServiceCount(count || 0);
+      // Por la misma razón se descuentan las gestiones internas (Solicitud de Repuestos):
+      // son un pedido a planta, no un servicio hecho sobre el vehículo. Eran 3 filas
+      // completadas contando como mantenimientos. La cuenta sigue en JS y no en un
+      // `head: true` porque la lista de servicios internos es configurable.
+      setVehServiceCount(
+        ((data || []) as { service_type: string | null }[]).filter(
+          r => !isInternalServiceName(r.service_type, internalServiceNames),
+        ).length,
+      );
     }
   };
 
@@ -270,7 +280,6 @@ const AdminHistorial = () => {
     // `.select()` no es cosmético: cuando una política RLS rechaza la fila, PostgREST
     // actualiza cero filas y devuelve 204 SIN error. Sin leer las filas afectadas, un
     // usuario sin permisos vería un cartel verde sobre un cambio que nunca ocurrió.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: updated, error } = await supabase
       .from('reservations')
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

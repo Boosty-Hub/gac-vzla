@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Wrench, Plus, Pencil, Trash2, Clock, Star } from 'lucide-react';
+import { Wrench, Plus, Pencil, Trash2, Clock, Star, Eye, EyeOff } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ServiceType {
@@ -17,6 +17,7 @@ interface ServiceType {
   duration_minutes: number;
   is_active: boolean;
   sends_postventa_survey: boolean;
+  is_internal: boolean;
   created_at: string;
 }
 
@@ -33,6 +34,7 @@ const AdminServicios = () => {
   const [formDuration, setFormDuration] = useState('60');
   const [formIsActive, setFormIsActive] = useState(true);
   const [formSendsSurvey, setFormSendsSurvey] = useState(true);
+  const [formIsInternal, setFormIsInternal] = useState(false);
   // La columna "Encuesta postventa" es por tipo de servicio, pero hay un interruptor general
   // arriba de ella en Configuración → Automatizaciones. Con ese apagado, un "Sí" en esta
   // tabla no envía nada. Se consulta para avisarlo y no dejar la pantalla mintiendo.
@@ -70,6 +72,7 @@ const AdminServicios = () => {
     setFormDuration('60');
     setFormIsActive(true);
     setFormSendsSurvey(true);
+    setFormIsInternal(false);
     setDialogOpen(true);
   };
 
@@ -79,6 +82,7 @@ const AdminServicios = () => {
     setFormDuration(String(s.duration_minutes));
     setFormIsActive(s.is_active);
     setFormSendsSurvey(s.sends_postventa_survey ?? true);
+    setFormIsInternal(s.is_internal ?? false);
     setDialogOpen(true);
   };
 
@@ -93,6 +97,7 @@ const AdminServicios = () => {
       duration_minutes: duration,
       is_active: formIsActive,
       sends_postventa_survey: formSendsSurvey,
+      is_internal: formIsInternal,
     };
 
     if (editing) {
@@ -166,6 +171,7 @@ const AdminServicios = () => {
                 <TableHead>Duración</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead>Encuesta postventa / servicio</TableHead>
+                <TableHead>Visibilidad</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
             </TableHeader>
@@ -190,6 +196,17 @@ const AdminServicios = () => {
                       </Badge>
                     ) : (
                       <Badge variant="secondary" className="text-[10px] px-1.5 py-0">No se envía</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {s.is_internal ? (
+                      <Badge variant="secondary" className="text-[10px] px-1.5 py-0 gap-0.5">
+                        <EyeOff className="w-2.5 h-2.5" /> Solo interno
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 gap-0.5">
+                        <Eye className="w-2.5 h-2.5" /> Visible al cliente
+                      </Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
@@ -243,6 +260,17 @@ const AdminServicios = () => {
                 </p>
               </div>
               <Switch checked={formSendsSurvey} onCheckedChange={setFormSendsSurvey} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>Solo uso interno</Label>
+                <p className="text-xs text-muted-foreground">
+                  El cliente no puede elegirlo al reservar y no lo ve en sus citas, en el
+                  historial de su vehículo ni en la cuenta de servicios de la garantía. El
+                  personal lo sigue viendo siempre.
+                </p>
+              </div>
+              <Switch checked={formIsInternal} onCheckedChange={setFormIsInternal} />
             </div>
           </div>
           <DialogFooter>
