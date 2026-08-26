@@ -6,7 +6,11 @@ import { deliverSatisfactionSurvey, describeSkippedDelivery } from './surveyDeli
  *
  * Desde este día el barrido automático no manda nada: manda una persona, con un botón.
  *   - Entrega de vehículo -> ficha del cliente, pestaña "Encuestas", "Enviar encuesta".
+ *   - Entrega de vehículo -> al marcar el prospecto como ganado, decisión obligatoria sí/no.
  *   - Postventa / servicio -> diálogo "Completar Servicio", decisión obligatoria sí/no.
+ *   - Postventa / servicio -> Historial de Servicios, detalle de una cita completada. Esta
+ *     última existe porque las otras se cierran una sola vez: pasado el momento de completar
+ *     la cita no había forma de mandarle la encuesta a un servicio ya cerrado.
  *
  * Los dos caminos hacen lo mismo en dos pasos, y por eso viven acá y no duplicados en tres
  * pantallas:
@@ -66,6 +70,31 @@ function describeEnsureReason(reason: string): string {
   }
 }
 
+/**
+ * Errores TECNICOS que puede devolver la entrega (no son "skips": son fallas).
+ *
+ * Llegan como el texto crudo del error de la edge function. Mostrarlos asi obliga al
+ * usuario a adivinar, y el unico que puede resolverlos suele ser el mismo que los ve.
+ */
+export function describeDeliveryError(message: string): string {
+  if (message.includes('service_reservation_lead_missing')) {
+    return 'Esta cita todavía no tiene su registro en Kommo, que es donde se le deja el enlace de la encuesta. Abrí la cita en Reservas y volvé a guardarla para que se cree.';
+  }
+  if (message.includes('service_link_field_not_configured')) {
+    return 'Falta configurar en Kommo el campo de la encuesta de postventa. Se carga en Configuración → Automatizaciones.';
+  }
+  if (message.includes('survey_has_no_client')) {
+    return 'Esta cita no está asociada a un cliente registrado, así que no se le puede enviar la encuesta.';
+  }
+  if (message.includes('survey_not_found')) {
+    return 'No se encontró la encuesta de esta cita. Intentá de nuevo en un momento.';
+  }
+  if (message.includes('client_not_found')) {
+    return 'No se encontró el cliente de esta cita.';
+  }
+  return message;
+}
+
 function describeRpcError(e: unknown, fallback: string): string {
   const msg = String((e as { message?: string })?.message || '');
   if (msg.includes('not_authorized')) {
@@ -107,7 +136,7 @@ async function ensureAndDeliver(
     case 'skipped':
       return { ok: false, message: describeSkippedDelivery(outcome.reason) };
     default:
-      return { ok: false, message: outcome.message };
+      return { ok: false, message: describeDeliveryError(outcome.message) };
   }
 }
 

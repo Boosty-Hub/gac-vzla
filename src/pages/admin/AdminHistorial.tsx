@@ -795,7 +795,7 @@ const AdminHistorial = () => {
                       status={e.status}
                       serviceType={e.service_type}
                       canSend={canSendSurvey}
-                      hasResponse={!!detailSurveys.get(e.id)?.responded_at}
+                      survey={detailSurveys.get(e.id)}
                     />
                   </>
                 )}
