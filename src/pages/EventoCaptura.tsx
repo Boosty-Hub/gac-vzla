@@ -152,9 +152,9 @@ const EventoCaptura = () => {
       }
     }
 
-    // Mismos campos que el alta desde el panel. `status: 'nuevo'` y `source: 'evento'` son los
-    // que ya usan Prospectos y la importación: cambiar cualquiera de los dos rompería los
-    // filtros y el mapeo de etapas de Kommo.
+    // Mismos campos que el alta desde el panel. `source: 'evento'` es el que ya usan
+    // Prospectos y la importación; cambiarlo rompería los filtros y el mapeo de etapas de
+    // Kommo. El estado NO se manda: lo pone la base con el de entrada del catálogo.
     const payload = {
       dealership_id: dealershipId,
       name: name.trim(),
@@ -162,7 +162,6 @@ const EventoCaptura = () => {
       email: email.trim() || null,
       model_interest: `${brand} ${model}`.trim(),
       source: 'evento',
-      status: 'nuevo',
       notes: notes.trim() || null,
       salesperson,
       event_name: event.name,

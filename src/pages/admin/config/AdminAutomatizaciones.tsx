@@ -14,8 +14,10 @@ import { cn } from '@/lib/utils';
 
 const WEBHOOK_URL = 'https://wsbuqiznddvxcwvpnbxm.supabase.co/functions/v1/kommo-webhook';
 
+// Espejo de `integration_configs.stage_mappings`. Se sacó la fila 'nuevo': apuntaba a la MISMA
+// etapa que 'por_contactar' (101392711), ese estado ya no existe en el catálogo y no lo escribe
+// nadie. Se agregó 'seguimiento', que sí está en el mapeo real y faltaba en esta tabla.
 const STAGE_MAPPING = [
-  { ourStatus: 'nuevo', ourLabel: 'Nuevo', kommoStage: 'por contactar', kommoId: 101392711 },
   { ourStatus: 'por_contactar', ourLabel: 'Por Contactar', kommoStage: 'por contactar', kommoId: 101392711 },
   { ourStatus: 'en_conversacion', ourLabel: 'En Conversación', kommoStage: 'en conversación', kommoId: 102420903 },
   { ourStatus: 'cotizacion_enviada', ourLabel: 'Cotización Enviada', kommoStage: 'cotización enviada', kommoId: 101392715 },
@@ -23,6 +25,7 @@ const STAGE_MAPPING = [
   { ourStatus: 'demostracion', ourLabel: 'Demostración', kommoStage: 'demostración', kommoId: 101392719 },
   { ourStatus: 'negociacion', ourLabel: 'Negociación', kommoStage: 'negociación', kommoId: 101392723 },
   { ourStatus: 'pendiente_por_disponibilidad', ourLabel: 'Pendiente por Disponibilidad', kommoStage: 'Pendiente por disponibilidad', kommoId: 104647804 },
+  { ourStatus: 'seguimiento', ourLabel: 'Seguimiento', kommoStage: 'seguimiento', kommoId: 105277992 },
   { ourStatus: 'ganado', ourLabel: 'Ganado', kommoStage: 'GANADO', kommoId: 142 },
   { ourStatus: 'perdido', ourLabel: 'Perdido', kommoStage: 'PERDIDO', kommoId: 143 },
 ];

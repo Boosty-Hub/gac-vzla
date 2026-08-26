@@ -116,7 +116,10 @@ const PublicProspectos = () => {
       email: email.trim(),
       model_interest: unitsToModelInterest(pUnits),
       source,
-      status: 'nuevo',
+      // Sin `status`: lo pone la base con el estado de entrada del catálogo
+      // (`normalize_prospect_status`). Acá no hay catálogo cargado para elegirlo bien, y el
+      // 'nuevo' que se mandaba antes no existía como estado: esos leads aparecían como
+      // "Desconocido" en Prospectos.
       dealership_id: dealershipId,
       event_name: source === 'evento' ? eventName.trim() : null,
       notes: notes.trim() || null,

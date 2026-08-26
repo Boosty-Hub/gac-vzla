@@ -24,6 +24,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
+import { entryStatus } from '@/lib/prospectStatus';
 import ProspectStatusManager from '@/components/ProspectStatusManager';
 import SalespersonManager from '@/components/SalespersonManager';
 import ProspectModelManager from '@/components/ProspectModelManager';
@@ -209,6 +210,10 @@ const parseExtraUnitsCell = (raw: string): ProspectUnit[] =>
 
 const AdminProspectos = () => {
   const { statuses: PROSPECT_STATUSES, fetchStatuses: refetchStatuses } = useProspectStatuses();
+  // Estado de ENTRADA del embudo, tomado del catálogo. `'nuevo'` estaba escrito a mano en
+  // seis lugares y no existía en ese catálogo: 50 prospectos quedaron mostrándose como
+  // "Desconocido" y el selector de Estado abría en blanco.
+  const ENTRY_STATUS = entryStatus(PROSPECT_STATUSES);
   const { sources: PROSPECT_SOURCES, fetchSources: refetchSources } = useProspectSources();
   const { salespersons, fetchSalespersons: refetchSalespersons } = useSalespersons();
   const { hasPermission } = useAuth();
@@ -279,7 +284,7 @@ const AdminProspectos = () => {
   const addUnit = () => setPUnits(prev => (prev.length >= MAX_PROSPECT_UNITS ? prev : [...prev, { brand: '', model: '' }]));
   const removeUnit = (index: number) => setPUnits(prev => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
   const [pSource, setPSource] = useState<string>(() => getSS().pSource || 'concesionario');
-  const [pStatus, setPStatus] = useState<string>(() => getSS().pStatus || 'nuevo');
+  const [pStatus, setPStatus] = useState<string>(() => getSS().pStatus || '');
   const [pNotes, setPNotes] = useState<string>(() => getSS().pNotes || '');
   const [pSalesperson, setPSalesperson] = useState<string>(() => getSS().pSalesperson || '');
   const [pEventName, setPEventName] = useState<string>(() => getSS().pEventName || '');
@@ -459,7 +464,7 @@ const AdminProspectos = () => {
     setEditing(null);
     setPDealership(dealerships.length > 0 ? dealerships[0].id : '');
     setPName(''); setPPhone(''); setPEmail(''); setPCompanyName(''); setPUnits([{ brand: '', model: '' }]);
-    setPSource('concesionario'); setPStatus('nuevo'); setPNotes(''); setPSalesperson('');
+    setPSource('concesionario'); setPStatus(ENTRY_STATUS); setPNotes(''); setPSalesperson('');
     setPEventName(''); setPEstadoVzla('');
     setPTestDrive(false); setPShowroom(false); setPPersonType(''); setPGender(''); setPAgeRange('');
     setPPaymentModality('');
@@ -513,7 +518,7 @@ const AdminProspectos = () => {
     email: pEmail.trim() || null,
     model_interest: unitsToModelInterest(pUnits),
     source: pSource || 'concesionario',
-    status: pStatus || 'nuevo',
+    status: pStatus || ENTRY_STATUS,
     notes: pNotes.trim() || null,
     salesperson: (pSalesperson && pSalesperson !== '__none') ? pSalesperson : null,
     event_name: pEventName.trim() || null,
@@ -926,7 +931,7 @@ const AdminProspectos = () => {
     const example = [
       'Juan Pérez', '+58 412 1234567', 'juan@email.com', 'GAC', 'GS4', 'DFSK C31 | SHINERAY X30',
       PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
-      PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
+      PROSPECT_STATUSES.map(s => s.name).join(' | ') || ENTRY_STATUS,
       'Interesado en SUV', 'Carlos Gómez', '', '2026-04-07',
       'si', 'natural', 'masculino', '30-40', 'Contado',
     ];
@@ -1079,9 +1084,9 @@ const AdminProspectos = () => {
           if (!source) source = VALID_SOURCES[0] || 'concesionario';
           if (status && !VALID_STATUSES.includes(status)) {
             errors.push(`Estado inválido: "${status}"`);
-            status = VALID_STATUSES[0] || 'nuevo';
+            status = VALID_STATUSES[0] || ENTRY_STATUS;
           }
-          if (!status) status = VALID_STATUSES[0] || 'nuevo';
+          if (!status) status = VALID_STATUSES[0] || ENTRY_STATUS;
           if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email inválido');
 
           rows.push({ row: i + 2, name, phone, email, brand, model, extraUnits, source, status, dealership: '', notes, salesperson, event_name, fecha, test_drive, person_type, gender, age_range, payment_modality, errors });
@@ -1174,8 +1179,11 @@ const AdminProspectos = () => {
   const [activeTab, setActiveTab] = useState<'abiertos' | 'cerrados' | 'ganados' | 'falta_placa'>('abiertos');
 
   // Stats
-  const totalNuevos = prospects.filter(p => p.status === 'nuevo').length;
-  const totalInteresados = prospects.filter(p => !CLOSED_STATUSES.includes(p.status) && p.status !== 'nuevo').length;
+  // Cuenta el estado de ENTRADA del embudo, no un literal. Antes contaba `'nuevo'`, que no
+  // está en el catálogo `prospect_statuses` y ya no lo escribe nadie: el card habría quedado
+  // en cero sin que nadie se enterara.
+  const totalPorContactar = prospects.filter(p => p.status === ENTRY_STATUS).length;
+  const totalInteresados = prospects.filter(p => !CLOSED_STATUSES.includes(p.status) && p.status !== ENTRY_STATUS).length;
   const totalGanados = prospects.filter(p => p.status === 'ganado').length;
 
   const openProspects = sortedProspects.filter(p => !CLOSED_STATUSES.includes(p.status));
@@ -1414,8 +1422,8 @@ const AdminProspectos = () => {
       <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <Card className="gac-shadow">
           <CardContent className="p-2 sm:p-3 text-center">
-            <p className="text-xl sm:text-2xl font-bold text-blue-600">{totalNuevos}</p>
-            <p className="text-[10px] text-muted-foreground">Nuevos</p>
+            <p className="text-xl sm:text-2xl font-bold text-blue-600">{totalPorContactar}</p>
+            <p className="text-[10px] text-muted-foreground">Por contactar</p>
           </CardContent>
         </Card>
         <Card className="gac-shadow">

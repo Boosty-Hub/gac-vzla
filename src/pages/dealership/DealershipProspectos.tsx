@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
+import { entryStatus } from '@/lib/prospectStatus';
 import { useSalespersons } from '@/hooks/useSalespersons';
 import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { useAuth } from '@/contexts/AuthContext';
@@ -194,6 +195,9 @@ const parseExtraUnitsCell = (raw: string): ProspectUnit[] =>
 
 const DealershipProspectos = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
+  // Estado de ENTRADA del embudo, del catálogo. Ver AdminProspectos: `'nuevo'` estaba
+  // escrito a mano, no existe en ese catálogo, y dejaba el selector de Estado en blanco.
+  const ENTRY_STATUS = entryStatus(PROSPECT_STATUSES);
   const { sources: PROSPECT_SOURCES } = useProspectSources();
   const { events: prospectEvents } = useProspectEvents();
   const { salespersons } = useSalespersons();
@@ -276,7 +280,7 @@ const DealershipProspectos = () => {
   const addUnit = () => setPUnits(prev => (prev.length >= MAX_PROSPECT_UNITS ? prev : [...prev, { brand: '', model: '' }]));
   const removeUnit = (index: number) => setPUnits(prev => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
   const [pSource, setPSource] = useState<string>(() => getSS().pSource || 'concesionario');
-  const [pStatus, setPStatus] = useState<string>(() => getSS().pStatus || 'nuevo');
+  const [pStatus, setPStatus] = useState<string>(() => getSS().pStatus || '');
   const [pNotes, setPNotes] = useState<string>(() => getSS().pNotes || '');
   const [pSalesperson, setPSalesperson] = useState<string>(() => getSS().pSalesperson || '');
   const [pEventName, setPEventName] = useState<string>(() => getSS().pEventName || '');
@@ -724,7 +728,7 @@ const DealershipProspectos = () => {
     const headers = ['nombre','telefono','email','marca','modelo','unidades_adicionales','fuente','estado','notas','vendedor','nombre_evento','estado_vzla','fecha','test_drive','tipo_persona','genero','rango_edad','modalidad_pago'];
     const example = ['Juan Pérez','+58 412 1234567','juan@email.com','GAC','GS4','DFSK C31 | SHINERAY X30',
       PROSPECT_SOURCES.map(s => s.value).join(' | ') || 'concesionario',
-      PROSPECT_STATUSES.map(s => s.name).join(' | ') || 'nuevo',
+      PROSPECT_STATUSES.map(s => s.name).join(' | ') || ENTRY_STATUS,
       'Interesado en SUV', autoSalesperson || 'Carlos Gómez', '', '', '2026-04-07',
       'si','natural','masculino','30-40','Contado'];
     const wb = XLSX.utils.book_new();
@@ -816,8 +820,8 @@ const DealershipProspectos = () => {
           if (brand && !BRANDS_LIST.includes(brand)) errors.push(`Marca inválida: "${brand}"`);
           if (source && !VALID_SOURCES.includes(source)) { errors.push(`Fuente inválida: "${source}"`); source = VALID_SOURCES[0] || 'concesionario'; }
           if (!source) source = VALID_SOURCES[0] || 'concesionario';
-          if (status && !VALID_STATUSES.includes(status)) { errors.push(`Estado inválido: "${status}"`); status = VALID_STATUSES[0] || 'nuevo'; }
-          if (!status) status = VALID_STATUSES[0] || 'nuevo';
+          if (status && !VALID_STATUSES.includes(status)) { errors.push(`Estado inválido: "${status}"`); status = VALID_STATUSES[0] || ENTRY_STATUS; }
+          if (!status) status = VALID_STATUSES[0] || ENTRY_STATUS;
           rows.push({ row: i + 2, name, phone, email, brand, model, extraUnits, source, status, notes, salesperson, event_name, estado_vzla, fecha, test_drive, person_type, gender, age_range, payment_modality, errors });
         });
         setImportRows(rows);
@@ -888,7 +892,7 @@ const DealershipProspectos = () => {
 
   const resetForm = () => {
     setPName(''); setPPhone(''); setPEmail(''); setPCompanyName(''); setPUnits([{ brand: '', model: '' }]);
-    setPSource('concesionario'); setPStatus('nuevo'); setPNotes('');
+    setPSource('concesionario'); setPStatus(ENTRY_STATUS); setPNotes('');
     setPSalesperson(autoSalesperson);
     setPEventName(''); setPEstadoVzla('');
     setPTestDrive(false); setPShowroom(false); setPPersonType(''); setPGender(''); setPAgeRange('');
@@ -919,7 +923,7 @@ const DealershipProspectos = () => {
     // waiting on the network; refine with the full per-unit list once it loads.
     setPUnits(modelInterestToUnits(p.model_interest));
     setPSource(p.source || 'concesionario');
-    setPStatus(p.status || 'nuevo');
+    setPStatus(p.status || ENTRY_STATUS);
     setPNotes(p.notes || '');
     setPSalesperson(p.salesperson || autoSalesperson);
     setPEventName(p.event_name || '');
@@ -988,7 +992,7 @@ const DealershipProspectos = () => {
         email: pEmail.trim() || null,
         model_interest: unitsToModelInterest(pUnits),
         source: pSource || 'concesionario',
-        status: pStatus || 'nuevo',
+        status: pStatus || ENTRY_STATUS,
         notes: pNotes.trim() || null,
         salesperson: resolveSalespersonForSave(),
         event_name: pEventName.trim() || null,
@@ -1001,11 +1005,11 @@ const DealershipProspectos = () => {
         payment_modality: pPaymentModality || null,
         company_name: pCompanyName.trim() || null,
         // C6: when the new status is not "perdido", clear any stale loss reason.
-        ...((pStatus || 'nuevo') !== 'perdido' ? { loss_reason_id: null, loss_reason: null } : {}),
+        ...((pStatus || ENTRY_STATUS) !== 'perdido' ? { loss_reason_id: null, loss_reason: null } : {}),
       };
       // REQ1: when the edit moves the prospect to "perdido" we must capture a
       // mandatory loss reason before persisting. Defer to the loss-reason dialog.
-      if ((pStatus || 'nuevo') === 'perdido' && editingProspect.status !== 'perdido') {
+      if ((pStatus || ENTRY_STATUS) === 'perdido' && editingProspect.status !== 'perdido') {
         setSaving(false);
         setSelectedLossReasonId('');
         // W-a: close the missing-fields AlertDialog first so modals don't stack.
@@ -1039,7 +1043,7 @@ const DealershipProspectos = () => {
       }
       // C5: creating a brand-new prospect already marked "perdido" must capture a
       // mandatory loss reason first; defer the insert to the loss-reason dialog.
-      if ((pStatus || 'nuevo') === 'perdido') {
+      if ((pStatus || ENTRY_STATUS) === 'perdido') {
         setSaving(false);
         setSelectedLossReasonId('');
         setConfirmOpen(false);
@@ -1053,7 +1057,7 @@ const DealershipProspectos = () => {
         email: pEmail.trim() || null,
         model_interest: unitsToModelInterest(pUnits),
         source: pSource || 'concesionario',
-        status: pStatus || 'nuevo',
+        status: pStatus || ENTRY_STATUS,
         notes: pNotes.trim() || null,
         salesperson: resolveSalespersonForSave(),
         event_name: pEventName.trim() || null,
@@ -1200,7 +1204,7 @@ const DealershipProspectos = () => {
           email: pEmail.trim() || null,
           model_interest: unitsToModelInterest(pUnits),
           source: pSource || 'concesionario',
-          status: pStatus || 'nuevo',
+          status: pStatus || ENTRY_STATUS,
           notes: pNotes.trim() || null,
           salesperson: resolveSalespersonForSave(),
           event_name: pEventName.trim() || null,
