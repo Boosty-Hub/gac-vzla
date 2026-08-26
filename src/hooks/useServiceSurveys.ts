@@ -47,6 +47,10 @@ export interface ServiceSurveySummary {
 export function useServiceSurveys(reservationIds: string[]) {
   const [surveys, setSurveys] = useState<Map<string, ServiceSurveySummary>>(new Map());
   const [loading, setLoading] = useState(false);
+  // Se incrementa para volver a pedir las mismas encuestas. Hace falta desde que se puede
+  // ENVIAR una desde el listado: sin esto el icono de esa fila seguiría diciendo "sin
+  // enviar" hasta recargar la página.
+  const [reloadToken, setReloadToken] = useState(0);
 
   // Join the ids into a stable primitive so the effect doesn't re-run on every render just
   // because the caller passed a freshly-built array with identical contents.
@@ -62,28 +66,44 @@ export function useServiceSurveys(reservationIds: string[]) {
     let cancelled = false;
     setLoading(true);
     (async () => {
-      // `satisfaction_surveys` / `service_survey_responses` are not in the generated
-      // types.ts yet — `as any` matches this project's convention for new DB objects.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase as any)
-        .from('satisfaction_surveys')
-        .select('id, reservation_id, status, responded_at, response:service_survey_responses(*)')
-        .eq('origin', 'service')
-        // A suppressed survey must never render. It was withdrawn on purpose — showing it as
-        // "enviada, sin responder" would blame the customer for silence we caused.
-        .is('suppressed_reason', null)
-        .in('reservation_id', ids);
+      // Los ids viajan DENTRO DE LA URL (`?reservation_id=in.(...)`). Un uuid ocupa 37
+      // caracteres, así que el Historial con 1000 filas por página armaría una URL de ~37 KB
+      // y el servidor la rechaza con 414 antes de mirarla. Cortado en lotes, cada pedido
+      // queda en unos 5 KB y los lotes van en paralelo.
+      const CHUNK = 120;
+      const chunks: string[][] = [];
+      for (let i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+
+      const results = await Promise.all(chunks.map(chunk =>
+        // `satisfaction_surveys` / `service_survey_responses` are not in the generated
+        // types.ts yet — `as any` matches this project's convention for new DB objects.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (supabase as any)
+          .from('satisfaction_surveys')
+          .select('id, reservation_id, status, responded_at, response:service_survey_responses(*)')
+          .eq('origin', 'service')
+          // A suppressed survey must never render. It was withdrawn on purpose — showing it
+          // as "enviada, sin responder" would blame the customer for silence we caused.
+          .is('suppressed_reason', null)
+          .in('reservation_id', chunk),
+      ));
 
       if (cancelled) return;
-      if (error) {
+
+      const failed = results.find(r => r.error);
+      if (failed) {
         // A history list must still render if this side lookup fails — the survey is
-        // supplementary information, not the point of the dialog.
-        console.error('Error loading service surveys:', error);
+        // supplementary information, not the point of the dialog. Se descarta TODO y no lo
+        // que llegó: un mapa a medias pintaría "sin enviar" sobre encuestas ya enviadas,
+        // que es peor que no pintar nada.
+        console.error('Error loading service surveys:', failed.error);
         setSurveys(new Map());
       } else {
         const map = new Map<string, ServiceSurveySummary>();
-        for (const row of (data || []) as ServiceSurveySummary[]) {
-          if (row.reservation_id) map.set(row.reservation_id, row);
+        for (const result of results) {
+          for (const row of (result.data || []) as ServiceSurveySummary[]) {
+            if (row.reservation_id) map.set(row.reservation_id, row);
+          }
         }
         setSurveys(map);
       }
@@ -91,7 +111,7 @@ export function useServiceSurveys(reservationIds: string[]) {
     })();
 
     return () => { cancelled = true; };
-  }, [key]);
+  }, [key, reloadToken]);
 
-  return { surveys, loading };
+  return { surveys, loading, reload: () => setReloadToken(t => t + 1) };
 }

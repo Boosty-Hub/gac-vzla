@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText, X, Pencil, AlertTriangle } from 'lucide-react';
+import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText, X, Pencil, AlertTriangle, Send, Clock, Star, Minus } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 import {
@@ -25,6 +25,9 @@ import { toast } from 'sonner';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 import ServiceSurveySendPanel from '@/components/satisfaction/ServiceSurveySendPanel';
+import ServiceSurveySendDialog, { type ServiceSurveyTarget } from '@/components/satisfaction/ServiceSurveySendDialog';
+import { serviceSurveyIconState } from '@/lib/serviceSurveyIcon';
+import { useServiceSurveySettings } from '@/hooks/useServiceSurveySettings';
 import { fetchAllRows } from '@/lib/fetchAllRows';
 import { isInternalServiceName, serviceNotesLabel } from '@/lib/serviceTypes';
 import { useInternalServiceTypes } from '@/hooks/useInternalServiceTypes';
@@ -135,9 +138,31 @@ const AdminHistorial = () => {
   const [editRecommendation, setEditRecommendation] = useState('');
   const [editInternalNotes, setEditInternalNotes] = useState('');
 
-  // Encuesta de postventa del servicio abierto en el detalle. Se pide sólo para esa cita:
-  // traerlas para las 100 filas de la página cargaría datos que nadie va a mirar.
-  const { surveys: detailSurveys } = useServiceSurveys(detail ? [detail.id] : []);
+  // Encuestas de postventa de TODA la página, en UNA consulta (`.in('reservation_id', ids)`).
+  //
+  // Antes se pedía sólo la del detalle abierto, con el argumento de que traerlas para las 100
+  // filas cargaba datos que nadie iba a mirar. Dejó de ser cierto: el listado ahora pinta un
+  // icono por fila con el estado de la encuesta, así que ese dato se mira en todas.
+  const surveyIds = useMemo(() => entries.map(e => e.id), [entries]);
+  const { surveys: serviceSurveys, reload: reloadSurveys } = useServiceSurveys(surveyIds);
+
+  // Las dos condiciones que deciden si una cita PUEDE recibir la encuesta. Se leen una vez
+  // para toda la pantalla: por fila serían mil consultas para pintar una columna.
+  const { enabled: surveyEnabled, sendsSurvey } = useServiceSurveySettings();
+
+  // Cita cuyo envío se está confirmando. El diálogo es UNO solo para el listado y para el
+  // detalle: dos caminos de envío que preguntan distinto terminan siendo dos comportamientos.
+  const [surveyTarget, setSurveyTarget] = useState<ServiceSurveyTarget | null>(null);
+
+  const openSurveyDialog = (entry: ServiceEntry) => setSurveyTarget({
+    reservationId: entry.id,
+    clientId: entry.client_id,
+    clientName: entry.clients?.full_name ?? null,
+    clientPhone: entry.clients?.phone ?? null,
+    plate: entry.vehicles?.plate ?? null,
+    serviceType: entry.service_type,
+    date: entry.reservation_date,
+  });
 
   useEffect(() => {
     supabase
@@ -556,6 +581,7 @@ const AdminHistorial = () => {
                 <TableHead>Concesionario</TableHead>
                 <TableHead>Km</TableHead>
                 <TableHead>Garantía</TableHead>
+                <TableHead className="text-center">Encuesta</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -585,6 +611,40 @@ const AdminHistorial = () => {
                         {e.vehicles?.vehicle_models?.is_manual ? <Car className="w-2.5 h-2.5" /> : w.active ? <ShieldCheck className="w-2.5 h-2.5" /> : <ShieldX className="w-2.5 h-2.5" />}
                         {e.vehicles?.vehicle_models?.is_manual ? 'Terceros' : w.active ? 'Sí' : 'No'}
                       </Badge>
+                    </TableCell>
+                    {/* Encuesta de postventa, a un clic desde el listado. `stopPropagation`
+                        es obligatorio: la fila entera abre el detalle, y sin él tocar el
+                        icono abriría las dos cosas a la vez. */}
+                    <TableCell className="text-center" onClick={ev => ev.stopPropagation()}>
+                      {e.status !== 'completada' ? (
+                        <span className="text-muted-foreground/50">—</span>
+                      ) : (() => {
+                        const state = serviceSurveyIconState(serviceSurveys.get(e.id), sendsSurvey(e.service_type));
+                        if (state === 'no_aplica') {
+                          return (
+                            <span title={`«${e.service_type}» no envía encuesta de postventa`}>
+                              <Minus className="w-3.5 h-3.5 text-muted-foreground/50 mx-auto" />
+                            </span>
+                          );
+                        }
+                        const look = {
+                          respondida: { Icon: Star,  cls: 'text-green-600 fill-green-600', title: 'El cliente ya respondió la encuesta' },
+                          enviada:    { Icon: Clock, cls: 'text-amber-600',                title: 'Encuesta enviada, sin responder' },
+                          sin_enviar: { Icon: Send,  cls: 'text-primary',                  title: 'Enviar encuesta de postventa' },
+                        }[state];
+                        return (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            title={canSendSurvey ? look.title : 'Sin permiso para enviar encuestas'}
+                            disabled={!canSendSurvey}
+                            onClick={() => openSurveyDialog(e)}
+                          >
+                            <look.Icon className={cn('w-3.5 h-3.5', look.cls)} />
+                          </Button>
+                        );
+                      })()}
                     </TableCell>
                   </TableRow>
                 );
@@ -776,10 +836,10 @@ const AdminHistorial = () => {
 
                 {/* Resultado de la encuesta de postventa de ESTE servicio. Rinde null cuando
                     no hay encuesta, así que un servicio sin ella se ve igual que antes. */}
-                {detailSurveys.get(e.id) && (
+                {serviceSurveys.get(e.id) && (
                   <>
                     <Separator />
-                    <ServiceSurveyInline survey={detailSurveys.get(e.id)} />
+                    <ServiceSurveyInline survey={serviceSurveys.get(e.id)} />
                   </>
                 )}
 
@@ -791,11 +851,13 @@ const AdminHistorial = () => {
                     <Separator />
                     <ServiceSurveySendPanel
                       reservationId={e.id}
-                      clientId={e.client_id}
                       status={e.status}
                       serviceType={e.service_type}
                       canSend={canSendSurvey}
-                      survey={detailSurveys.get(e.id)}
+                      survey={serviceSurveys.get(e.id)}
+                      sendsSurvey={sendsSurvey(e.service_type)}
+                      surveyEnabled={surveyEnabled}
+                      onSend={() => openSurveyDialog(e)}
                     />
                   </>
                 )}
@@ -850,6 +912,17 @@ const AdminHistorial = () => {
           })()}
         </DialogContent>
       </Dialog>
+
+      {/* Confirmación de envío de la encuesta de postventa. Uno solo, compartido por el
+          icono del listado y por el botón del detalle. */}
+      <ServiceSurveySendDialog
+        target={surveyTarget}
+        survey={surveyTarget ? serviceSurveys.get(surveyTarget.reservationId) : undefined}
+        surveyEnabled={surveyEnabled}
+        sendsSurvey={surveyTarget ? sendsSurvey(surveyTarget.serviceType) : true}
+        onOpenChange={open => { if (!open) setSurveyTarget(null); }}
+        onSent={reloadSurveys}
+      />
 
       {/* EDIT DIALOG */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
