@@ -3,6 +3,21 @@ name: gitleaks
 # Escaneo de secretos en cada push y PR. Previene que credenciales entren al
 # repo — la causa raíz del hallazgo C4. Usa el binario open-source de gitleaks
 # directamente (el action gitleaks/gitleaks-action exige licencia paga en orgs).
+#
+# ESCANEA EL HISTORIAL, NO SÓLO LOS ARCHIVOS DE HOY (cambiado el 2026-08-26).
+#
+# Antes corría con `--no-git --source .`, que mira únicamente el árbol de trabajo. Eso deja
+# pasar el caso más común y más grave: un secreto que se commitea, alguien lo borra del
+# archivo, y queda en el historial para siempre. El escaneo daba verde mientras el secreto
+# seguía ahí, a un `git log -p` de distancia.
+#
+# No es hipotético. Así quedó publicado el access_token de Kommo en
+# supabase/migrations/20260420000001_kommo_integration.sql (commit 1f91b92, 2026-04-20): el
+# archivo de hoy dice 'NO ', pero el token real sigue en el historial y es EL MISMO que está
+# en producción, válido hasta 2028.
+#
+# Un secreto ya rotado se agrega a la allowlist de .gitleaks.toml, que es como se resolvió el
+# token sbp_ viejo. Rotar primero, allowlistear después — nunca al revés.
 
 on:
   push:
@@ -15,10 +30,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Sin esto el checkout trae un solo commit y el escaneo del historial no ve nada:
+          # daría verde por no tener qué mirar, que es peor que fallar.
+          fetch-depth: 0
       - name: Instalar y correr gitleaks
         run: |
           VERSION=8.18.4
           curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
           tar -xzf gitleaks.tar.gz gitleaks
           chmod +x gitleaks
-          ./gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose --exit-code 1
+          ./gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1

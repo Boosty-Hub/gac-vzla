@@ -13,4 +13,9 @@ regexes = [
   '''eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndzYnVxaXpuZGR2eGN3dnBuYnhtIiwicm9sZSI6ImFub24i''',
   # Nueva publishable key (sb_publishable_...): también pública por diseño.
   '''sb_publishable_7kE-XLp_jL_fPq2XqVOSMg_IejPqbdy''',
+  # Clave del widget de soporte de Boosty (src/components/BoostySupport.tsx).
+  # El prefijo `pk_` es de publishable, y se comprobó: viaja adentro del bundle
+  # compilado, así que cualquiera la lee desde el navegador. Marcarla sería pedir
+  # que se esconda algo que por diseño se publica.
+  '''bw_pk_887c9a608806a32b74f2f7dc2531e5b2''',
 ]
