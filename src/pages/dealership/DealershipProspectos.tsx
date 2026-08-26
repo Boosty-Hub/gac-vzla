@@ -30,6 +30,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useProspectModels } from '@/hooks/useProspectModels';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import { useProspectEvents } from '@/hooks/useProspectEvents';
+import { buildEventFilterOptions } from '@/lib/prospectEventFilter';
 import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 import { useLossReasons } from '@/hooks/useLossReasons';
@@ -1434,20 +1435,24 @@ const DealershipProspectos = () => {
                 </SelectContent>
               </Select>
             </div>
-            {(prosSourceFilter === 'evento' || eventNameFilter !== 'todos') && (
-              <div className="flex flex-col gap-0.5 shrink-0">
-                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Evento</span>
-                <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
-                  <SelectTrigger className="w-[180px] h-8 text-xs"><SelectValue placeholder="Todos los eventos" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todos">Todos los eventos</SelectItem>
-                    {[...new Set(prospects.filter(p => p.event_name).map(p => p.event_name!))].map(en => (
-                      <SelectItem key={en} value={en}>{en}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            {/* Independiente del filtro de Canal, por lo mismo que en AdminProspectos:
+                `event_name` y `source` no son la misma pregunta y atarlos escondía 404
+                leads con evento cuya fuente era otra. */}
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Evento</span>
+              <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="w-[180px] h-8 text-xs"><SelectValue placeholder="Todos los eventos" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los eventos</SelectItem>
+                  {buildEventFilterOptions(prospectEvents, prospects).map(opt => (
+                    <SelectItem key={opt.name} value={opt.name}>
+                      {opt.name}{' '}
+                      <span className="text-muted-foreground">({opt.count})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex flex-col gap-0.5 shrink-0">
               <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Marca</span>
               <Select value={prosBrandFilter} onValueChange={v => { setProsBrandFilter(v); setCurrentPage(1); }}>

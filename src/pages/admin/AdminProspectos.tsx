@@ -35,6 +35,7 @@ import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import ProspectSourceManager from '@/components/ProspectSourceManager';
 import ProspectEventManager from '@/components/ProspectEventManager';
 import { useProspectEvents } from '@/hooks/useProspectEvents';
+import { buildEventFilterOptions } from '@/lib/prospectEventFilter';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 import { phonesMatch } from '@/lib/phone';
@@ -1492,7 +1493,7 @@ const AdminProspectos = () => {
             </div>
             <div className="flex flex-col gap-0.5 shrink-0">
               <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Canal</span>
-              <Select value={sourceFilter} onValueChange={v => { setSourceFilter(v); if (v !== 'evento') setEventNameFilter('todos'); setCurrentPage(1); }}>
+              <Select value={sourceFilter} onValueChange={v => { setSourceFilter(v); setCurrentPage(1); }}>
                 <SelectTrigger className="h-8 text-xs w-[120px]"><SelectValue placeholder="Todos" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos los canales</SelectItem>
@@ -1500,20 +1501,32 @@ const AdminProspectos = () => {
                 </SelectContent>
               </Select>
             </div>
-            {(sourceFilter === 'evento' || eventNameFilter !== 'todos') && (
-              <div className="flex flex-col gap-0.5 shrink-0">
-                <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Evento</span>
-                <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
-                  <SelectTrigger className="w-[190px] h-8 text-xs"><SelectValue placeholder="Todos los eventos" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="todos">Todos los eventos</SelectItem>
-                    {[...new Set(prospects.filter(p => p.event_name).map(p => p.event_name!))].sort().map(en => (
-                      <SelectItem key={en} value={en}>{en}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            {/* El filtro de Evento NO depende del de Canal.
+
+                Estaban atados: sólo aparecía con Canal = Evento, y ese mismo Canal filtra
+                las filas por `source`. Pero `event_name` y `source` son independientes — un
+                lead captado en el stand por Instagram tiene source 'redes_sociales' y su
+                evento cargado, y las dos cosas son ciertas. 404 de los 1.271 leads con
+                evento tienen otra fuente.
+
+                El resultado era un conteo mudo y equivocado: "Cerro Verde 2026" mostraba 32
+                leads de los 236 que tiene, y "Acarigua Mango Center" 213 de 359. Con esos
+                números se decide dónde poner la plata del próximo evento. */}
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Evento</span>
+              <Select value={eventNameFilter} onValueChange={v => { setEventNameFilter(v); setCurrentPage(1); }}>
+                <SelectTrigger className="w-[190px] h-8 text-xs"><SelectValue placeholder="Todos los eventos" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los eventos</SelectItem>
+                  {buildEventFilterOptions(prospectEvents, prospects).map(opt => (
+                    <SelectItem key={opt.name} value={opt.name}>
+                      {opt.name}{' '}
+                      <span className="text-muted-foreground">({opt.count})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex flex-col gap-0.5 shrink-0">
               <span className="text-[10px] text-muted-foreground font-medium leading-none px-0.5">Marca</span>
               <Select value={brandFilter} onValueChange={v => { setBrandFilter(v); setCurrentPage(1); }}>
