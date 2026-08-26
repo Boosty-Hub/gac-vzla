@@ -1,28 +1,29 @@
 name: gitleaks
 
-# Escaneo de secretos en cada push y PR. Previene que credenciales entren al
-# repo — la causa raíz del hallazgo C4. Usa el binario open-source de gitleaks
-# directamente (el action gitleaks/gitleaks-action exige licencia paga en orgs).
+# EN MANUAL A PROPÓSITO (2026-08-26). Ya no corre en cada push.
 #
-# ESCANEA EL HISTORIAL, NO SÓLO LOS ARCHIVOS DE HOY (cambiado el 2026-08-26).
+# Las 40 corridas entre el 2026-08-03 y el 2026-08-26 fallaron, todas, y ninguna llegó a
+# escanear una línea: el job ni siquiera arrancaba. GitHub devolvía "The job was not started
+# because recent account payments have failed or your spending limit needs to be increased".
+# Es facturación de la cuenta, no algo que se arregle desde el repo — ningún cambio acá
+# adentro hace que un job bloqueado por pago corra.
 #
-# Antes corría con `--no-git --source .`, que mira únicamente el árbol de trabajo. Eso deja
-# pasar el caso más común y más grave: un secreto que se commitea, alguien lo borra del
-# archivo, y queda en el historial para siempre. El escaneo daba verde mientras el secreto
-# seguía ahí, a un `git log -p` de distancia.
+# El resultado era un mail de "Run failed" por cada push, sobre algo que nadie podía resolver
+# leyendo el repo. Una alarma que suena siempre deja de ser una alarma, y encima tapa a las
+# que sí importan.
 #
-# No es hipotético. Así quedó publicado el access_token de Kommo en
-# supabase/migrations/20260420000001_kommo_integration.sql (commit 1f91b92, 2026-04-20): el
-# archivo de hoy dice 'NO ', pero el token real sigue en el historial y es EL MISMO que está
-# en producción, válido hasta 2028.
+# EL ESCANEO NO SE PERDIÓ, SE MUDÓ: ahora corre en `.githooks/pre-commit`, antes de que el
+# commit exista. Ahí sirve más — el CI avisa cuando el secreto YA está en el historial y la
+# única salida es rotar la credencial; el hook impide que entre.
 #
-# Un secreto ya rotado se agrega a la allowlist de .gitleaks.toml, que es como se resolvió el
-# token sbp_ viejo. Rotar primero, allowlistear después — nunca al revés.
+# PARA VOLVER A DEJARLO AUTOMÁTICO, una vez resuelta la facturación: descomentar el bloque
+# `push`/`pull_request` de abajo. El escaneo en sí quedó bien y mira el historial completo.
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
+  # push:
+  #   branches: [main]
+  # pull_request:
 
 jobs:
   scan:
@@ -40,4 +41,7 @@ jobs:
           curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
           tar -xzf gitleaks.tar.gz gitleaks
           chmod +x gitleaks
+          # Escanea el HISTORIAL, no sólo los archivos de hoy. Con `--no-git` un secreto
+          # commiteado y después borrado del archivo daba verde — así pasó desapercibido el
+          # access_token de Kommo del commit 1f91b92 durante cuatro meses.
           ./gitleaks detect --source . --config .gitleaks.toml --redact --verbose --exit-code 1

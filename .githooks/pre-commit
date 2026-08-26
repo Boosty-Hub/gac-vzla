@@ -1,0 +1,43 @@
+#!/bin/sh
+# Escaneo de secretos ANTES de que el commit exista.
+#
+# Reemplaza al workflow de gitleaks, que quedó en manual: fallaba en cada push por la
+# facturación de GitHub Actions y eso no se arregla desde el repo. Este corre acá, gratis,
+# sin depender de nada externo.
+#
+# Y es el lugar donde de verdad sirve. El escaneo en CI avisa DESPUÉS: cuando salta, el
+# secreto ya está en el historial, ya viajó al servidor, y la única salida es rotar la
+# credencial. Acá el secreto simplemente no entra: se corrige el archivo y se vuelve a
+# commitear, sin historial que limpiar y sin nada que rotar.
+#
+# No es hipotético en este repo — el access_token de Kommo quedó commiteado el 2026-04-20 y
+# sigue en el historial, válido hasta 2028.
+#
+# ACTIVARLO (una vez por clon):
+#     git config core.hooksPath .githooks
+#
+# SALTEARLO en un commit puntual (que quede claro que es a propósito):
+#     git commit --no-verify
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  # No se bloquea el commit por no tener la herramienta: dejar a alguien sin poder trabajar
+  # es peor que el riesgo que esto cubre, y el aviso alcanza para que la instale.
+  echo "AVISO: gitleaks no está instalado, el commit va SIN escaneo de secretos."
+  echo "       Instalalo desde https://github.com/gitleaks/gitleaks/releases"
+  echo "       y dejá el binario en una carpeta de tu PATH."
+  exit 0
+fi
+
+# `protect --staged` mira SÓLO lo que está por commitearse. Escanear el repo entero en cada
+# commit tardaría casi un minuto y marcaría siempre los hallazgos viejos ya conocidos.
+if ! gitleaks protect --staged --config .gitleaks.toml --redact --verbose; then
+  echo ""
+  echo "COMMIT BLOQUEADO: hay algo que parece una credencial en lo que ibas a commitear."
+  echo ""
+  echo "  - Si ES un secreto: sacalo del archivo y leelo de una variable de entorno."
+  echo "  - Si es PÚBLICO por diseño (una publishable key, por ejemplo): agregalo a la"
+  echo "    allowlist de .gitleaks.toml explicando por qué."
+  echo ""
+  echo "Si estás seguro de que es un falso positivo y tenés apuro: git commit --no-verify"
+  exit 1
+fi
