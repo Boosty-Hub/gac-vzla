@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -694,27 +694,71 @@ export type Database = {
       }
       prospect_events: {
         Row: {
+          brands: string[]
+          capture_form_enabled: boolean
           created_at: string
+          dealership_id: string | null
+          description: string | null
+          end_date: string | null
+          exhibited_vehicles: string[]
           id: string
+          investment: number | null
+          investment_currency: string
           is_active: boolean
+          location: string | null
           name: string
+          salesperson_ids: string[]
           sort_order: number
+          start_date: string | null
+          updated_at: string
         }
         Insert: {
+          brands?: string[]
+          capture_form_enabled?: boolean
           created_at?: string
+          dealership_id?: string | null
+          description?: string | null
+          end_date?: string | null
+          exhibited_vehicles?: string[]
           id?: string
+          investment?: number | null
+          investment_currency?: string
           is_active?: boolean
+          location?: string | null
           name: string
+          salesperson_ids?: string[]
           sort_order?: number
+          start_date?: string | null
+          updated_at?: string
         }
         Update: {
+          brands?: string[]
+          capture_form_enabled?: boolean
           created_at?: string
+          dealership_id?: string | null
+          description?: string | null
+          end_date?: string | null
+          exhibited_vehicles?: string[]
           id?: string
+          investment?: number | null
+          investment_currency?: string
           is_active?: boolean
+          location?: string | null
           name?: string
+          salesperson_ids?: string[]
           sort_order?: number
+          start_date?: string | null
+          updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "prospect_events_dealership_id_fkey"
+            columns: ["dealership_id"]
+            isOneToOne: false
+            referencedRelation: "dealerships"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       prospect_loss_reasons: {
         Row: {
@@ -1587,6 +1631,87 @@ export type Database = {
         }
         Relationships: []
       }
+      survey_send_decisions: {
+        Row: {
+          client_id: string | null
+          created_at: string
+          decided_at: string
+          decided_by: string | null
+          decided_by_name: string
+          decision: boolean
+          id: string
+          kind: string
+          outcome: string | null
+          prospect_id: string | null
+          reservation_id: string | null
+          survey_id: string | null
+        }
+        Insert: {
+          client_id?: string | null
+          created_at?: string
+          decided_at?: string
+          decided_by?: string | null
+          decided_by_name: string
+          decision: boolean
+          id?: string
+          kind: string
+          outcome?: string | null
+          prospect_id?: string | null
+          reservation_id?: string | null
+          survey_id?: string | null
+        }
+        Update: {
+          client_id?: string | null
+          created_at?: string
+          decided_at?: string
+          decided_by?: string | null
+          decided_by_name?: string
+          decision?: boolean
+          id?: string
+          kind?: string
+          outcome?: string | null
+          prospect_id?: string | null
+          reservation_id?: string | null
+          survey_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "survey_send_decisions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "survey_send_decisions_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "survey_send_decisions_prospect_id_fkey"
+            columns: ["prospect_id"]
+            isOneToOne: false
+            referencedRelation: "prospects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "survey_send_decisions_reservation_id_fkey"
+            columns: ["reservation_id"]
+            isOneToOne: false
+            referencedRelation: "reservations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "survey_send_decisions_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "satisfaction_surveys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_permissions: {
         Row: {
           created_at: string
@@ -1799,6 +1924,20 @@ export type Database = {
       }
     }
     Views: {
+      prospect_event_stats: {
+        Row: {
+          en_gestion: number | null
+          event_id: string | null
+          event_name: string | null
+          ganados: number | null
+          leads_total: number | null
+          perdidos: number | null
+          test_drives: number | null
+          ultimo_lead_at: string | null
+          visitas_showroom: number | null
+        }
+        Relationships: []
+      }
       v_duplicate_clients: {
         Row: {
           cedula: string | null
@@ -2006,6 +2145,18 @@ export type Database = {
         Returns: undefined
       }
       prospect_phone_exists: { Args: { p_phone: string }; Returns: boolean }
+      record_survey_decision: {
+        Args: {
+          p_client_id?: string
+          p_decision: boolean
+          p_kind: string
+          p_outcome?: string
+          p_prospect_id?: string
+          p_reservation_id?: string
+          p_survey_id?: string
+        }
+        Returns: string
+      }
       register_client_repurchase: {
         Args: {
           p_client_id: string
@@ -2077,6 +2228,10 @@ export type Database = {
       set_service_survey_enabled: {
         Args: { p_enabled: boolean }
         Returns: boolean
+      }
+      set_survey_decision_outcome: {
+        Args: { p_decision_id: string; p_outcome: string }
+        Returns: undefined
       }
       staff_lookup_client_vehicles: {
         Args: { p_client_id: string }

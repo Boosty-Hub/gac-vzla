@@ -38,6 +38,7 @@ import PublicReserva from "./pages/PublicReserva";
 import PublicMiFlota from "./pages/PublicMiFlota";
 import PublicProspectos from "./pages/PublicProspectos";
 import PublicEncuesta from "./pages/PublicEncuesta";
+import EventoCaptura from "./pages/EventoCaptura";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -79,6 +80,16 @@ const App = () => (
             <Route path="/mi-flota" element={<PublicMiFlota />} />
             <Route path="/prospectos" element={<PublicProspectos />} />
             <Route path="/encuesta/:token" element={<PublicEncuesta />} />
+
+            {/* Formulario de captación de un evento. Pide sesión a propósito: el lead tiene
+                que subir a Kommo por la edge function, que exige JWT — el formulario público
+                de /prospectos no la llama y por eso sus leads no llegan al CRM. Ver
+                EventoCaptura.tsx. */}
+            <Route path="/captura/:eventId" element={
+              <ProtectedRoute allowedPortals={['admin', 'concesionario']} requiredModule="prospectos">
+                <EventoCaptura />
+              </ProtectedRoute>
+            } />
 
             {/* Cliente routes */}
             <Route path="/usuario" element={

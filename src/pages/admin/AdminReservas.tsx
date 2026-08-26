@@ -32,6 +32,7 @@ import { fetchAllRows } from '@/lib/fetchAllRows';
 import ServiceSurveyDecision, { type ServiceSurveyChoice } from '@/components/reservations/ServiceSurveyDecision';
 import CancelReservationDialog from '@/components/reservations/CancelReservationDialog';
 import { sendServiceSurveyNow } from '@/components/clients/manualSurveySend';
+import { recordSurveyDecision, closeSurveyDecision } from '@/lib/surveyDecision';
 import {
   RESERVATION_STATUS_LABELS as STATUS_LABELS,
   RESERVATION_STATUS_COLORS as STATUS_COLORS,
@@ -1019,13 +1020,33 @@ const AdminReservas = () => {
       // La encuesta va DESPUÉS de que la cita quedó cerrada y sólo si la pidieron. Va sin
       // await y sin bloquear el diálogo: si Kommo tarda o falla, el servicio ya está
       // completado igual — que es lo que importa. El resultado se cuenta por toast.
-      if (surveyChoice === 'si') {
-        sendServiceSurveyNow(completingRes.id)
-          .then(result => (result.ok ? toast.success(result.message) : toast.warning(result.message)))
-          .catch(err => {
-            console.error(err);
-            toast.warning('El servicio se cerró, pero no se pudo enviar la encuesta.');
+      // La decisión se escribe SIEMPRE, también cuando eligió que no. Guardar sólo los "sí"
+      // convertiría el registro en una lista de envíos, que es lo que ya existía: si mañana
+      // el cliente reclama que nunca le llegó la encuesta, lo que hay que poder responder es
+      // quién decidió no mandársela.
+      //
+      // `askSurvey` en false = este tipo de servicio no lleva encuesta, así que no hubo
+      // decisión que registrar.
+      if (surveyChoice !== null) {
+        const wantsSurvey = surveyChoice === 'si';
+        const reservationId = completingRes.id;
+        recordSurveyDecision(
+          'postventa',
+          wantsSurvey,
+          { reservationId, clientId: completingRes.client_id ?? null },
+          wantsSurvey ? undefined : 'No se envió: decisión de quien cerró el servicio',
+        ).then(decisionId => {
+          if (!wantsSurvey) return;
+          // Sin await sobre el diálogo: si Kommo tarda o falla, el servicio ya está cerrado.
+          return sendServiceSurveyNow(reservationId).then(result => {
+            if (result.ok) toast.success(result.message);
+            else toast.warning(result.message);
+            return closeSurveyDecision(decisionId, result.ok ? 'Enviada' : result.message);
           });
+        }).catch(err => {
+          console.error(err);
+          toast.warning('El servicio se cerró, pero no se pudo enviar la encuesta.');
+        });
       }
     }
     setCompleting(false);

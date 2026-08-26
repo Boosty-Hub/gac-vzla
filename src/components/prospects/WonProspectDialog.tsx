@@ -17,7 +17,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Plus, Trash2 } from 'lucide-react';
 import { normalizeSoldPlate, isValidSoldPlate } from '@/lib/plate';
 import { translateRegisterWonProspectError } from '@/components/prospects/wonProspectMessages';
-import { deliverSatisfactionSurvey, type DeliverSurveyOutcome } from '@/components/clients/surveyDelivery';
+import { sendSalesSurveyNow, type ManualSendResult } from '@/components/clients/manualSurveySend';
+import { deliverSatisfactionSurvey, describeSkippedDelivery } from '@/components/clients/surveyDelivery';
+import ServiceSurveyDecision, { type ServiceSurveyChoice } from '@/components/reservations/ServiceSurveyDecision';
+import { recordSurveyDecision, closeSurveyDecision } from '@/lib/surveyDecision';
 
 /**
  * Shared "won prospect" dialog — moving a prospect to `ganado` in both the admin and
@@ -38,16 +41,33 @@ import { deliverSatisfactionSurvey, type DeliverSurveyOutcome } from '@/componen
  * types.ts`. Follows the established `as any` convention used elsewhere in this codebase
  * for tables/RPCs ahead of a type regen (see `SatisfactionOverview.tsx:13-14`).
  *
- * design.md's data-flow diagram (line 42) requires this UI path to also invoke
- * `kommo-api`'s `deliver_satisfaction_survey` action once the survey exists — the
- * Kommo-webhook path (task 2.2) already does this for its own entry point, this is the
- * other one. Reuses `deliverSatisfactionSurvey`/`DeliverSurveyOutcome` from
- * `src/components/clients/surveyDelivery.ts` (built for the resend button / repurchase
- * flow) rather than re-implementing the same edge-function contract a second time.
- * Delivery is attempted ONLY when the RPC did not suppress the survey (suppressed_reason
- * null) — a suppressed survey has nothing to deliver. A delivery failure never rolls back
- * or hides the win: it is reported to the caller as a separate `delivery` outcome on the
- * result, distinct from `suppressedReason` (creation-time gate) and `vehiclesCreated`.
+ * ENCUESTA DE VENTA (2026-08-26). Antes salía sola cuando la RPC dejaba una encuesta
+ * creada. Ya no: acá, con la placa recién cargada, hay que elegir SÍ o NO — es obligatorio
+ * y no hay opción marcada por defecto. Este es el único momento en que alguien sabe si el
+ * cliente quedó en condiciones de recibir la pregunta, y es el momento en que el pedido
+ * dice que hay que preguntarlo.
+ *
+ * La elección se escribe en `survey_send_decisions` ANTES de intentar el envío: si Kommo
+ * falla o el navegador se cierra, igual queda quién eligió qué.
+ *
+ * EL ENVÍO TIENE DOS CAMINOS, y el orden importa:
+ *
+ *   1. Con `survey_id` (el caso normal: la RPC acaba de crear la encuesta) se entrega
+ *      directo por la edge function. Se manda con `reason: 'resend'` y no `'won'` porque
+ *      esto es una persona pidiendo el envío ahora: `'won'` cae en la espera de 20 horas y,
+ *      con el envío automático apagado como está hoy, esa encuesta no saldría nunca.
+ *
+ *   2. Sin `survey_id` (el prospecto YA estaba en ganado, así que el trigger no disparó, o
+ *      la encuesta quedó suprimida) se usa `sendSalesSurveyNow`, que primero crea la fila
+ *      con `ensure_sales_survey`. Antes este caso no hacía absolutamente nada, en silencio.
+ *
+ * El camino 1 va primero A PROPÓSITO: `ensure_sales_survey` exige que el concesionario del
+ * prospecto sea uno de los del usuario, y hay 25 ventas ganadas cuyo concesionario NO es el
+ * del vendedor que las trabaja. Usar siempre el camino 2 le habría roto el envío a ese
+ * vendedor en el momento exacto de cerrar la venta.
+ *
+ * Un fallo de envío nunca deshace ni esconde la venta: la venta ya está escrita y se
+ * reporta aparte.
  */
 
 const MIN_YEAR = 1980;
@@ -108,9 +128,10 @@ export interface WonProspectResult {
   surveyToken: string | null;
   suppressedReason: string | null;
   vehiclesCreated: number;
-  /** Outcome of invoking kommo-api's `deliver_satisfaction_survey` after the RPC. `null`
-   *  when delivery was never attempted because `suppressedReason` was already set. */
-  delivery: DeliverSurveyOutcome | null;
+  /** Lo que la persona eligió sobre la encuesta de venta. Nunca es null: es obligatorio. */
+  surveyChoice: 'si' | 'no';
+  /** Resultado del envío cuando eligió "sí". `null` cuando eligió "no". */
+  send: ManualSendResult | null;
 }
 
 interface WonProspectDialogProps {
@@ -154,6 +175,35 @@ const hasDuplicatePlates = (rows: VehicleRow[]): boolean => {
   return false;
 };
 
+/**
+ * Entrega la encuesta de venta por el camino que corresponda (ver el encabezado del
+ * archivo). Devuelve el mismo tipo que el botón manual para que las dos pantallas que
+ * consumen el resultado reporten igual.
+ */
+async function deliverSalesSurvey(
+  surveyId: string | null,
+  clientId: string | null,
+): Promise<ManualSendResult> {
+  if (surveyId) {
+    const outcome = await deliverSatisfactionSurvey({ survey_id: surveyId }, 'resend');
+    switch (outcome.kind) {
+      case 'delivered':
+        return { ok: true, message: 'Encuesta de satisfacción enviada al cliente.' };
+      case 'skipped':
+        return { ok: false, message: describeSkippedDelivery(outcome.reason) };
+      case 'config_error':
+        return { ok: false, message: `No se envió la encuesta: configuración de Kommo incompleta (${outcome.message}).` };
+      default:
+        return { ok: false, message: outcome.message };
+    }
+  }
+  if (clientId) return sendSalesSurveyNow(clientId);
+  return {
+    ok: false,
+    message: 'La venta quedó registrada, pero no se pudo identificar al cliente para enviarle la encuesta.',
+  };
+}
+
 export default function WonProspectDialog({ prospectId, modelInterest, onOpenChange, onConfirmed }: WonProspectDialogProps) {
   const [models, setModels] = useState<VehicleModelOption[]>([]);
   const [isFleet, setIsFleet] = useState(false);
@@ -161,6 +211,11 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   const [preselectHint, setPreselectHint] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // Decisión obligatoria sobre la encuesta de venta. `null` = todavía no eligió.
+  const [surveyChoice, setSurveyChoice] = useState<ServiceSurveyChoice>(null);
+  // Si la encuesta de venta está prendida. Se avisa apenas marca "sí" y no cuando ya
+  // confirmó, porque enterarse después de cerrar la venta no sirve de nada.
+  const [salesSurveyEnabled, setSalesSurveyEnabled] = useState(true);
   const attemptedPreselectRef = useRef<string | null>(null);
   /** One pending debounce timer per vehicle row, keyed by row key. */
   const lookupTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -196,7 +251,17 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
     setRows([makeEmptyRow()]);
     setPreselectHint(null);
     setFormError(null);
+    // Sin elegir, en CADA apertura. Arrastrar la decisión del prospecto anterior es
+    // exactamente cómo se manda una encuesta que nadie pidió.
+    setSurveyChoice(null);
     attemptedPreselectRef.current = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase.rpc as any)('get_survey_delivery_config')
+      .then(({ data }: { data: unknown }) => {
+        const row = (Array.isArray(data) ? data[0] : data) as { sales_enabled?: boolean } | undefined;
+        setSalesSurveyEnabled(row?.sales_enabled ?? true);
+      })
+      .catch(() => setSalesSurveyEnabled(true));
   }, [prospectId]);
 
   // Exact, unambiguous model_interest -> vehicle_models match: pre-selects but stays
@@ -315,7 +380,9 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   };
 
   const duplicatePlates = hasDuplicatePlates(rows);
-  const canSubmit = !saving && rows.length > 0 && rows.every(isRowValid) && !duplicatePlates;
+  // `surveyChoice !== null` es la parte obligatoria: sin elegir no se puede confirmar.
+  const canSubmit =
+    !saving && rows.length > 0 && rows.every(isRowValid) && !duplicatePlates && surveyChoice !== null;
 
   const handleConfirm = async () => {
     if (!prospectId || !canSubmit) return;
@@ -334,8 +401,8 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
       p_vehicles: payload,
       p_is_fleet: isFleet,
     });
-    setSaving(false);
     if (error) {
+      setSaving(false);
       setFormError(translateRegisterWonProspectError(error.message));
       return;
     }
@@ -346,27 +413,41 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
     // `register_won_prospect` now always returns exactly one row (migration
     // 20260805120000), so this is a last-resort guard, not an expected path.
     if (!row) {
+      setSaving(false);
       setFormError(
         'La venta se registró, pero no se pudo leer la confirmación. Actualiza la página para verla — no vuelvas a confirmar.'
       );
       return;
     }
 
-    // The win itself already succeeded (client/vehicles/survey all committed by the RPC).
-    // Delivery is a separate, secondary step — attempted only when there is something to
-    // deliver, and its outcome (success, skip, or failure) never blocks or hides the win.
-    let delivery: DeliverSurveyOutcome | null = null;
-    if (!row.suppressed_reason && row.survey_id) {
-      delivery = await deliverSatisfactionSurvey({ survey_id: row.survey_id }, 'won');
+    // La venta ya está escrita (cliente + vehículos, en una sola transacción de la RPC).
+    // Todo lo que sigue es la encuesta, y nada de esto puede deshacerla ni esconderla.
+    const wantsSurvey = surveyChoice === 'si';
+
+    // El acta se escribe ANTES de intentar el envío, a propósito: si Kommo tarda, falla, o
+    // alguien cierra la pestaña, igual queda registrado quién decidió qué.
+    const decisionId = await recordSurveyDecision(
+      'venta',
+      wantsSurvey,
+      { prospectId, clientId: row.client_id ?? null, surveyId: row.survey_id ?? null },
+      wantsSurvey ? undefined : 'No se envió: decisión de quien registró la venta',
+    );
+
+    let send: ManualSendResult | null = null;
+    if (wantsSurvey) {
+      send = await deliverSalesSurvey(row.survey_id ?? null, row.client_id ?? null);
+      await closeSurveyDecision(decisionId, send.ok ? 'Enviada' : send.message);
     }
 
+    setSaving(false);
     onConfirmed({
       clientId: row.client_id,
       surveyId: row.survey_id ?? null,
       surveyToken: row.survey_token ?? null,
       suppressedReason: row.suppressed_reason ?? null,
       vehiclesCreated: row.vehicles_created ?? 0,
-      delivery,
+      surveyChoice: wantsSurvey ? 'si' : 'no',
+      send,
     });
   };
 
@@ -522,6 +603,14 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
               <Plus className="h-3.5 w-3.5 mr-1" /> Agregar vehículo
             </Button>
           )}
+
+          <ServiceSurveyDecision
+            value={surveyChoice}
+            onChange={setSurveyChoice}
+            question="¿Enviar la encuesta de satisfacción de la venta al cliente? *"
+            disabledLabel="La encuesta de entrega de vehículo"
+            disabledNotice={surveyChoice === 'si' && !salesSurveyEnabled}
+          />
 
           {duplicatePlates && (
             <p className="text-xs text-destructive">Hay placas repetidas en la lista. Cada vehículo debe tener una placa distinta.</p>

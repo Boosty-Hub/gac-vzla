@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
@@ -24,6 +24,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useServiceSurveys } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
+import ServiceSurveySendPanel from '@/components/satisfaction/ServiceSurveySendPanel';
+import { fetchAllRows } from '@/lib/fetchAllRows';
 import { isInternalServiceName, serviceNotesLabel } from '@/lib/serviceTypes';
 import { useInternalServiceTypes } from '@/hooks/useInternalServiceTypes';
 
@@ -95,10 +97,16 @@ const AdminHistorial = () => {
   // tienen admin y superadmin. Se otorga o se quita desde Configuracion -> Roles, sin tocar
   // codigo, que es la regla para todo modulo nuevo de este proyecto.
   const canEditHistory = hasPermission('historial.edit');
+  // Mismo permiso que usan las otras pantallas para mandar encuestas a mano.
+  const canSendSurvey = isAdmin || hasPermission('encuestas.send');
 
   const [entries, setEntries] = useState<ServiceEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState('');
+  // Lo que efectivamente se le pide a la base. La búsqueda dejó de filtrar en el navegador
+  // (ver fetchEntries) y ahora viaja: sin este retardo serían siete consultas para escribir
+  // una placa de siete caracteres.
+  const [busquedaAplicada, setBusquedaAplicada] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [dealershipFilter, setDealershipFilter] = useState('all');
@@ -158,39 +166,110 @@ const AdminHistorial = () => {
       });
   }, []);
 
+  /**
+   * Ids de vehículos y clientes que coinciden con el texto buscado.
+   *
+   * La placa y el nombre del cliente viven en OTRAS tablas, así que no se pueden meter en un
+   * `.or()` sobre `reservations`. Se resuelven primero y entran como listas de ids. El tope
+   * de 500 es real: si alguien busca una sola letra podría coincidir media base, y una URL
+   * con 3.000 uuid no llega al servidor. Con un texto concreto — una placa, un apellido —
+   * nunca se acerca.
+   */
+  const resolveSearchIds = async (like: string) => {
+    const [veh, cli] = await Promise.all([
+      supabase.from('vehicles').select('id').ilike('plate', like).limit(500),
+      supabase.from('clients').select('id').ilike('full_name', like).limit(500),
+    ]);
+    return {
+      vehicleIds: (veh.data || []).map(v => v.id),
+      clientIds: (cli.data || []).map(c => c.id),
+    };
+  };
+
   const fetchEntries = async () => {
     setLoading(true);
 
-    let query = supabase
-      .from('reservations')
-      .select(
-        'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, cancellation_reason, recommendation, internal_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual))',
-        { count: 'exact' }
-      )
-      // Was `.eq('status','completada')`, which made cancelled appointments unfindable:
-      // they exist in the DB (cancelling is an UPDATE, never a DELETE) but no surface
-      // titled "Historial de Servicios" would show them.
-      .in('status', HISTORY_STATUSES);
+    // La búsqueda se resuelve ANTES de armar la consulta porque necesita dos consultas
+    // previas (placas y nombres). Ver el comentario de `buildQuery`.
+    //
+    // Los caracteres que se sacan son los que rompen la sintaxis de filtros de PostgREST:
+    // una coma dentro del valor de un `.or()` se lee como el separador entre condiciones y
+    // la consulta entera falla. No aparecen en placas ni en nombres.
+    const raw = busquedaAplicada.trim();
+    const term = raw.replace(/["(),\\]/g, ' ').trim();
+    const like = term ? `%${term}%` : '';
+    const search = term ? await resolveSearchIds(like) : null;
 
-    if (isVendedor && profile?.id) {
-      // Vendedor siempre ve solo sus propios registros
-      query = query.eq('created_by_profile_id', profile.id);
-    } else if (enforceScope && myDealershipId) {
-      // Scope 'own': concesionario ve solo su propio concesionario
-      query = query.eq('dealership_id', myDealershipId);
-    } else if (!enforceScope && dealershipFilter !== 'all') {
-      // Scope 'all' o admin: usar el selector de concesionario
-      query = query.eq('dealership_id', dealershipFilter);
+    const buildQuery = () => {
+      let query = supabase
+        .from('reservations')
+        .select(
+          'id, dealership_id, client_id, vehicle_id, reservation_date, reservation_time, service_type, current_mileage, status, notes, service_notes, cancellation_reason, recommendation, internal_notes, technical_report_url, completed_at, created_at, dealerships(name, city, phone), clients(full_name, cedula, phone, email), vehicles(id, plate, year, color, vin, mileage, warranty_active, purchase_date, vehicle_models(name, brand, warranty_km, warranty_months, warranty_service_interval_km, is_manual))',
+          { count: 'exact' }
+        )
+        // Was `.eq('status','completada')`, which made cancelled appointments unfindable:
+        // they exist in the DB (cancelling is an UPDATE, never a DELETE) but no surface
+        // titled "Historial de Servicios" would show them.
+        .in('status', HISTORY_STATUSES);
+
+      if (isVendedor && profile?.id) {
+        // Vendedor siempre ve solo sus propios registros
+        query = query.eq('created_by_profile_id', profile.id);
+      } else if (enforceScope && myDealershipId) {
+        // Scope 'own': concesionario ve solo su propio concesionario
+        query = query.eq('dealership_id', myDealershipId);
+      } else if (!enforceScope && dealershipFilter !== 'all') {
+        // Scope 'all' o admin: usar el selector de concesionario
+        query = query.eq('dealership_id', dealershipFilter);
+      }
+
+      if (dateFrom) query = query.gte('reservation_date', dateFrom);
+      if (dateTo) query = query.lte('reservation_date', dateTo);
+      if (dealershipFilter !== 'all') query = query.eq('dealership_id', dealershipFilter);
+      if (serviceTypeFilter !== 'all') query = query.eq('service_type', serviceTypeFilter);
+
+      // BÚSQUEDA DEL LADO DEL SERVIDOR.
+      //
+      // Antes filtraba `entries`, que es SÓLO la página cargada: 100 filas de 707 archivadas.
+      // Buscar una placa cuya cita estaba en la página 3 devolvía "sin resultados", y el
+      // registro parecía no existir. Ese es exactamente el reporte de "la cita completada
+      // aparece en la ficha del vehículo pero no en el historial": estaba, pero la búsqueda
+      // no llegaba hasta ella. Peor todavía, el contador de abajo seguía diciendo 707.
+      if (search) {
+        const ors = [
+          `service_type.ilike."${like}"`,
+          `notes.ilike."${like}"`,
+          `service_notes.ilike."${like}"`,
+        ];
+        if (search.vehicleIds.length) ors.push(`vehicle_id.in.(${search.vehicleIds.join(',')})`);
+        if (search.clientIds.length) ors.push(`client_id.in.(${search.clientIds.join(',')})`);
+        query = query.or(ors.join(','));
+      }
+
+      return query
+        .order('reservation_date', { ascending: false })
+        .order('reservation_time', { ascending: false });
+    };
+
+    // El filtro de garantía se calcula en el navegador: depende del vehículo, de su modelo y
+    // de las condiciones globales, y no hay columna que lo tenga. Aplicado sobre una sola
+    // página diría "3 resultados" cuando hay 40, así que cuando está activo se traen todas
+    // las filas que pasan los demás filtros y la paginación pasa a hacerse acá.
+    if (warrantyFilter !== 'all') {
+      const all = await fetchAllRows<ServiceEntry>(
+        (from, to) => buildQuery().range(from, to) as unknown as PromiseLike<{ data: ServiceEntry[] | null }>,
+      );
+      const matching = all.filter(e => {
+        const w = evaluateWarranty(e);
+        return warrantyFilter === 'active' ? w.active : !w.active;
+      });
+      setEntries(matching.slice(page * pageSize, (page + 1) * pageSize));
+      setTotalCount(matching.length);
+      setLoading(false);
+      return;
     }
 
-    if (dateFrom) query = query.gte('reservation_date', dateFrom);
-    if (dateTo) query = query.lte('reservation_date', dateTo);
-    if (dealershipFilter !== 'all') query = query.eq('dealership_id', dealershipFilter);
-    if (serviceTypeFilter !== 'all') query = query.eq('service_type', serviceTypeFilter);
-
-    const { data, error, count } = await query
-      .order('reservation_date', { ascending: false })
-      .order('reservation_time', { ascending: false })
+    const { data, error, count } = await buildQuery()
       .range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error) console.error(error);
@@ -201,8 +280,16 @@ const AdminHistorial = () => {
     setLoading(false);
   };
 
-  useEffect(() => { setPage(0); }, [busqueda, dateFrom, dateTo, dealershipFilter, serviceTypeFilter, warrantyFilter, pageSize]);
-  useEffect(() => { fetchEntries(); }, [page, dateFrom, dateTo, dealershipFilter, serviceTypeFilter, pageSize, profile?.id, isVendedor, enforceScope, myDealershipId]);
+  // Retardo entre lo que se escribe y lo que se consulta.
+  useEffect(() => {
+    const timer = setTimeout(() => setBusquedaAplicada(busqueda.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [busqueda]);
+
+  useEffect(() => { setPage(0); }, [busquedaAplicada, dateFrom, dateTo, dealershipFilter, serviceTypeFilter, warrantyFilter, pageSize]);
+  // `warrantyCond` está en las dependencias porque el filtro de garantía lo usa para
+  // decidir: si llega después de la primera consulta, el resultado se recalcula.
+  useEffect(() => { fetchEntries(); }, [page, busquedaAplicada, dateFrom, dateTo, dealershipFilter, serviceTypeFilter, warrantyFilter, warrantyCond, pageSize, profile?.id, isVendedor, enforceScope, myDealershipId]);
 
   const openDetail = async (entry: ServiceEntry) => {
     setDetail(entry);
@@ -336,26 +423,9 @@ const AdminHistorial = () => {
     return { active: reasons.length === 0 && v.warranty_active, reason: reasons.length > 0 ? reasons.join('; ') : null };
   }, [warrantyCond]);
 
-  const filteredEntries = useMemo(() => {
-    let result = entries;
-    if (busqueda.trim()) {
-      const q = busqueda.toLowerCase();
-      result = result.filter(e =>
-        e.vehicles?.plate?.toLowerCase().includes(q) ||
-        e.clients?.full_name?.toLowerCase().includes(q) ||
-        e.service_type?.toLowerCase().includes(q) ||
-        e.notes?.toLowerCase().includes(q) ||
-        e.service_notes?.toLowerCase().includes(q)
-      );
-    }
-    if (warrantyFilter !== 'all') {
-      result = result.filter(e => {
-        const w = evaluateWarranty(e);
-        return warrantyFilter === 'active' ? w.active : !w.active;
-      });
-    }
-    return result;
-  }, [entries, busqueda, warrantyFilter, evaluateWarranty]);
+  // `entries` ya viene filtrado y paginado por fetchEntries — búsqueda y garantía incluidas.
+  // El memo que había acá filtraba de nuevo sobre la página cargada y era la causa del bug
+  // de arriba; se fue entero a propósito, para que no quede una segunda fuente de verdad.
 
   const hasActiveFilters = !!(busqueda || dateFrom || dateTo || dealershipFilter !== 'all' || serviceTypeFilter !== 'all' || warrantyFilter !== 'all');
 
@@ -467,7 +537,7 @@ const AdminHistorial = () => {
             <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">Cargando historial...</p>
           </CardContent>
-        ) : filteredEntries.length === 0 ? (
+        ) : entries.length === 0 ? (
           <CardContent className="p-8 text-center">
             <ClipboardList className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
             <p className="text-sm text-muted-foreground">No se encontraron registros</p>
@@ -489,7 +559,7 @@ const AdminHistorial = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredEntries.map(e => {
+              {entries.map(e => {
                 const w = evaluateWarranty(e);
                 return (
                   <TableRow key={e.id} className="[&>td]:py-1.5 cursor-pointer hover:bg-muted/50" onClick={() => openDetail(e)}>
@@ -710,6 +780,23 @@ const AdminHistorial = () => {
                   <>
                     <Separator />
                     <ServiceSurveyInline survey={detailSurveys.get(e.id)} />
+                  </>
+                )}
+
+                {/* Enviar la encuesta desde acá. Antes la única puerta era el diálogo
+                    "Completar Servicio", que se cierra una sola vez: un servicio ya cerrado
+                    no tenía forma de recibirla. Muestra también quién decidió qué. */}
+                {e.status === 'completada' && (
+                  <>
+                    <Separator />
+                    <ServiceSurveySendPanel
+                      reservationId={e.id}
+                      clientId={e.client_id}
+                      status={e.status}
+                      serviceType={e.service_type}
+                      canSend={canSendSurvey}
+                      hasResponse={!!detailSurveys.get(e.id)?.responded_at}
+                    />
                   </>
                 )}
 

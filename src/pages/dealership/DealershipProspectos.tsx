@@ -34,6 +34,7 @@ import ProspectUpdatesSidebar from '@/components/ProspectUpdatesSidebar';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 import { useLossReasons } from '@/hooks/useLossReasons';
 import WonProspectDialog, { type WonProspectResult } from '@/components/prospects/WonProspectDialog';
+import ProspectSurveyDecision from '@/components/prospects/ProspectSurveyDecision';
 import { describeSkippedDelivery } from '@/components/clients/surveyDelivery';
 
 
@@ -1120,13 +1121,11 @@ const DealershipProspectos = () => {
   };
 
   // Confirm handler for WonProspectDialog: the RPC already wrote status/sold_plate/
-  // is_fleet, created the client + vehicle(s) + survey atomically, and (unless suppressed)
-  // the dialog already attempted delivery via kommo-api. register_won_prospect doesn't
+  // is_fleet and created the client + vehicle(s) atomically. register_won_prospect doesn't
   // touch loss_reason columns, so clear them here to preserve the existing "recovered from
   // perdido" behavior; then run the same Kommo lead-stage sync the normal inline status
-  // change runs, refresh the list, and report the win and the survey/delivery outcome as
-  // two separate, honest toasts — the win always succeeded even when delivery is skipped
-  // or fails (never "enviada" unless delivered).
+  // change runs, refresh the list, y reporta la venta y la encuesta como dos avisos
+  // separados — la venta ya quedó registrada aunque la encuesta no salga.
   const handleWonProspectConfirmed = async (result: WonProspectResult) => {
     const id = soldPlateTarget;
     if (id) {
@@ -1138,18 +1137,14 @@ const DealershipProspectos = () => {
 
     toast.success(`Venta registrada (${result.vehiclesCreated} vehículo${result.vehiclesCreated === 1 ? '' : 's'}).`);
 
-    if (result.suppressedReason) {
-      toast.warning(describeSkippedDelivery(result.suppressedReason));
-    } else if (result.delivery) {
-      if (result.delivery.kind === 'delivered') {
-        toast.success('Encuesta de satisfacción enviada.');
-      } else if (result.delivery.kind === 'skipped') {
-        toast.warning(describeSkippedDelivery(result.delivery.reason));
-      } else if (result.delivery.kind === 'config_error') {
-        toast.error(`No se envió la encuesta: configuración de Kommo incompleta (${result.delivery.message}).`);
-      } else {
-        toast.error(`No se pudo enviar la encuesta: ${result.delivery.message}`);
-      }
+    // La encuesta la decidió una persona en el diálogo y esa decisión ya quedó escrita en
+    // `survey_send_decisions`. Acá sólo se cuenta qué pasó, y "registrada" nunca se dice
+    // como "enviada": son dos hechos distintos.
+    if (result.surveyChoice === 'no') {
+      toast.info('Queda registrado que NO se le envía la encuesta de satisfacción.');
+    } else if (result.send) {
+      if (result.send.ok) toast.success(result.send.message);
+      else toast.warning(result.send.message);
     }
     setSoldPlateTarget(null);
   };
@@ -2097,6 +2092,10 @@ const DealershipProspectos = () => {
                   <Field label="Actualizado" icon={CalendarDays} value={new Date(detailProspect.updated_at).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })} />
                 )}
               </div>
+
+              {/* Quién decidió enviar o no la encuesta de venta. Se elige al marcar el
+                  prospecto como ganado y queda escrito en `survey_send_decisions`. */}
+              <ProspectSurveyDecision prospectId={detailProspect.id} status={detailProspect.status} />
 
               {detailProspect.notes && (
                 <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
