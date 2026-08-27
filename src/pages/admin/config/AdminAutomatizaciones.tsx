@@ -52,6 +52,10 @@ export default function AdminAutomatizaciones() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(true);
   const [syncedCount, setSyncedCount] = useState<number | null>(null);
+  // Última vez que Kommo nos habló. El 2026-08-27 se descubrió que el webhook había
+  // quedado deshabilitado del lado de Kommo y estuvo 18 horas sin entrar nada, sin que
+  // nada lo avisara. Este dato es el que hace visible ese silencio.
+  const [lastInbound, setLastInbound] = useState<string | null | undefined>(undefined);
 
   const fetchConfig = async () => {
     const { data } = await supabase
@@ -74,6 +78,18 @@ export default function AdminAutomatizaciones() {
     setLoadingLogs(false);
   };
 
+  const fetchLastInbound = async () => {
+    const { data } = await supabase
+      .from('integration_logs')
+      .select('created_at')
+      .eq('integration_name', 'kommo')
+      .like('event_type', 'webhook%')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    setLastInbound((data as { created_at: string } | null)?.created_at ?? null);
+  };
+
   const fetchSyncedCount = async () => {
     const { count } = await supabase
       .from('prospects')
@@ -86,6 +102,7 @@ export default function AdminAutomatizaciones() {
     fetchConfig();
     fetchLogs();
     fetchSyncedCount();
+    fetchLastInbound();
   }, []);
 
   const copyWebhook = () => {
@@ -95,6 +112,17 @@ export default function AdminAutomatizaciones() {
 
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' });
+
+  // Kommo manda cientos de eventos por día. Más de dos horas de silencio no es calma:
+  // es que dejó de llegar, y hasta ahora eso sólo se notaba cuando alguien reclamaba
+  // que un lead no había entrado.
+  const inboundAge = lastInbound ? (Date.now() - new Date(lastInbound).getTime()) / 3600000 : null;
+  const inboundSilent = inboundAge === null || inboundAge > 2;
+
+  const describeAge = (hours: number) =>
+    hours < 1 ? `hace ${Math.max(1, Math.round(hours * 60))} min`
+    : hours < 48 ? `hace ${Math.round(hours)} h`
+    : `hace ${Math.round(hours / 24)} días`;
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -139,10 +167,28 @@ export default function AdminAutomatizaciones() {
               <p className="font-medium">Prospecto → Lead Kommo</p>
               <p className="text-xs text-muted-foreground">Al crear un prospecto</p>
             </div>
-            <div className="rounded-lg border p-3 space-y-1">
+            <div className={cn(
+              'rounded-lg border p-3 space-y-1',
+              inboundSilent && 'border-red-300 bg-red-50',
+            )}>
               <p className="text-muted-foreground text-xs">Flujo entrante</p>
               <p className="font-medium">Kommo → Prospecto</p>
-              <p className="text-xs text-muted-foreground">Cambio de etapa via webhook</p>
+              {lastInbound === undefined ? (
+                <p className="text-xs text-muted-foreground">Cargando...</p>
+              ) : inboundSilent ? (
+                <>
+                  <p className="text-xs font-medium text-red-700">
+                    Sin señal {inboundAge === null ? 'nunca' : describeAge(inboundAge)}
+                  </p>
+                  <p className="text-[10px] text-red-700">
+                    Revisá en Kommo que el webhook siga activo.
+                  </p>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Última señal {describeAge(inboundAge!)}
+                </p>
+              )}
             </div>
           </div>
 
@@ -158,9 +204,16 @@ export default function AdminAutomatizaciones() {
                 <Copy className="w-3.5 h-3.5" />
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              En Kommo: Configuración → Integraciones → tu app → Webhooks → agregar esta URL para el evento "Estado del lead cambiado".
-            </p>
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 space-y-1">
+              <p className="text-[11px] font-medium text-amber-900">
+                El webhook ya está configurado en Kommo. No lo reemplaces con esta URL tal cual.
+              </p>
+              <p className="text-[11px] text-amber-800">
+                La URL registrada en Kommo lleva además una clave al final (<code>?secret=...</code>) que
+                esta pantalla no muestra. Sin esa clave el webhook se rechaza y dejan de entrar los
+                leads. Si hay que rehacerlo, pedilo por soporte en vez de pegar esta dirección sola.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>
