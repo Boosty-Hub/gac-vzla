@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { supabase } from '@/integrations/supabase/client';
 import { findOrCreateManualModel, type ManualModelClient } from '@/lib/manualVehicleModel';
@@ -18,7 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Search, Car, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, User, Pencil, X, Trash2, Palette, Power, ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildVehicleSearchFilter, sanitizeSearchTerm } from '@/lib/vehicleSearch';
-import { useServiceSurveys } from '@/hooks/useServiceSurveys';
+import type { ServiceSurveySummary } from '@/hooks/useServiceSurveys';
 import ServiceSurveyInline from '@/components/satisfaction/ServiceSurveyInline';
 import { toast } from 'sonner';
 
@@ -64,6 +64,22 @@ interface ServiceRecord {
   service_notes: string | null;
   completed_at: string | null;
   dealerships: { name: string } | null;
+  /** Encuesta de postventa de ESE servicio. Viene con el historial, no aparte. */
+  survey?: ServiceSurveySummary | null;
+}
+
+/** Una fila tal como la devuelve `vehicle_service_history`. */
+interface VehicleHistoryRow {
+  id: string;
+  reservation_date: string;
+  reservation_time: string;
+  service_type: string;
+  current_mileage: number | null;
+  status: string;
+  service_notes: string | null;
+  completed_at: string | null;
+  dealership_name: string | null;
+  survey: ServiceSurveySummary | null;
 }
 
 const AdminVehiculos = () => {
@@ -99,8 +115,14 @@ const AdminVehiculos = () => {
   const [detailVehicle, setDetailVehicle] = useState<Vehicle | null>(null);
   const [detailHistory, setDetailHistory] = useState<ServiceRecord[]>([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  // R7 — the postventa survey result for each service in the history above.
-  const { surveys: serviceSurveys } = useServiceSurveys(detailHistory.map(h => h.id));
+  // R7 — la encuesta de cada servicio. Antes se pedía aparte contra `satisfaction_surveys`,
+  // pero esa consulta se recorta por concesionario: los servicios hechos en OTRO centro
+  // llegaban sin encuesta. Ahora viaja dentro del historial, que ya cruza centros.
+  const serviceSurveys = useMemo(() => {
+    const m = new Map<string, ServiceSurveySummary>();
+    for (const h of detailHistory) if (h.survey) m.set(h.id, h.survey);
+    return m;
+  }, [detailHistory]);
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
@@ -213,13 +235,27 @@ const AdminVehiculos = () => {
     setDetailHistory([]);
     setDetailOpen(true);
     setLoadingDetail(true);
-    const { data } = await supabase
-      .from('reservations')
-      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, completed_at, dealerships(name)')
-      .eq('vehicle_id', v.id)
-      .order('reservation_date', { ascending: false })
-      .limit(50);
-    setDetailHistory((data || []) as ServiceRecord[]);
+    // `vehicle_service_history` y no un select sobre `reservations`: la policy de reservas
+    // recorta por concesionario, así que el select directo mostraba SOLO los servicios del
+    // centro de quien mira. Un vehículo que pasó por tres centros se veía con uno. Esa
+    // comunicación entre centros es para lo que existe esta pantalla.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('vehicle_service_history', {
+      p_vehicle_id: v.id,
+    });
+    if (error) console.error('Error cargando el historial del vehículo:', error);
+    setDetailHistory(((data as VehicleHistoryRow[]) || []).map(h => ({
+      id: h.id,
+      reservation_date: h.reservation_date,
+      reservation_time: h.reservation_time,
+      service_type: h.service_type,
+      current_mileage: h.current_mileage ?? 0,
+      status: h.status,
+      service_notes: h.service_notes,
+      completed_at: h.completed_at,
+      dealerships: h.dealership_name ? { name: h.dealership_name } : null,
+      survey: h.survey,
+    })));
     setLoadingDetail(false);
   };
 
