@@ -13,7 +13,7 @@ import { Shield, Plus, Pencil, Users, Eye, Trash2, KeyRound, AlertTriangle, Lock
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
-interface Role { id: string; name: string; description: string | null; created_at: string; _count?: number; }
+interface Role { id: string; name: string; description: string | null; created_at: string; redirect_portal: string | null; _count?: number; }
 interface Permission { id: string; name: string; module: string; }
 interface RolePermission { role_id: string; permission_id: string; }
 interface AssignedUser { id: string; full_name: string | null; email: string; }
@@ -37,8 +37,11 @@ const MODULE_LABELS: Record<string, string> = {
   usuarios: 'Usuarios', roles: 'Roles', eventos: 'Eventos',
 };
 
-// Modules where scope (own vs all) applies — structural/global modules don't need scoping
-const SCOPEABLE_MODULES = new Set(['clientes', 'vehiculos', 'reservas', 'garantias', 'historial', 'prospectos', 'concesionarios', 'usuarios']);
+// Qué módulos muestran el interruptor "Ver todo" / "Solo propio" NO se decide acá: sale de
+// `module_scope_catalog`, que lista los módulos cuyas policies de verdad lo obedecen.
+// Esta lista antes estaba escrita a mano e incluía siete módulos donde el botón no hacía
+// absolutamente nada: el usuario lo prendía y la base seguía recortando por concesionario.
+// Atándolo a la base, un módulo sin su policy simplemente no ofrece el botón.
 
 // Portal → name of the template role to copy permissions from when creating a new role
 const PORTAL_TEMPLATE_ROLE: Record<string, string> = {
@@ -78,6 +81,9 @@ const AdminRoles = () => {
   const [permRole, setPermRole] = useState<Role | null>(null);
   const [permChecked, setPermChecked] = useState<Set<string>>(new Set());
   const [moduleScopes, setModuleScopes] = useState<Record<string, 'own' | 'all'>>({});
+  // module → qué significa "Ver todo" ahí. Vacío hasta que carga: si la consulta falla es
+  // preferible no ofrecer el interruptor antes que ofrecer uno que no se cumple.
+  const [scopeCatalog, setScopeCatalog] = useState<Record<string, string>>({});
   const [savingPerms, setSavingPerms] = useState(false);
 
   // Delete dialog
@@ -89,14 +95,20 @@ const AdminRoles = () => {
 
   const fetchAll = async () => {
     setLoading(true);
-    const [rolesRes, permsRes, rpRes] = await Promise.all([
+    const [rolesRes, permsRes, rpRes, catalogRes] = await Promise.all([
       supabase.from('roles').select('*, profiles(count)').order('name'),
       supabase.from('permissions').select('id, name, module').order('module').order('name'),
       supabase.from('role_permissions').select('role_id, permission_id'),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase as any).from('module_scope_catalog').select('module, note').order('sort_order'),
     ]);
     setRoles((rolesRes.data || []).map((r: any) => ({ ...r, _count: r.profiles?.[0]?.count ?? 0 })));
     setPermissions(permsRes.data || []);
     setRolePermissions(rpRes.data || []);
+    setScopeCatalog(Object.fromEntries(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((catalogRes.data as any[]) || []).map(c => [c.module as string, (c.note as string) || '']),
+    ));
     setLoading(false);
   };
 
@@ -220,11 +232,15 @@ const AdminRoles = () => {
       if (error) { toast.error('Error al guardar'); setSavingPerms(false); return; }
     }
 
-    // Save module scopes (only for scopeable modules that have at least one permission active)
+    // Solo se guarda el scope de los módulos que la base declara scopeables y que además
+    // tienen algún permiso activo. Sobre un rol de cliente no se guarda ninguno: las policies
+    // lo ignoran por portal, así que dejar la fila solo confundiría a quien la lea después.
     await supabase.from('role_module_scopes' as any).delete().eq('role_id', permRole.id);
-    const activeModules = [...new Set(permissions.filter(p => permChecked.has(p.id)).map(p => p.module))];
+    const activeModules = permRole.redirect_portal === 'cliente'
+      ? []
+      : [...new Set(permissions.filter(p => permChecked.has(p.id)).map(p => p.module))];
     const scopeInserts = activeModules
-      .filter(mod => SCOPEABLE_MODULES.has(mod))
+      .filter(mod => mod in scopeCatalog)
       .map(mod => ({ role_id: permRole.id, module: mod, scope: moduleScopes[mod] ?? 'own' }));
     if (scopeInserts.length > 0) {
       await supabase.from('role_module_scopes' as any).insert(scopeInserts);
@@ -402,7 +418,7 @@ const AdminRoles = () => {
                 const allChecked = modPerms.every(p => permChecked.has(p.id));
                 const hasAnyPerm = modPerms.some(p => permChecked.has(p.id));
                 const notInPortal = portalMods.length > 0 && !portalMods.includes(mod);
-                const isScopeable = SCOPEABLE_MODULES.has(mod);
+                const isScopeable = mod in scopeCatalog && permRole?.redirect_portal !== 'cliente';
                 const scope = moduleScopes[mod] ?? 'own';
                 return (
                   <TableRow key={mod} className={cn("[&>td]:py-2", notInPortal && "bg-muted/40")}>
@@ -440,7 +456,12 @@ const AdminRoles = () => {
                               ? "bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100"
                               : "bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100"
                           )}
-                          title={scope === 'all' ? 'Ver todo el sistema — clic para restringir' : 'Solo su concesionario — clic para dar acceso total'}
+                          title={
+                            (scope === 'all'
+                              ? 'Ve todo el sistema — clic para restringir a su concesionario'
+                              : 'Ve solo lo de su concesionario — clic para dar acceso a todo')
+                            + (scopeCatalog[mod] ? `\n${scopeCatalog[mod]}` : '')
+                          }
                         >
                           {scope === 'all'
                             ? <><Globe className="w-2.5 h-2.5" /> Ver todo</>
