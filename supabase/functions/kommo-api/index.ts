@@ -97,32 +97,69 @@ function normEventName(s: string): string {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim()
 }
 
-function eventNameToKommoEnumId(eventName: string): number | null {
-  if (!eventName) return null
-  return EVENT_NAME_TO_ENUM_ID[normEventName(eventName)] ?? null
+// Clave de comparación tolerante: además de mayúsculas y acentos, ignora TODO lo que no sea
+// letra o número. La opción del evento en Kommo la escribe una persona a mano, y alcanza un
+// espacio de diferencia para que no matchee y el lead llegue sin evento: pasó con "ExpoZulia"
+// en Kommo contra "Expo Zulia" en el panel de GAC, y el campo "Nombre del Evento" quedó vacío.
+function eventKey(s: string): string {
+  return normEventName(s).replace(/[^a-z0-9]/g, '')
 }
 
-// Dynamic outbound resolver: events are authored in Kommo. If the name isn't in the
-// static snapshot above, fetch the live enum options of CF "Nombre del Evento" and
-// match by normalized label, so events created ONLY in Kommo resolve outbound without
-// a code change/redeploy. The static map stays as a fast path / offline fallback.
+const EVENT_KEY_TO_ENUM_ID: Record<string, number> = Object.fromEntries(
+  Object.entries(EVENT_NAME_TO_ENUM_ID).map(([nombre, id]) => [eventKey(nombre), id]),
+)
+
+function eventNameToKommoEnumId(eventName: string): number | null {
+  if (!eventName) return null
+  return EVENT_KEY_TO_ENUM_ID[eventKey(eventName)] ?? null
+}
+
+// Resolutor saliente (GAC → Kommo) del select "Nombre del Evento".
+//
+// Orden: mapa estático (rápido) → opciones vivas del campo → y si tampoco está, se CREA la
+// opción en Kommo. Ese último paso es el que cierra el circuito: los eventos se dan de alta en
+// el panel de GAC, así que exigir además que alguien los cargue a mano en Kommo garantizaba que
+// tarde o temprano un lead llegara sin evento. Es el espejo de `ensureProspectEvent`, que hace
+// lo mismo en la dirección contraria.
 async function resolveEventEnumId(
   eventName: string,
   baseUrl: string,
   authHeaders: Record<string, string>,
 ): Promise<number | null> {
   if (!eventName) return null
-  const norm = normEventName(eventName)
-  const cached = EVENT_NAME_TO_ENUM_ID[norm]
+  const key = eventKey(eventName)
+  if (!key) return null
+  const cached = EVENT_KEY_TO_ENUM_ID[key]
   if (cached) return cached
   try {
     const res = await fetch(`${baseUrl}/leads/custom_fields/${CF.event_name}`, { headers: authHeaders })
     if (!res.ok) return null
     const field = await res.json() as { enums?: Array<{ id: number; value: string }> }
-    for (const e of field.enums || []) {
-      if (normEventName(String(e.value)) === norm) return e.id
+    const opciones = field.enums || []
+    for (const e of opciones) {
+      if (eventKey(String(e.value)) === key) return e.id
     }
-  } catch (_) { /* ignore — fall through to null */ }
+
+    // Alta de la opción faltante. Se manda la lista COMPLETA con sus ids: Kommo reemplaza el
+    // conjunto de opciones, así que omitir una la borraría junto con el dato de los leads que
+    // ya la tienen. Verificado contra el campo real: reenviar las mismas ids no pierde ninguna.
+    const cuerpo = {
+      enums: [
+        ...opciones.map(e => ({ id: e.id, value: e.value })),
+        { value: String(eventName).trim() },
+      ],
+    }
+    const alta = await fetch(`${baseUrl}/leads/custom_fields/${CF.event_name}`, {
+      method: 'PATCH',
+      headers: authHeaders,
+      body: JSON.stringify(cuerpo),
+    })
+    if (!alta.ok) return null
+    const actualizado = await alta.json() as { enums?: Array<{ id: number; value: string }> }
+    for (const e of actualizado.enums || []) {
+      if (eventKey(String(e.value)) === key) return e.id
+    }
+  } catch (_) { /* el nombre del evento nunca puede tumbar el alta del lead */ }
   return null
 }
 
