@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { MapPin, Plus, Pencil, Phone, Clock, Car, Mail, Instagram, Globe, Wrench, Building2, Trash2, Navigation, X, Power, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { syncKommoDealershipContact } from '@/lib/kommo';
+import { syncKommoDealershipContact, resetKommoDealershipContact } from '@/lib/kommo';
 import { toast } from 'sonner';
 import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
 
@@ -53,6 +53,8 @@ const AdminConcesionarios = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailDealer, setDetailDealer] = useState<Dealership | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Dealership | null>(null);
+  // Centro cuyo contacto de avisos se está rehaciendo en Kommo.
+  const [rehaciendoKommo, setRehaciendoKommo] = useState<string | null>(null);
 
   const [filterBrand, setFilterBrand] = useState('todos');
 
@@ -435,9 +437,42 @@ const AdminConcesionarios = () => {
                   </div>
                 )}
                 {detailDealer.phone && (
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-muted-foreground shrink-0" />
-                    <span>{detailDealer.phone}</span>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Phone className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <span>{detailDealer.phone}</span>
+                    </div>
+                    {/* Cambiar el número acá no basta para que el aviso llegue al número
+                        nuevo: en Kommo la conversación de WhatsApp queda pegada al contacto
+                        anterior. Este botón arranca uno nuevo con el teléfono de arriba. */}
+                    <div className="rounded-md border bg-muted/40 p-2 space-y-1.5">
+                      <p className="text-[11px] text-muted-foreground">
+                        ¿Cambiaste el teléfono y los avisos siguen llegando al número viejo?
+                        En Kommo la conversación queda pegada al contacto anterior. Esto
+                        arranca una nueva con el número de arriba.
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px]"
+                        disabled={rehaciendoKommo === detailDealer.id}
+                        onClick={async () => {
+                          setRehaciendoKommo(detailDealer.id);
+                          const r = await resetKommoDealershipContact(detailDealer.id);
+                          setRehaciendoKommo(null);
+                          if (r.ok) {
+                            toast.success(`Contacto rehecho en Kommo. Los avisos de este centro van al ${detailDealer.phone}.`);
+                            fetchDealerships();
+                          } else {
+                            toast.error(r.error || 'No se pudo rehacer el contacto en Kommo.');
+                          }
+                        }}
+                      >
+                        {rehaciendoKommo === detailDealer.id
+                          ? 'Rehaciendo...'
+                          : 'Rehacer contacto de avisos en Kommo'}
+                      </Button>
+                    </div>
                   </div>
                 )}
                 {detailDealer.email && (

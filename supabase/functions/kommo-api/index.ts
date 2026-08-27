@@ -1571,6 +1571,22 @@ Deno.serve(async (req) => {
       // El guard va acá y no en quien llama, porque el estado de la cita ya está leído en este
       // lado y así ningún caller futuro puede volver a equivocarse.
       const reservationIsClosed = ARCHIVED_RESERVATION_STATUSES.has(String(res.status))
+      if (!newLead?.id || reservationIsClosed) {
+        // Igual que arriba: lo que no se intenta tiene que quedar escrito. Sin esto, una
+        // reserva sin aviso era indistinguible de una con aviso entregado.
+        await supabase.from('integration_logs').insert({
+          integration_name: 'kommo',
+          event_type: 'notify_dealership_skipped',
+          status: 'warning',
+          details: {
+            reservation_id,
+            reason: !newLead?.id
+              ? 'la reserva no tiene lead en Kommo, asi que no hay de donde avisar'
+              : 'la cita ya estaba cerrada: un aviso de cita nueva no corresponde',
+            reservation_status: String(res.status),
+          },
+        })
+      }
       if (newLead?.id && !reservationIsClosed) {
         supabase.functions.invoke('kommo-api', {
           body: {
@@ -1796,6 +1812,20 @@ Deno.serve(async (req) => {
       } | null
 
       if (!dealership?.phone) {
+        // Se registra el salto. Antes se devolvia `skipped` en silencio: un centro sin
+        // telefono cargado no avisaba NUNCA y no habia forma de darse cuenta salvo que
+        // alguien reclamara. "No se estan disparando" empieza por poder verlo.
+        await supabase.from('integration_logs').insert({
+          integration_name: 'kommo',
+          event_type: 'notify_dealership_skipped',
+          status: 'warning',
+          details: {
+            reservation_id,
+            dealership_id: dealership?.id ?? null,
+            dealership_name: dealership?.name ?? null,
+            reason: 'el centro no tiene telefono cargado',
+          },
+        })
         return new Response(JSON.stringify({ skipped: true, reason: 'dealership has no phone' }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
@@ -2612,6 +2642,8 @@ Deno.serve(async (req) => {
       let contactId = (d.kommo_contact_id as number | null) ?? null
       let leadId = (d.kommo_notification_lead_id as number | null) ?? null
       let createdContact = false, createdLead = false
+      // Queda seteado cuando el numero cambio y hubo que armar un contacto nuevo.
+      let contactoReemplazado: number | null = null
 
       if (!contactId) {
         // Provision the notification contact with GAC's name + phone
@@ -2626,14 +2658,54 @@ Deno.serve(async (req) => {
         contactId = ((cData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>)?.[0]?.id ?? null
         createdContact = true
       } else {
-        // Enforce GAC's name + phone onto the existing contact
-        await fetch(`${baseUrl}/contacts/${contactId}`, {
-          method: 'PATCH', headers: authHeaders,
-          body: JSON.stringify({
-            name: dealName,
-            custom_fields_values: [{ field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] }],
-          }),
-        })
+        // CAMBIO DE NUMERO. Reescribir el campo telefono del contacto existente NO alcanza:
+        // la conversacion de WhatsApp en Kommo queda atada al contacto viejo, asi que el
+        // aviso sigue saliendo al numero anterior. Reportado tal cual: "no importa si cambio
+        // el numero de telefono, no lo toma, sigue con el lead anterior".
+        //
+        // Entonces, si el numero cambio, se crea un contacto NUEVO con el numero nuevo y el
+        // lead de notificaciones se muda a el. El contacto viejo queda intacto: conserva su
+        // historial y su numero, que es de otra persona o de otra epoca.
+        let telefonoEnKommo: string | null = null
+        const actualRes = await fetch(`${baseUrl}/contacts/${contactId}`, { headers: authHeaders })
+        if (actualRes.ok && actualRes.status !== 204) {
+          const actual = await actualRes.json() as Record<string, unknown>
+          const cfs = (actual.custom_fields_values as Array<{ field_code?: string; values?: Array<{ value?: string }> }>) || []
+          telefonoEnKommo = cfs.find(f => f.field_code === 'PHONE')?.values?.[0]?.value ?? null
+        }
+
+        // `force_new_contact` lo manda el boton "Rehacer contacto" del panel. Hace falta
+        // porque cuando el numero YA se habia reescrito sobre el contacto viejo, los dos
+        // lados coinciden y no hay nada que detectar — pero la conversacion de WhatsApp
+        // sigue pegada al contacto de antes. Es el caso del centro DFSK & GAC.
+        const cambioElNumero = body.force_new_contact === true
+          || (!!telefonoEnKommo && normalizeVzPhone(telefonoEnKommo) !== normalizedPhone)
+
+        if (cambioElNumero) {
+          const nuevoRes = await fetch(`${baseUrl}/contacts`, {
+            method: 'POST', headers: authHeaders,
+            body: JSON.stringify([{
+              name: dealName,
+              custom_fields_values: [{ field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] }],
+            }]),
+          })
+          const nuevoData = await nuevoRes.json() as Record<string, unknown>
+          const nuevoId = ((nuevoData._embedded as Record<string, unknown>)?.contacts as Array<{ id: number }>)?.[0]?.id ?? null
+          if (nuevoId) {
+            contactoReemplazado = contactId
+            contactId = nuevoId
+            createdContact = true
+          }
+        } else {
+          // Mismo numero: solo se alinea el nombre.
+          await fetch(`${baseUrl}/contacts/${contactId}`, {
+            method: 'PATCH', headers: authHeaders,
+            body: JSON.stringify({
+              name: dealName,
+              custom_fields_values: [{ field_code: 'PHONE', values: [{ value: normalizedPhone, enum_code: 'WORK' }] }],
+            }),
+          })
+        }
       }
 
       if (contactId && !leadId) {
@@ -2654,6 +2726,20 @@ Deno.serve(async (req) => {
           method: 'PATCH', headers: authHeaders,
           body: JSON.stringify({ name: dealName }),
         }).catch(() => {})
+
+        // El lead de avisos se muda al contacto nuevo. Sin esto el contacto se cambiaria en
+        // nuestra base pero el aviso seguiria saliendo por el contacto viejo, que es
+        // exactamente el sintoma que vino a corregirse.
+        if (contactoReemplazado && contactId) {
+          await fetch(`${baseUrl}/leads/${leadId}/link`, {
+            method: 'POST', headers: authHeaders,
+            body: JSON.stringify([{ to_entity_id: contactId, to_entity_type: 'contacts' }]),
+          }).catch(() => {})
+          await fetch(`${baseUrl}/leads/${leadId}/unlink`, {
+            method: 'POST', headers: authHeaders,
+            body: JSON.stringify([{ to_entity_id: contactoReemplazado, to_entity_type: 'contacts' }]),
+          }).catch(() => {})
+        }
       }
 
       if (createdContact || createdLead) {
@@ -2670,6 +2756,7 @@ Deno.serve(async (req) => {
           dealership_id: d.id, contact_id: contactId, lead_id: leadId,
           name: dealName, phone: normalizedPhone,
           created_contact: createdContact, created_lead: createdLead,
+          replaced_contact: contactoReemplazado,
         },
       })
 
@@ -2677,6 +2764,7 @@ Deno.serve(async (req) => {
         success: !!contactId, contact_id: contactId, lead_id: leadId,
         name: dealName, phone: normalizedPhone,
         created_contact: createdContact, created_lead: createdLead,
+        replaced_contact: contactoReemplazado,
       }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 

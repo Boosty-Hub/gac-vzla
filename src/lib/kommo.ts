@@ -71,6 +71,34 @@ export async function syncKommoDealershipContact(dealershipId: string): Promise<
   if (error) console.error('[Kommo] Error sincronizando teléfono del concesionario:', error)
 }
 
+/**
+ * Rehace el contacto de avisos del centro en Kommo, con su teléfono actual, y muda el lead
+ * de notificaciones al contacto nuevo.
+ *
+ * Existe porque cambiar el número no alcanza con reescribir el campo del contacto: la
+ * conversación de WhatsApp en Kommo queda atada al contacto viejo y el aviso sigue saliendo
+ * al número anterior. Esto arranca uno nuevo. El contacto viejo no se toca: conserva su
+ * historial.
+ *
+ * A diferencia del resto de este archivo, devuelve el error en vez de solo registrarlo: es
+ * una acción que una persona dispara a mano y tiene que ver si salió o no.
+ */
+export async function resetKommoDealershipContact(
+  dealershipId: string,
+): Promise<{ ok: boolean; contactId?: number | null; error?: string }> {
+  const { data, error } = await supabase.functions.invoke('kommo-api', {
+    body: {
+      action: 'sync_dealership_contact',
+      dealership_id: dealershipId,
+      force_new_contact: true,
+    },
+  })
+  if (error) return { ok: false, error: error.message }
+  const d = data as { success?: boolean; contact_id?: number | null; error?: string } | null
+  if (!d?.success) return { ok: false, error: d?.error || 'Kommo no aceptó el cambio.' }
+  return { ok: true, contactId: d.contact_id }
+}
+
 // Overwrite all matching fields in Kommo with current GAC values (true bidirectional sync)
 export async function updateKommoLeadFields(
   prospectId: string,
