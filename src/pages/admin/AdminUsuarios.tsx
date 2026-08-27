@@ -17,7 +17,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { extractEdgeError } from '@/lib/edgeError';
+import { invokeAdminFunction } from '@/lib/adminFunctions';
 
 interface ProfileWithRole {
   id: string;
@@ -178,11 +178,10 @@ const AdminUsuarios = () => {
   const handleGenerateMagicLink = async (userId: string) => {
     setGeneratingLink(userId);
     try {
-      const { data, error } = await supabase.functions.invoke('generate-magic-link', {
-        body: { user_id: userId },
-      });
+      const { data, error } = await invokeAdminFunction<{ error?: string; token?: string }>(
+        'generate-magic-link', { user_id: userId }, 'Error al generar link');
       if (error || data?.error) {
-        toast.error(data?.error || error?.message || 'Error al generar link');
+        toast.error(error || data?.error || 'Error al generar link');
         return;
       }
       const url = `${window.location.origin}/magic-login?token=${data.token}`;
@@ -228,20 +227,22 @@ const AdminUsuarios = () => {
         ? (createDealershipIds[0] || null)
         : (needsDealership(createRoleId) ? createDealershipId || null : null);
 
-      const { data, error } = await supabase.functions.invoke('create-user', {
-        body: {
-          email: createEmail.trim(),
-          password: createPassword,
-          full_name: createFullName.trim() || null,
-          role_id: createRoleId || null,
-          dealership_id: primaryDealershipId,
-          pin_code: pinValue || null,
-          phone: createPhone.trim() || null,
-        },
-      });
+      // `invokeAdminFunction` y no `supabase.functions.invoke`: este llamado exige un token
+      // vivo, y `invoke` manda el que tenga cacheado aunque esté vencido. Ver adminFunctions.ts.
+      const { data, error } = await invokeAdminFunction<{
+        error?: string; warning?: string; user_id?: string; user?: { id?: string };
+      }>('create-user', {
+        email: createEmail.trim(),
+        password: createPassword,
+        full_name: createFullName.trim() || null,
+        role_id: createRoleId || null,
+        dealership_id: primaryDealershipId,
+        pin_code: pinValue || null,
+        phone: createPhone.trim() || null,
+      }, 'Error al crear usuario');
 
       if (error) {
-        toast.error(await extractEdgeError(error, 'Error al crear usuario'));
+        toast.error(error);
       } else if (data?.error) {
         toast.error(data.error);
       } else {
@@ -374,11 +375,10 @@ const AdminUsuarios = () => {
     if (!deletingUser) return;
     setDeleting(true);
     try {
-      const { data, error } = await supabase.functions.invoke('delete-user', {
-        body: { user_id: deletingUser.id },
-      });
+      const { data, error } = await invokeAdminFunction<{ error?: string }>(
+        'delete-user', { user_id: deletingUser.id }, 'Error al eliminar usuario');
       if (error) {
-        toast.error(await extractEdgeError(error, 'Error al eliminar usuario'));
+        toast.error(error);
       } else if (data?.error) {
         toast.error(data.error);
       } else {

@@ -40,6 +40,7 @@ import { buildEventFilterOptions } from '@/lib/prospectEventFilter';
 import { useProspectSources } from '@/hooks/useProspectSources';
 import { createKommoLead, updateKommoLeadStage, updateKommoLeadFields } from '@/lib/kommo';
 import { phonesMatch } from '@/lib/phone';
+import { invokeAdminFunction } from '@/lib/adminFunctions';
 import WonProspectDialog, { type WonProspectResult } from '@/components/prospects/WonProspectDialog';
 import ProspectSurveyDecision from '@/components/prospects/ProspectSurveyDecision';
 import { deliverSatisfactionSurvey, describeSkippedDelivery } from '@/components/clients/surveyDelivery';
@@ -757,9 +758,8 @@ const AdminProspectos = () => {
 
     if (sp.profile_id) {
       try {
-        const { data, error } = await supabase.functions.invoke('generate-magic-link', {
-          body: { user_id: sp.profile_id },
-        });
+        const { data, error } = await invokeAdminFunction<{ token?: string }>(
+          'generate-magic-link', { user_id: sp.profile_id });
         if (!error && data?.token) {
           const magicUrl = `${window.location.origin}/magic-login?token=${data.token}`;
           message += `\n🔗 *Accede a la plataforma:*\n${magicUrl}`;

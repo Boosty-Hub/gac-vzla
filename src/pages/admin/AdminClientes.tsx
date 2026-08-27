@@ -23,7 +23,7 @@ import ClientDetailDialog from '@/components/clients/ClientDetailDialog';
 import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
-import { extractEdgeError } from '@/lib/edgeError';
+import { invokeAdminFunction } from '@/lib/adminFunctions';
 import { isRecurrentClient } from '@/lib/recompra';
 import { syncClientToKommo } from '@/lib/kommo';
 import { VENEZUELA_STATES } from '@/lib/venezuelaStates';
@@ -790,17 +790,16 @@ const AdminClientes = () => {
     setCreatingUser(true);
 
     try {
-      const { data, error } = await supabase.functions.invoke('create-client-user', {
-        body: {
+      const { data, error } = await invokeAdminFunction<{ error?: string }>(
+        'create-client-user', {
           email: cuEmail.trim(),
           password: cuPassword,
           full_name: cuFullName.trim() || usersClient.full_name,
           client_id: usersClient.id,
-        },
-      });
+        }, 'Error al crear usuario');
 
       if (error) {
-        toast.error(await extractEdgeError(error, 'Error al crear usuario'));
+        toast.error(error);
       } else if (data?.error) {
         toast.error(data.error);
       } else {
