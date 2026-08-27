@@ -668,10 +668,15 @@ const AdminEventos = () => {
 
               {/* FORMULARIO DE CAPTACIÓN */}
               <div className="rounded-md border p-3 space-y-2 bg-muted/30">
-                <p className="text-xs font-semibold flex items-center gap-1"><Link2 className="w-3.5 h-3.5" /> Formulario de captación</p>
+                <p className="text-xs font-semibold flex items-center gap-1">
+                  <Link2 className="w-3.5 h-3.5" /> Formulario de captación
+                  {detail.capture_form_enabled && (
+                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0 ml-1">Público</Badge>
+                  )}
+                </p>
                 <p className="text-[11px] text-muted-foreground">
                   {detail.capture_form_enabled
-                    ? 'Los vendedores cargan leads desde este enlace. Ya viene con el evento y los vendedores de este evento cargados; el lead entra a Prospectos y sube a Kommo igual que si se cargara desde el panel.'
+                    ? 'Se abre y se llena SIN iniciar sesión, desde cualquier celular o tablet. Ya viene con el evento y sus vendedores cargados; el lead entra a Prospectos y sube a Kommo igual que si se cargara desde el panel. Como cualquiera con el enlace puede registrar, apagá el formulario cuando termine el evento.'
                     : 'El formulario está apagado: el enlace ya no acepta registros. Se prende desde Editar.'}
                 </p>
                 {detail.capture_form_enabled && (
@@ -929,8 +934,9 @@ const AdminEventos = () => {
               <div>
                 <Label className="text-xs">Formulario de captación</Label>
                 <p className="text-[10px] text-muted-foreground">
-                  Al crear el evento queda listo un enlace para que los vendedores carguen leads
-                  desde el stand. Apagalo cuando el evento termine.
+                  Al crear el evento queda listo un enlace PÚBLICO: se abre sin iniciar sesión,
+                  así que sirve en el celular de cualquiera del stand. Apagalo cuando el evento
+                  termine — el enlace deja de aceptar registros al instante.
                 </p>
               </div>
               <Switch checked={fFormEnabled} onCheckedChange={setFFormEnabled} />

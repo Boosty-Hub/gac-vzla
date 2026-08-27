@@ -14,53 +14,87 @@ import { Badge } from '@/components/ui/badge';
 import { CalendarDays, CheckCircle2, User, Phone, Mail, Car, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { Toaster as Sonner } from '@/components/ui/sonner';
-import { useDealershipAccess } from '@/hooks/useDealershipAccess';
-import { useProspectModels } from '@/hooks/useProspectModels';
-import { useSalespersons } from '@/hooks/useSalespersons';
-import { createKommoLead } from '@/lib/kommo';
 
 /**
- * Formulario de captación de un evento (2026-08-26).
+ * Formulario de captación de un evento. Link público: se abre y se llena sin iniciar sesión.
  *
- * Lo que pide el requerimiento: al crear un evento queda listo un formulario corto para que
- * los vendedores carguen leads desde el stand, con el evento y los vendedores del evento ya
- * puestos, y sólo esos vendedores en el desplegable — no el listado completo.
+ * Lo que pide el requerimiento: al crear un evento queda listo un formulario corto para cargar
+ * leads desde el stand, con el evento y los vendedores del evento ya puestos, y sólo esos
+ * vendedores en el desplegable — no el listado completo.
  *
- * POR QUÉ PIDE SESIÓN Y NO ES PÚBLICO. El lead tiene que subir a Kommo exactamente igual que
- * uno cargado desde el panel, y eso lo hace la edge function `kommo-api`, que exige JWT. El
- * formulario público de /prospectos NO lo llama — por eso los leads que entran por ahí se
- * quedan en el sistema y no aparecen en el CRM. Repetir esa arquitectura en el módulo de
- * eventos habría roto justamente lo que el pedido dice que no se toca. Con sesión, el lead
- * entra a Prospectos, sube a Kommo y aparece en el evento, los tres por el mismo camino de
- * siempre. Se abre una vez en el celular o la tablet del stand y se usa todo el día.
+ * POR QUÉ NO LEE TABLAS. Antes esta pantalla pedía sesión, y la razón era Kommo: el lead tiene
+ * que subir al CRM igual que uno cargado desde el panel, y eso lo hacía la edge function
+ * `kommo-api`, que exige JWT. Abrirla a `anon` habría sido exponer el proxy completo del CRM.
+ * Así que la pantalla dejó de tocar tablas y de llamar a la edge function: todo pasa por dos
+ * funciones de base (`event_capture_form` y `submit_event_lead`) que devuelven exactamente lo
+ * que el formulario necesita y disparan Kommo desde el servidor con la llave del vault.
+ * Resultado: el link queda abierto, `prospect_events` / `salespersons` / `prospect_vehicles`
+ * siguen cerradas a `anon`, y el lead entra a Prospectos, sube a Kommo y aparece en el evento
+ * por el mismo camino de siempre.
  *
- * Escribe en `prospects` con `source = 'evento'` y `event_name` = el nombre del evento: la
- * MISMA columna que lee el módulo de Eventos y que escribe el webhook de Kommo. No hay tabla
- * nueva ni copia de datos.
+ * El evento se apaga desde Eventos → Editar, con cualquiera de sus dos interruptores
+ * (`is_active` y el del formulario). La base los vuelve a revisar al guardar, no sólo al
+ * pintar: un evento que se cierra mientras alguien tiene el link abierto deja de aceptar leads.
  */
 
-interface EventInfo {
+interface CaptureEvent {
   id: string;
   name: string;
   location: string | null;
   start_date: string | null;
   end_date: string | null;
-  dealership_id: string | null;
-  salesperson_ids: string[] | null;
-  brands: string[] | null;
-  capture_form_enabled: boolean;
-  is_active: boolean;
+  brands: string[];
+  exhibited_vehicles: string[];
+  has_dealership: boolean;
 }
+
+interface CaptureModel {
+  brand: string;
+  name: string;
+}
+
+interface CapturePerson {
+  id: string;
+  name: string;
+}
+
+interface CaptureForm {
+  ok: boolean;
+  reason?: string;
+  name?: string;
+  event?: CaptureEvent;
+  models?: CaptureModel[];
+  salespersons?: CapturePerson[];
+}
+
+/** `supabase.rpc` usa `this` adentro; guardarlo suelto lo desprende del cliente. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const rpc = (fn: string, params?: Record<string, unknown>): Promise<any> =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (supabase.rpc as any)(fn, params);
+
+/**
+ * Motivos que devuelve `submit_event_lead`. Se traducen acá y no en la base para que el mensaje
+ * se pueda cambiar sin migración. `duplicate_phone` no está en la lista: no es un error, abre el
+ * aviso de confirmación.
+ */
+const SUBMIT_ERRORS: Record<string, string> = {
+  not_found:           'Este evento ya no existe. Pedí un enlace nuevo.',
+  closed:              'El evento se cerró y ya no acepta registros.',
+  disabled:            'El formulario de este evento se apagó.',
+  no_dealership:       'Este evento no tiene concesionario asignado. Cargalo en Eventos → Editar.',
+  missing_name:        'El nombre y apellido es requerido.',
+  missing_phone:       'El teléfono es requerido.',
+  invalid_email:       'El correo no es válido.',
+  invalid_salesperson: 'Ese vendedor ya no está habilitado para el evento. Elegí otro.',
+  rate_limited:        'Se recibieron demasiados registros seguidos. Esperá un momento y reintentá.',
+};
 
 const EventoCaptura = () => {
   const { eventId } = useParams<{ eventId: string }>();
-  const { dealerships } = useDealershipAccess();
-  const { models, brands } = useProspectModels();
-  const { salespersons } = useSalespersons();
 
-  const [event, setEvent] = useState<EventInfo | null>(null);
+  const [form, setForm] = useState<CaptureForm | null>(null);
   const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [lastName, setLastName] = useState('');
@@ -71,7 +105,6 @@ const EventoCaptura = () => {
   const [brand, setBrand] = useState('');
   const [model, setModel] = useState('');
   const [salesperson, setSalesperson] = useState('');
-  const [dealershipId, setDealershipId] = useState('');
   const [notes, setNotes] = useState('');
   const [testDrive, setTestDrive] = useState(false);
   // Aviso de teléfono repetido. Obliga a confirmar una segunda vez en vez de bloquear: en un
@@ -79,47 +112,39 @@ const EventoCaptura = () => {
   const [duplicateWarning, setDuplicateWarning] = useState(false);
 
   useEffect(() => {
-    if (!eventId) { setNotFound(true); setLoading(false); return; }
-    supabase
-      .from('prospect_events')
-      .select('id, name, location, start_date, end_date, dealership_id, salesperson_ids, brands, capture_form_enabled, is_active')
-      .eq('id', eventId)
-      .maybeSingle()
+    if (!eventId) { setForm({ ok: false, reason: 'not_found' }); setLoading(false); return; }
+    let alive = true;
+    rpc('event_capture_form', { p_event_id: eventId })
       .then(({ data, error }) => {
-        if (error) console.error(error);
-        if (!data) setNotFound(true);
-        else {
-          const ev = data as unknown as EventInfo;
-          setEvent(ev);
-          if (ev.dealership_id) setDealershipId(ev.dealership_id);
-        }
+        if (!alive) return;
+        if (error) { console.error(error); setForm({ ok: false, reason: 'not_found' }); }
+        else setForm((data as CaptureForm) ?? { ok: false, reason: 'not_found' });
+        setLoading(false);
+      })
+      .catch(e => {
+        if (!alive) return;
+        console.error(e);
+        setForm({ ok: false, reason: 'not_found' });
         setLoading(false);
       });
+    return () => { alive = false; };
   }, [eventId]);
 
-  // El concesionario del evento manda; si no tiene, se usa el del usuario que abrió el
-  // formulario. Sin concesionario la RLS rechaza el insert, así que nunca queda vacío.
-  useEffect(() => {
-    if (!dealershipId && dealerships.length > 0) setDealershipId(dealerships[0].id);
-  }, [dealerships, dealershipId]);
-
-  // Sólo los vendedores del evento. Si el evento no cargó ninguno, se ofrecen todos: es
-  // preferible a un desplegable vacío que no deja registrar nada.
-  const eventSalespersons = useMemo(() => {
-    const ids = event?.salesperson_ids || [];
-    if (ids.length === 0) return salespersons;
-    return salespersons.filter(s => ids.includes(s.id));
-  }, [event, salespersons]);
-
-  const usingAllSalespersons = (event?.salesperson_ids || []).length === 0;
+  const event = form?.ok ? form.event ?? null : null;
+  const salespersons = useMemo(() => form?.salespersons ?? [], [form]);
+  const models = useMemo(() => form?.models ?? [], [form]);
+  const allBrands = useMemo(
+    () => Array.from(new Set(models.map(m => m.brand))),
+    [models],
+  );
 
   // Las marcas del evento primero; el catálogo completo detrás, por si aparece un interesado
   // en algo que no se llevó al stand.
   const brandOptions = useMemo(() => {
-    const eventBrands = (event?.brands || []).filter(b => brands.includes(b));
-    const rest = brands.filter(b => !eventBrands.includes(b));
+    const eventBrands = (event?.brands || []).filter(b => allBrands.includes(b));
+    const rest = allBrands.filter(b => !eventBrands.includes(b));
     return { eventBrands, rest };
-  }, [event, brands]);
+  }, [event, allBrands]);
 
   const resetForm = () => {
     setName(''); setPhone(''); setEmail(''); setBrand(''); setModel('');
@@ -139,65 +164,40 @@ const EventoCaptura = () => {
     }
     if (!brand) { toast.error('El modelo de interés es requerido'); return; }
     if (!salesperson) { toast.error('Elegí el vendedor que atiende'); return; }
-    if (!dealershipId) { toast.error('No hay concesionario asignado. Cargalo en el evento.'); return; }
 
     setSaving(true);
 
-    if (!duplicateWarning) {
-      const { data: exists } = await supabase.rpc('prospect_phone_exists', { p_phone: phone.trim() });
-      if (exists) {
-        setDuplicateWarning(true);
-        setSaving(false);
-        return;
-      }
-    }
+    // Una sola llamada: valida, guarda la unidad de interés y encola el lead de Kommo. El
+    // navegador no toca ninguna tabla, así que no hay alta a medias si algo falla.
+    const { data, error } = await rpc('submit_event_lead', {
+      p_event_id:        event.id,
+      p_name:            name.trim(),
+      p_phone:           phone.trim(),
+      p_email:           email.trim() || null,
+      p_brand:           brand || null,
+      p_model:           model || null,
+      p_salesperson:     salesperson || null,
+      p_notes:           notes.trim() || null,
+      p_test_drive:      testDrive,
+      p_allow_duplicate: duplicateWarning,
+    });
 
-    // Mismos campos que el alta desde el panel. `source: 'evento'` es el que ya usan
-    // Prospectos y la importación; cambiarlo rompería los filtros y el mapeo de etapas de
-    // Kommo. El estado NO se manda: lo pone la base con el de entrada del catálogo.
-    const payload = {
-      dealership_id: dealershipId,
-      name: name.trim(),
-      phone: phone.trim(),
-      email: email.trim() || null,
-      model_interest: `${brand} ${model}`.trim(),
-      source: 'evento',
-      notes: notes.trim() || null,
-      salesperson,
-      event_name: event.name,
-      test_drive: testDrive,
-    };
+    setSaving(false);
 
-    const { data: inserted, error } = await supabase
-      .from('prospects')
-      .insert(payload)
-      .select('id')
-      .single();
-
-    if (error || !inserted) {
-      setSaving(false);
+    if (error) {
       console.error(error);
-      toast.error('No se pudo registrar el lead. Revisá los datos e intentá de nuevo.');
+      toast.error('No se pudo registrar el lead. Revisá la conexión e intentá de nuevo.');
       return;
     }
 
-    // Unidad de interés, igual que en el panel. Un fallo acá no invalida el lead: el
-    // `model_interest` de arriba ya guarda lo mismo en texto.
-    if (brand.trim()) {
-      const { error: unitError } = await supabase.from('prospect_vehicles').insert({
-        prospect_id: inserted.id,
-        brand: brand.trim(),
-        model: model.trim() || null,
-        sort_order: 0,
-      });
-      if (unitError) console.error('[evento] unidad no guardada:', unitError);
+    const result = data as { ok?: boolean; reason?: string } | null;
+
+    if (!result?.ok) {
+      if (result?.reason === 'duplicate_phone') { setDuplicateWarning(true); return; }
+      toast.error(SUBMIT_ERRORS[result?.reason ?? ''] ?? 'No se pudo registrar el lead.');
+      return;
     }
 
-    // Kommo, sin await y sin bloquear: el lead ya está en el sistema. Es el MISMO llamado que
-    // hace Prospectos al crear desde el panel.
-    createKommoLead(inserted.id).catch(console.error);
-
-    setSaving(false);
     setLastName(name.trim());
     resetForm();
     setSubmitted(true);
@@ -211,23 +211,36 @@ const EventoCaptura = () => {
     );
   }
 
-  if (notFound || !event) {
+  if (!form?.ok || !event) {
+    const reason = form?.reason;
+    const closed = reason === 'closed' || reason === 'disabled';
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <Card className="w-full max-w-md text-center">
           <CardContent className="pt-8 pb-8 space-y-2">
             <CalendarDays className="w-8 h-8 mx-auto text-muted-foreground" />
-            <p className="text-sm font-medium">Este evento no existe</p>
+            <p className="text-sm font-medium">{closed ? form?.name : 'Este evento no existe'}</p>
             <p className="text-xs text-muted-foreground">
-              Revisá el enlace o pedí uno nuevo desde el módulo de Eventos.
+              {reason === 'disabled'
+                ? 'El formulario de captación de este evento está apagado.'
+                : reason === 'closed'
+                  ? 'Este evento está cerrado, así que ya no acepta registros.'
+                  : 'Revisá el enlace o pedí uno nuevo desde el módulo de Eventos.'}
             </p>
+            {closed && (
+              <p className="text-xs text-muted-foreground">
+                Se vuelve a prender desde Eventos → Editar.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  if (!event.capture_form_enabled || !event.is_active) {
+  // Sin concesionario en el evento la base rechaza el alta. Se avisa acá en vez de dejar
+  // llenar todo el formulario para que falle recién al tocar el botón.
+  if (!event.has_dealership) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <Card className="w-full max-w-md text-center">
@@ -235,12 +248,10 @@ const EventoCaptura = () => {
             <CalendarDays className="w-8 h-8 mx-auto text-muted-foreground" />
             <p className="text-sm font-medium">{event.name}</p>
             <p className="text-xs text-muted-foreground">
-              {event.is_active
-                ? 'El formulario de captación de este evento está apagado.'
-                : 'Este evento está cerrado, así que ya no acepta registros.'}
+              Este evento todavía no tiene concesionario asignado, así que no puede recibir leads.
             </p>
             <p className="text-xs text-muted-foreground">
-              Se vuelve a prender desde Eventos → Editar.
+              Se carga desde Eventos → Editar → Concesionario.
             </p>
           </CardContent>
         </Card>
@@ -364,7 +375,7 @@ const EventoCaptura = () => {
                     <SelectValue placeholder={brand ? 'Elegí el modelo' : 'Primero la marca'} />
                   </SelectTrigger>
                   <SelectContent>
-                    {modelsOfBrand.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}
+                    {modelsOfBrand.map(m => <SelectItem key={`${m.brand}-${m.name}`} value={m.name}>{m.name}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -375,28 +386,10 @@ const EventoCaptura = () => {
               <Select value={salesperson} onValueChange={setSalesperson}>
                 <SelectTrigger><SelectValue placeholder="Elegí el vendedor" /></SelectTrigger>
                 <SelectContent>
-                  {eventSalespersons.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
+                  {salespersons.map(s => <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {usingAllSalespersons && (
-                <p className="text-[10px] text-muted-foreground">
-                  Este evento no tiene vendedores asignados, así que se muestran todos. Se
-                  cargan desde Eventos → Editar.
-                </p>
-              )}
             </div>
-
-            {dealerships.length > 1 && (
-              <div className="space-y-1.5">
-                <Label className="text-xs">Concesionario</Label>
-                <Select value={dealershipId} onValueChange={setDealershipId}>
-                  <SelectTrigger><SelectValue placeholder="Elegí el concesionario" /></SelectTrigger>
-                  <SelectContent>
-                    {dealerships.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
 
             <div className="space-y-1.5">
               <Label className="text-xs">Notas</Label>

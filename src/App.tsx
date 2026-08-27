@@ -79,17 +79,14 @@ const App = () => (
             <Route path="/reservar" element={<PublicReserva />} />
             <Route path="/mi-flota" element={<PublicMiFlota />} />
             <Route path="/prospectos" element={<PublicProspectos />} />
-            <Route path="/encuesta/:token" element={<PublicEncuesta />} />
 
-            {/* Formulario de captación de un evento. Pide sesión a propósito: el lead tiene
-                que subir a Kommo por la edge function, que exige JWT — el formulario público
-                de /prospectos no la llama y por eso sus leads no llegan al CRM. Ver
-                EventoCaptura.tsx. */}
-            <Route path="/captura/:eventId" element={
-              <ProtectedRoute allowedPortals={['admin', 'concesionario']} requiredModule="prospectos">
-                <EventoCaptura />
-              </ProtectedRoute>
-            } />
+            {/* Formulario de captación de un evento. Link PÚBLICO: se abre y se llena sin
+                iniciar sesión. El lead sube a Kommo igual que uno cargado desde el panel,
+                pero lo dispara la base (`submit_event_lead`) y no el navegador — por eso no
+                hace falta JWT y la edge function `kommo-api` sigue cerrada a internet.
+                Se apaga desde Eventos → Editar. Ver EventoCaptura.tsx. */}
+            <Route path="/captura/:eventId" element={<EventoCaptura />} />
+            <Route path="/encuesta/:token" element={<PublicEncuesta />} />
 
             {/* Cliente routes */}
             <Route path="/usuario" element={
