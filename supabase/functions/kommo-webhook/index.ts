@@ -178,19 +178,38 @@ async function resolveEventEnumId(
 // create it in prospect_events (idempotent by normalized name) so it appears in the
 // GAC selector and future prospects match by the exact same label. Single source of
 // truth = Kommo; the event never needs to be created by hand in two places.
+//
+// Matching and the value returned both use `eventKey` (accent/case/space/punctuation
+// insensitive), not `normEventName`. Real incident: "Expo Zulia" (created by hand, 177
+// leads) and "ExpoZulia" (auto-provisioned later by this same function from a Kommo lead)
+// were treated as different events over a single space, so this function inserted a
+// duplicate AND every prospect that landed here kept the raw Kommo text instead of the
+// catalog's real name — leads scattered across two rows, one of them invisible in reports.
+// The caller must always write the CANONICAL name this function returns (the existing
+// catalog row's `name`), never the raw text Kommo sent, or the same split happens again.
 async function ensureProspectEvent(
   supabase: ReturnType<typeof createClient>,
   eventName: string | null | undefined,
-): Promise<void> {
+): Promise<string | null> {
   const name = String(eventName || '').trim()
-  if (!name) return
+  if (!name) return null
   try {
-    const norm = normEventName(name)
-    const { data } = await supabase.from('prospect_events').select('name')
-    const rows = (data as Array<{ name: string }> | null) || []
-    if (rows.some(r => normEventName(String(r.name)) === norm)) return
+    const key = eventKey(name)
+    const { data } = await supabase
+      .from('prospect_events')
+      .select('name, is_active, created_at')
+      .order('is_active', { ascending: false })
+      .order('created_at', { ascending: true })
+    const rows = (data as Array<{ name: string; is_active: boolean; created_at: string }> | null) || []
+    // If more than one catalog row matches (can still happen with pre-existing duplicates),
+    // prefer the active one, then the oldest — never the newest/inactive stray.
+    const match = rows.find(r => eventKey(String(r.name)) === key)
+    if (match) return match.name
     await supabase.from('prospect_events').insert({ name, is_active: true })
-  } catch (_) { /* non-fatal: never break the sync over a selector row */ }
+    return name
+  } catch (_) {
+    return name /* non-fatal: never break the sync over a selector row; fall back to raw text */
+  }
 }
 
 const PERSON_TYPE_TO_KOMMO: Record<string, number> = {
@@ -718,8 +737,8 @@ async function syncFieldsFromKommo(
   // it doesn't have one yet (don't clobber a GAC value on every sync).
   const kommoEvent = getCFText(cfValues, CF.event_name)
   if (kommoEvent) {
-    await ensureProspectEvent(supabase, kommoEvent)
-    if (!prospect.event_name) updates.event_name = kommoEvent
+    const canonicalEvent = await ensureProspectEvent(supabase, kommoEvent)
+    if (!prospect.event_name) updates.event_name = canonicalEvent ?? kommoEvent
   }
 
   // Source (select → text)
@@ -1246,7 +1265,7 @@ async function autoCreateProspectFromKommo(
   const paymentModality = paymentEnumId ? (KOMMO_TO_PAYMENT_MODALITY[paymentEnumId] ?? null) : null
 
   const eventName = getCFText(cfValues, CF.event_name)
-  if (eventName) await ensureProspectEvent(supabase, eventName)
+  const canonicalEventName = eventName ? await ensureProspectEvent(supabase, eventName) : null
 
   const sourceEnumId = getCFEnum(cfValues, CF.fuente)
   const source = sourceEnumId ? (KOMMO_TO_SOURCE[String(sourceEnumId)] || 'concesionario') : 'concesionario'
@@ -1277,7 +1296,7 @@ async function autoCreateProspectFromKommo(
     ...(notes && { notes }),
     ...(estadoVzla && { 'Estado de Vnzla': estadoVzla }),
     ...(paymentModality && { payment_modality: paymentModality }),
-    ...(eventName && { event_name: eventName }),
+    ...(canonicalEventName && { event_name: canonicalEventName }),
     ...(modelInterest && { model_interest: modelInterest }),
     ...(dealershipId && { dealership_id: dealershipId }),
     ...(personType && { person_type: personType }),

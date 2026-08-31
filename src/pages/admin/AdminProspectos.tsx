@@ -195,6 +195,14 @@ const getProspectUnits = (p: Prospect): ProspectUnit[] => {
   return [{ brand, model }];
 };
 
+// Clave tolerante para matchear "nombre_evento" del Excel contra el catálogo de eventos ya
+// cargado en el panel: minúsculas, sin acentos, sin ningún caracter que no sea letra o número.
+// Mismo criterio que `eventKey()` en supabase/functions/kommo-webhook/index.ts — un espacio o
+// una tilde de diferencia entre la planilla y el catálogo no debe partir el conteo de leads
+// de un evento en dos (incidente real: "Expo Zulia" vs "ExpoZulia").
+const eventKey = (s: string): string =>
+  s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+
 // re3 CSV/XLSX import: parse the "Unidades adicionales" cell — extra units (sort_order >= 1)
 // written as "BRAND MODEL" joined by " | ". First token is the brand, the rest is the model.
 const parseExtraUnitsCell = (raw: string): ProspectUnit[] =>
@@ -1011,6 +1019,13 @@ const AdminProspectos = () => {
 
         if (raw.length === 0) { toast.error('El archivo no contiene filas de datos'); return; }
 
+        // Catálogo de eventos ya cargado en el panel (useProspectEvents), indexado por clave
+        // tolerante. Si "nombre_evento" del Excel matchea un evento existente con espaciado o
+        // acentos distintos, usamos el nombre canónico del catálogo en vez del texto crudo de
+        // la celda — así el lead se sigue contando bajo el evento correcto. Si no hay match,
+        // se deja el texto tal cual viene (puede ser un evento legítimamente nuevo).
+        const eventCatalogByKey = new Map(prospectEvents.map(e => [eventKey(e.name), e.name]));
+
         const rows: typeof importRows = [];
         raw.forEach((row, i) => {
           const errors: string[] = [];
@@ -1028,7 +1043,8 @@ const AdminProspectos = () => {
           let status = String(row['estado'] ?? '').trim().toLowerCase().replace(/\s+/g, '_');
           const notes = String(row['notas'] ?? '').trim();
           const salesperson = String(row['vendedor'] ?? '').trim();
-          const event_name = String(row['nombre_evento'] ?? '').trim();
+          const event_name_raw = String(row['nombre_evento'] ?? '').trim();
+          const event_name = event_name_raw ? (eventCatalogByKey.get(eventKey(event_name_raw)) ?? event_name_raw) : event_name_raw;
           const tdRaw = String(row['test_drive'] ?? '').trim().toLowerCase();
           const test_drive = ['si','sí','true','1','yes','y'].includes(tdRaw);
           let person_type = String(row['tipo_persona'] ?? '').trim().toLowerCase();
