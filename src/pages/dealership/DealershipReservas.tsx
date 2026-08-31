@@ -182,8 +182,16 @@ const DR_LS_KEY = 'dealership_reservas_create_form';
 const getDrLS = () => { try { return JSON.parse(localStorage.getItem(DR_LS_KEY) || '{}'); } catch { return {}; } };
 
 const DealershipReservas = () => {
-  const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
-  const { profile, role, hasPermission } = useAuth();
+  const { dealerships, selectedDealership, setSelectedDealership, loading: loadingAccess } = useDealershipAccess();
+  const { profile, role, getModuleScope, hasPermission } = useAuth();
+  const dealershipRoleName = role?.name?.toLowerCase() ?? '';
+  const isAdmin = dealershipRoleName === 'superadmin' || dealershipRoleName === 'admin';
+  // `showSelector` viene de useDealershipAccess, que arma `dealerships` solo a partir de
+  // `dealership_users` (a qué concesionarios está vinculado el usuario) y nunca mira
+  // `role_module_scopes`. Un usuario vinculado a UN SOLO concesionario nunca vería la
+  // opción "Todos los concesionarios" aunque su rol tenga `reservas` en 'all'. Se corrige
+  // acá, localmente, sin tocar el hook compartido.
+  const canSeeAllDealerships = isAdmin || getModuleScope('reservas') === 'all' || dealerships.length > 1;
   const canCreate = hasPermission('reservas.create');
   const canEdit = hasPermission('reservas.edit');
   const canDelete = hasPermission('reservas.delete');
@@ -1184,7 +1192,7 @@ const DealershipReservas = () => {
           </Badge>
         </div>
         <div className="flex items-center gap-2">
-          {showSelector && (
+          {canSeeAllDealerships && (
             <Select value={selectedDealership} onValueChange={setSelectedDealership}>
               <SelectTrigger className="w-[210px] h-8 text-xs"><SelectValue /></SelectTrigger>
               <SelectContent>

@@ -35,6 +35,7 @@ const MODULE_LABELS: Record<string, string> = {
   modelos: 'Modelos', concesionarios: 'Concesionarios', reservas: 'Reservas',
   garantias: 'Garantías', historial: 'Historial', prospectos: 'Prospectos',
   usuarios: 'Usuarios', roles: 'Roles', eventos: 'Eventos',
+  portal_externo: 'Portal Mi Flota',
 };
 
 // Qué módulos muestran el interruptor "Ver todo" / "Solo propio" NO se decide acá: sale de
@@ -53,7 +54,9 @@ const PORTAL_TEMPLATE_ROLE: Record<string, string> = {
 // Modules that have real pages per portal.
 // concesionario now has ALL modules — permissions determine what's visible, not the portal.
 const PORTAL_MODULES: Record<string, string[]> = {
-  admin:         ['dashboard','clientes','vehiculos','modelos','concesionarios','reservas','garantias','historial','prospectos','usuarios','roles','eventos'],
+  // portal_externo NO va en 'concesionario': es una pantalla de Configuración exclusiva de
+  // Admin (no tiene ruta bajo /concesionario), a diferencia del resto de estos módulos.
+  admin:         ['dashboard','clientes','vehiculos','modelos','concesionarios','reservas','garantias','historial','prospectos','usuarios','roles','eventos','portal_externo'],
   concesionario: ['dashboard','clientes','vehiculos','modelos','concesionarios','reservas','garantias','historial','prospectos','usuarios','roles','eventos'],
   cliente:       ['reservas'],
 };
@@ -235,8 +238,9 @@ const AdminRoles = () => {
     // Solo se guarda el scope de los módulos que la base declara scopeables y que además
     // tienen algún permiso activo. Sobre un rol de cliente no se guarda ninguno: las policies
     // lo ignoran por portal, así que dejar la fila solo confundiría a quien la lea después.
+    // admin/superadmin tampoco: is_admin_user() ya les da acceso total sin mirar esta tabla.
     await supabase.from('role_module_scopes' as any).delete().eq('role_id', permRole.id);
-    const activeModules = permRole.redirect_portal === 'cliente'
+    const activeModules = (permRole.redirect_portal === 'cliente' || permRole.name === 'admin' || permRole.name === 'superadmin')
       ? []
       : [...new Set(permissions.filter(p => permChecked.has(p.id)).map(p => p.module))];
     const scopeInserts = activeModules
@@ -418,7 +422,12 @@ const AdminRoles = () => {
                 const allChecked = modPerms.every(p => permChecked.has(p.id));
                 const hasAnyPerm = modPerms.some(p => permChecked.has(p.id));
                 const notInPortal = portalMods.length > 0 && !portalMods.includes(mod);
-                const isScopeable = mod in scopeCatalog && permRole?.redirect_portal !== 'cliente';
+                // admin/superadmin quedan afuera igual que cliente: is_admin_user() les da acceso
+                // total sin mirar role_module_scopes, así que el interruptor nunca tendría efecto
+                // ahí y solo confundiría a quien lo pruebe (medido en prod: da lo mismo 'own' que
+                // 'all' para esos dos roles).
+                const isAdminRole = permRole?.name === 'admin' || permRole?.name === 'superadmin';
+                const isScopeable = mod in scopeCatalog && permRole?.redirect_portal !== 'cliente' && !isAdminRole;
                 const scope = moduleScopes[mod] ?? 'own';
                 return (
                   <TableRow key={mod} className={cn("[&>td]:py-2", notInPortal && "bg-muted/40")}>

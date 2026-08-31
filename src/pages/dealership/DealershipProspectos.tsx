@@ -211,8 +211,16 @@ const DealershipProspectos = () => {
   const { salespersons } = useSalespersons();
   const { dealerships, selectedDealership, setSelectedDealership, showSelector, loading: loadingAccess } = useDealershipAccess();
   const { salesperson: currentSalesperson, isSalesperson } = useCurrentSalesperson();
-  const { profile, role, hasPermission } = useAuth();
+  const { profile, role, getModuleScope, hasPermission } = useAuth();
   const isVendedor = role?.name?.toLowerCase() === 'vendedor';
+  const roleName = role?.name?.toLowerCase() ?? '';
+  const isAdmin = roleName === 'superadmin' || roleName === 'admin';
+  // Scope 'all' (o admin/superadmin): esta pantalla no tiene selector "Todos los
+  // concesionarios" (a diferencia de Reservas), así que cuando el alcance del rol para
+  // el módulo es 'all' el fetch trae TODOS los prospectos sin filtrar por dealership_id
+  // (la RLS ya lo permite, ver prospects_select_global). Scope 'own' (default): sigue
+  // igual que siempre, filtrado por el concesionario seleccionado.
+  const scopeAll = isAdmin || getModuleScope('prospectos') === 'all';
   const canCreate = hasPermission('prospectos.create');
   const canEdit = hasPermission('prospectos.edit');
   const isMobile = useIsMobile();
@@ -437,9 +445,11 @@ const DealershipProspectos = () => {
       let query = supabase
         .from('prospects')
         .select('*, prospect_vehicles(brand, model, sort_order)')
-        .eq('dealership_id', selectedDealership)
         .order('created_at', { ascending: false })
         .range(from, from + pageSize - 1);
+      // Scope 'own' (default): filtra por el concesionario seleccionado, igual que
+      // siempre. Scope 'all': no filtra por dealership_id, trae de todos.
+      if (!scopeAll) query = query.eq('dealership_id', selectedDealership);
       if (salespersonName) query = query.eq('salesperson', salespersonName);
       const { data, error } = await query;
       if (error || !data || data.length === 0) break;
