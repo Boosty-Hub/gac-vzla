@@ -18,6 +18,7 @@ import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
+import DashboardSurveysWidget from '@/components/dashboard/DashboardSurveysWidget';
 
 interface Prospect {
   id: string;
@@ -368,6 +369,9 @@ const DealershipDashboard = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Encuestas de satisfacción — se auto-oculta si el rol no tiene el permiso encuestas.view */}
+      <DashboardSurveysWidget dealershipId={selectedDealership} />
 
       {/* Trend */}
       <Card className="gac-shadow">
