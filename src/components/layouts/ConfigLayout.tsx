@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, Users, Shield, Settings, Wrench, ShieldCheck, SlidersHorizontal, MessageCircle, Zap, LifeBuoy } from 'lucide-react';
+import { ArrowLeft, Users, Shield, Settings, Wrench, ShieldCheck, SlidersHorizontal, MessageCircle, Zap, LifeBuoy, Handshake, Car } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import imbLogo from '@/assets/imb-logo.png';
 
@@ -20,6 +20,8 @@ const configMenu = [
   { label: 'Garantías', icon: ShieldCheck, path: '/admin/configuracion/garantias' },
   { label: 'Plantillas', icon: MessageCircle, path: '/admin/configuracion/plantillas' },
   { label: 'Automatizaciones', icon: Zap, path: '/admin/configuracion/automatizaciones' },
+  { label: 'Convenios', icon: Handshake, path: '/admin/configuracion/convenios' },
+  { label: 'Portal Mi Flota', icon: Car, path: '/admin/configuracion/portal-externo' },
   { label: 'Soporte', icon: LifeBuoy, path: '/admin/configuracion/soporte' },
 ];
 

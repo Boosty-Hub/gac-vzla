@@ -34,6 +34,8 @@ const ERROR_TEXT: Record<string, string> = {
   datos_incompletos: 'Ingresá la placa y el teléfono completo.',
   demasiados_intentos: 'Demasiados intentos con esta placa. Esperá 15 minutos e intentá de nuevo.',
   no_encontrado: 'No encontramos un vehículo con esa placa y ese teléfono. Verificá los datos.',
+  // Interruptor de Configuración -> Portal Mi Flota. No se cuenta como intento fallido.
+  portal_deshabilitado: 'El portal está deshabilitado temporalmente. Intentá más tarde.',
 };
 
 export default function PublicMiFlota() {
