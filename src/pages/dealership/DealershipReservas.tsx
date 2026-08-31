@@ -104,7 +104,14 @@ interface PlateResult {
  */
 type UnifiedResult =
   | { kind: 'vehicle'; data: PlateResult }
-  | { kind: 'client'; id: string; full_name: string; cedula: string | null; phone: string | null; is_manual: boolean };
+  | {
+      kind: 'client'; id: string; full_name: string; cedula: string | null; phone: string | null; is_manual: boolean;
+      // true cuando el termino buscado solo coincide con el telefono del cliente (no con
+      // su nombre ni cedula) — inferido en el front con la misma normalizacion que usa
+      // staff_search_clients, para avisar en el dropdown que el match no es por lo que el
+      // usuario esperaba encontrar. Ver 20260831130000_fix_staff_search_phone_threshold.sql.
+      phoneOnlyMatch: boolean;
+    };
 
 interface ServiceType {
   id: number;
@@ -454,7 +461,18 @@ const DealershipReservas = () => {
         };
         results.push({ kind: 'vehicle', data: pr });
       }
-      (clientRes.data || []).forEach((c: { client_id: string; full_name: string; cedula: string | null; phone: string | null; is_manual: boolean }) =>
+      // Digitos del termino buscado, mismos ultimos-10 que usa staff_search_clients, para
+      // poder distinguir en el front si un resultado matcheo por telefono y no por nombre/
+      // cedula (ver comentario de UnifiedResult y 20260831130000).
+      const qDigits = q.replace(/[^0-9]/g, '').slice(-10);
+      const qAlnum = q.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      const qLower = q.toLowerCase();
+      (clientRes.data || []).forEach((c: { client_id: string; full_name: string; cedula: string | null; phone: string | null; is_manual: boolean }) => {
+        const nameMatch = c.full_name.toLowerCase().includes(qLower);
+        const cedulaAlnum = (c.cedula || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+        const cedulaMatch = qAlnum.length >= 3 && cedulaAlnum.includes(qAlnum);
+        const phoneDigits = (c.phone || '').replace(/[^0-9]/g, '').slice(-10);
+        const phoneMatch = qDigits.length >= 7 && phoneDigits.includes(qDigits);
         results.push({
           kind: 'client',
           id: c.client_id,
@@ -462,7 +480,9 @@ const DealershipReservas = () => {
           cedula: c.cedula ?? null,
           phone: c.phone ?? null,
           is_manual: !!c.is_manual,
-        }));
+          phoneOnlyMatch: phoneMatch && !nameMatch && !cedulaMatch,
+        });
+      });
       setUnifiedResults(results);
       setUnifiedDropdown(results.length > 0);
       setUnifiedSearched(true);
@@ -1888,6 +1908,14 @@ const DealershipReservas = () => {
                               {r.is_manual && (
                                 <Badge className="ml-1 text-[9px] px-1 py-0 bg-amber-100 text-amber-800" title="Cliente externo">
                                   Externo
+                                </Badge>
+                              )}
+                              {r.phoneOnlyMatch && (
+                                <Badge
+                                  className="ml-1 text-[9px] px-1 py-0 bg-blue-100 text-blue-800"
+                                  title="Este resultado aparece porque el texto buscado coincide con el telefono del cliente, no con su nombre ni cedula"
+                                >
+                                  Coincide por teléfono
                                 </Badge>
                               )}
                               {(r.cedula || r.phone) && (
