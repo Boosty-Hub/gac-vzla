@@ -31,8 +31,6 @@ import AdminGeneral from './pages/admin/config/AdminGeneral';
 import AdminPlantillas from './pages/admin/config/AdminPlantillas';
 import AdminAutomatizaciones from './pages/admin/config/AdminAutomatizaciones';
 import AdminEventos from './pages/admin/config/AdminEventos';
-import AdminConvenios from './pages/admin/config/AdminConvenios';
-import AdminPortalExterno from './pages/admin/config/AdminPortalExterno';
 import AdminSoporte from './pages/admin/config/AdminSoporte';
 import ConfigLayout from "./components/layouts/ConfigLayout";
 import BoostySupport from "./components/BoostySupport";
@@ -130,8 +128,6 @@ const App = () => (
             <Route path="/admin/configuracion/garantias" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminCondicionesGarantia /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/plantillas" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminPlantillas /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/automatizaciones" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminAutomatizaciones /></ConfigLayout></ProtectedRoute>} />
-            <Route path="/admin/configuracion/convenios" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminConvenios /></ConfigLayout></ProtectedRoute>} />
-            <Route path="/admin/configuracion/portal-externo" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminPortalExterno /></ConfigLayout></ProtectedRoute>} />
             <Route path="/admin/configuracion/soporte" element={<ProtectedRoute allowedRoles={['superadmin', 'admin']}><ConfigLayout><AdminSoporte /></ConfigLayout></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />

@@ -28,32 +28,3 @@ export async function listExternalSources(): Promise<ExternalSource[]> {
   const { data } = await (supabase.rpc as unknown as SourcesRpc)('external_sources');
   return data || [];
 }
-
-/**
- * Renombra/fusiona y "borra" un convenio en TODOS los clientes que lo tengan, de forma
- * atómica. Ver supabase/migrations/20260831150000_convenios_y_portal_externo.sql — ambas RPC
- * se gatean con los permisos de Clientes que ya existen (`clientes.edit` / `clientes.delete`),
- * no con un permiso `convenios.*` nuevo.
- */
-type RenameRpc = (fn: 'rename_external_source', params: { p_old: string; p_new: string }) =>
-  Promise<{ data: number | null; error: { message: string } | null }>;
-type DeleteRpc = (fn: 'delete_external_source', params: { p_source: string }) =>
-  Promise<{ data: number | null; error: { message: string } | null }>;
-
-/** Renombra `oldName` a `newName` en todos sus clientes. Si `newName` ya existía, los fusiona. */
-export async function renameExternalSource(oldName: string, newName: string): Promise<number> {
-  const { data, error } = await (supabase.rpc as unknown as RenameRpc)('rename_external_source', {
-    p_old: oldName, p_new: newName,
-  });
-  if (error) throw new Error(error.message);
-  return data ?? 0;
-}
-
-/** Deja `external_source = NULL` en todos los clientes que tenían este convenio. */
-export async function deleteExternalSource(source: string): Promise<number> {
-  const { data, error } = await (supabase.rpc as unknown as DeleteRpc)('delete_external_source', {
-    p_source: source,
-  });
-  if (error) throw new Error(error.message);
-  return data ?? 0;
-}
