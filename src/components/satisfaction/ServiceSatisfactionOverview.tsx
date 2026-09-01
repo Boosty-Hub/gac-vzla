@@ -53,9 +53,15 @@ interface ServiceSatisfactionOverviewProps {
    * abrir. Es el mismo contrato que `SatisfactionOverview`.
    */
   onSelectClient?: (clientId: string) => void;
+  /**
+   * Igual que en `SatisfactionDashboard`: acota la consulta a un solo concesionario y oculta
+   * el selector "Todos los concesionarios" (quedaría siempre en una sola opción posible).
+   * `undefined` deja el panel global, tal como lo usa `AdminDashboard`.
+   */
+  dealershipId?: string;
 }
 
-const ServiceSatisfactionOverview = ({ onSelectClient }: ServiceSatisfactionOverviewProps) => {
+const ServiceSatisfactionOverview = ({ onSelectClient, dealershipId }: ServiceSatisfactionOverviewProps) => {
   const [rows, setRows] = useState<ServiceSurveyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -63,12 +69,14 @@ const ServiceSatisfactionOverview = ({ onSelectClient }: ServiceSatisfactionOver
   const [status, setStatus] = useState(ALL);
 
   useEffect(() => {
+    if (dealershipId === '') { setLoading(false); return; }
+
     const load = async () => {
       setLoading(true);
       // `satisfaction_surveys` / `service_survey_responses` no están en el types.ts generado
       // (tablas nuevas, sin regenerar) — `as any`, igual que el resto del módulo.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase as any)
+      let query = (supabase as any)
         .from('satisfaction_surveys')
         .select(
           'id, client_id, client_name, sold_plate, status, suppressed_reason, created_at, responded_at, ' +
@@ -76,8 +84,9 @@ const ServiceSatisfactionOverview = ({ onSelectClient }: ServiceSatisfactionOver
           'response:service_survey_responses(*)',
         )
         // El espejo exacto del filtro de las otras dos vistas. Acá sólo postventa.
-        .eq('origin', 'service')
-        .order('created_at', { ascending: false });
+        .eq('origin', 'service');
+      if (dealershipId) query = query.eq('dealership_id', dealershipId);
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         console.error(error);
@@ -90,7 +99,7 @@ const ServiceSatisfactionOverview = ({ onSelectClient }: ServiceSatisfactionOver
       setLoading(false);
     };
     load();
-  }, []);
+  }, [dealershipId]);
 
   const dealershipOptions = useMemo(() => {
     const seen = new Map<string, string>();
@@ -142,15 +151,19 @@ const ServiceSatisfactionOverview = ({ onSelectClient }: ServiceSatisfactionOver
             className="pl-8 h-9 text-sm"
           />
         </div>
-        <Select value={dealership} onValueChange={setDealership}>
-          <SelectTrigger className="h-9 w-[190px] text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Todos los concesionarios</SelectItem>
-            {dealershipOptions.map(([id, name]) => (
-              <SelectItem key={id} value={id}>{name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Con dealershipId ya viene fijado desde arriba (una sola opción posible) — el
+            selector no aporta nada y solo confundiría a un usuario de concesionario. */}
+        {dealershipId === undefined && (
+          <Select value={dealership} onValueChange={setDealership}>
+            <SelectTrigger className="h-9 w-[190px] text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>Todos los concesionarios</SelectItem>
+              {dealershipOptions.map(([id, name]) => (
+                <SelectItem key={id} value={id}>{name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger className="h-9 w-[170px] text-sm"><SelectValue /></SelectTrigger>
           <SelectContent>

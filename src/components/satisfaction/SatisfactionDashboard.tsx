@@ -28,7 +28,18 @@ import {
  * carries `dealership_id`/`salesperson` and a `client_name`/`client_phone`
  * snapshot on each row, so no `clients` read is needed at all.
  */
-const SatisfactionDashboard = () => {
+interface SatisfactionDashboardProps {
+  /**
+   * Cuando se pasa, acota ambas pestañas (venta y postservicio) a un solo concesionario —
+   * usado por `DealershipDashboard` para que un usuario con acceso a varios concesionarios
+   * vea solo el que tiene seleccionado, en vez de todos los que le permite su RLS. `undefined`
+   * (el caso de `AdminDashboard`) deja el panel sin filtrar, igual que siempre. `''` (todavía
+   * sin resolver por `useDealershipAccess`) pausa la carga.
+   */
+  dealershipId?: string;
+}
+
+const SatisfactionDashboard = ({ dealershipId }: SatisfactionDashboardProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const clientesBasePath = location.pathname.startsWith('/concesionario')
@@ -39,13 +50,15 @@ const SatisfactionDashboard = () => {
   const [filters, setFilters] = useState<SatisfactionFilterState>(DEFAULT_FILTERS);
 
   useEffect(() => {
+    if (dealershipId === '') { setLoading(false); return; }
+
     const load = async () => {
       setLoading(true);
       // `satisfaction_surveys` / `vehicles` / `vehicle_models` embeds are not
       // in the generated types.ts yet (new tables, no regen) — `as any`,
       // matching this project's established convention for un-typed tables
       // (see SatisfactionOverview.tsx).
-      const { data, error } = await (supabase as any)
+      let query = (supabase as any)
         .from('satisfaction_surveys')
         .select(
           'id, client_id, client_name, client_phone, sold_plate, status, origin, suppressed_reason, ' +
@@ -55,10 +68,11 @@ const SatisfactionDashboard = () => {
         // SALE surveys only. Postventa surveys (origin = 'service') store their answers in
         // `service_survey_responses`, so without this filter they would arrive here with a
         // null `response` and be counted as sale surveys that were sent and never answered —
-        // silently inflating "enviadas" and deflating the response rate on this panel.
+        // silently inflating "enviadas" and deflating la tasa de respuesta on this panel.
         // Postventa results are surfaced in the vehicle history instead (R7).
-        .in('origin', ['won', 'repurchase'])
-        .order('created_at', { ascending: false });
+        .in('origin', ['won', 'repurchase']);
+      if (dealershipId) query = query.eq('dealership_id', dealershipId);
+      const { data, error } = await query.order('created_at', { ascending: false });
 
       if (error) {
         toast.error('Error al cargar el panel de satisfacción');
@@ -70,7 +84,7 @@ const SatisfactionDashboard = () => {
       setLoading(false);
     };
     load();
-  }, []);
+  }, [dealershipId]);
 
   // Filters compose with AND and drive both the metrics and the client list
   // (requirements.md R8: "handled completely, not partially").
@@ -118,6 +132,7 @@ const SatisfactionDashboard = () => {
             contra el portal activo, nunca contra `/admin` fijo — esta pantalla también se
             sirve en `/concesionario`. */}
         <ServiceSatisfactionOverview
+          dealershipId={dealershipId}
           onSelectClient={clientId => navigate(`${clientesBasePath}?client=${clientId}&tab=postservicio`)}
         />
       </TabsContent>

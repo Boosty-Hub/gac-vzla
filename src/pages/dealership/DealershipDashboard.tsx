@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
-  MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal,
+  MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal, Smile,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -18,7 +18,7 @@ import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { DashboardDateRange, rangeDescription } from '@/components/DashboardDateRange';
-import DashboardSurveysWidget from '@/components/dashboard/DashboardSurveysWidget';
+import SatisfactionDashboard from '@/components/satisfaction/SatisfactionDashboard';
 
 interface Prospect {
   id: string;
@@ -370,8 +370,18 @@ const DealershipDashboard = () => {
         </Card>
       </div>
 
-      {/* Encuestas de satisfacción — se auto-oculta si el rol no tiene el permiso encuestas.view */}
-      <DashboardSurveysWidget dealershipId={selectedDealership} />
+      {/* Encuestas de satisfacción — mismo panel completo (pestañas Entrega/Post Servicio,
+          filtros, listado) que AdminDashboard, pero acotado a este concesionario via
+          dealershipId. Se oculta entero si el rol no tiene el permiso encuestas.view. */}
+      {(role?.name?.toLowerCase() === 'superadmin' || role?.name?.toLowerCase() === 'admin' || hasPermission('encuestas.view')) && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Smile className="w-4 h-4 text-muted-foreground" />
+            <h3 className="text-sm font-display font-semibold">Encuestas de Satisfacción</h3>
+          </div>
+          <SatisfactionDashboard dealershipId={selectedDealership} />
+        </div>
+      )}
 
       {/* Trend */}
       <Card className="gac-shadow">
