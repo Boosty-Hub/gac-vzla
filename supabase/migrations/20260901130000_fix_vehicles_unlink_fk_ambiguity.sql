@@ -1,0 +1,15 @@
+-- INCIDENTE EN VIVO: la migracion de "desvincular vehiculo del cliente" agrego
+-- vehicles.unlinked_from_client_id con una FK propia hacia clients(id). Eso le dio a
+-- `vehicles` DOS relaciones distintas hacia `clients` (vehicles_client_id_fkey y
+-- vehicles_unlinked_from_client_id_fkey), y PostgREST dejo de poder resolver el embed
+-- implicito `vehicles(...)` / `clients(...)` que usa CASI TODA pantalla del sistema
+-- (PGRST201: "more than one relationship was found for 'clients' and 'vehicles'") --
+-- tumbo Clientes (y cualquier otra pantalla con el mismo embed) en produccion.
+--
+-- unlinked_from_client_id sigue siendo util como dato de auditoria (que cliente tenia
+-- este vehiculo antes de desvincularlo), pero no necesita ser una FK "viva" que
+-- PostgREST pueda usar para un embed automatico -- ese uso no esta en ningun lado del
+-- codigo. Se saca la FK y se deja la columna como snapshot simple de uuid; el indice
+-- que la respaldaba tambien se descarta porque ya no hace falta para el constraint.
+-- vehicles_unlinked_by_fkey (hacia profiles, no clients) no ambigua nada y se deja igual.
+ALTER TABLE public.vehicles DROP CONSTRAINT IF EXISTS vehicles_unlinked_from_client_id_fkey;
