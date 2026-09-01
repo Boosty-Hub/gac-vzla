@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
   CalendarDays, ClipboardList, Users, TrendingUp, UserCheck,
-  MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal, Smile,
+  MapPin, Trophy, Target, ArrowUpRight, ArrowDownRight, Medal, Smile, LayoutGrid,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -12,6 +12,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line, Legend,
 } from 'recharts';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProspectStatuses } from '@/hooks/useProspectStatuses';
 import { useDealershipAccess } from '@/hooks/useDealershipAccess';
 import { useCurrentSalesperson } from '@/hooks/useCurrentSalesperson';
@@ -76,6 +77,7 @@ const DealershipDashboard = () => {
   const { selectedDealership, loading: loadingAccess } = useDealershipAccess();
   const { salesperson: currentSalesperson, loading: loadingSalesperson } = useCurrentSalesperson();
   const { user, profile, role, hasPermission } = useAuth();
+  const canSeeSatisfaccion = role?.name?.toLowerCase() === 'superadmin' || role?.name?.toLowerCase() === 'admin' || hasPermission('encuestas.view');
   // Un asesor de servicio no tiene prospectos.view: el tablero deja de mostrarle los
   // reportes de ventas, que no puede abrir en ninguna otra pantalla.
   const canSeeProspects = hasPermission('prospectos.view');
@@ -280,6 +282,16 @@ const DealershipDashboard = () => {
         />
       </div>
 
+      <Tabs defaultValue="resumen" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="resumen" className="gap-1.5"><LayoutGrid className="w-3.5 h-3.5" /> Resumen</TabsTrigger>
+          {canSeeSatisfaccion && (
+            <TabsTrigger value="satisfaccion" className="gap-1.5"><Smile className="w-3.5 h-3.5" /> Satisfacción</TabsTrigger>
+          )}
+        </TabsList>
+
+        <TabsContent value="resumen" className="space-y-6">
+
       {/* KPI Cards */}
       <div className={cn("grid grid-cols-2 gap-3", salespersonName ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
         {canSeeProspects && (
@@ -369,19 +381,6 @@ const DealershipDashboard = () => {
           </CardContent>
         </Card>
       </div>
-
-      {/* Encuestas de satisfacción — mismo panel completo (pestañas Entrega/Post Servicio,
-          filtros, listado) que AdminDashboard, pero acotado a este concesionario via
-          dealershipId. Se oculta entero si el rol no tiene el permiso encuestas.view. */}
-      {(role?.name?.toLowerCase() === 'superadmin' || role?.name?.toLowerCase() === 'admin' || hasPermission('encuestas.view')) && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Smile className="w-4 h-4 text-muted-foreground" />
-            <h3 className="text-sm font-display font-semibold">Encuestas de Satisfacción</h3>
-          </div>
-          <SatisfactionDashboard dealershipId={selectedDealership} />
-        </div>
-      )}
 
       {/* Trend */}
       <Card className="gac-shadow">
@@ -568,6 +567,14 @@ const DealershipDashboard = () => {
           </CardContent>
         </Card>
       )}
+        </TabsContent>
+
+        {canSeeSatisfaccion && (
+          <TabsContent value="satisfaccion">
+            <SatisfactionDashboard dealershipId={selectedDealership} />
+          </TabsContent>
+        )}
+      </Tabs>
     </div>
   );
 };
