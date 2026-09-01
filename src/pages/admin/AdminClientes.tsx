@@ -20,7 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SatisfactionOverview from '@/components/satisfaction/SatisfactionOverview';
 import ServiceSatisfactionOverview from '@/components/satisfaction/ServiceSatisfactionOverview';
 import ClientDetailDialog from '@/components/clients/ClientDetailDialog';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench, Link2Off } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { invokeAdminFunction } from '@/lib/adminFunctions';
@@ -156,12 +156,18 @@ interface Client {
 }
 
 const AdminClientes = () => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, role } = useAuth();
+  const roleName = role?.name?.toLowerCase() || '';
+  // Mismo criterio que ClientDetailDialog.tsx: "SOLO PARA ADMIN", sin excepcion para
+  // concesionario/vendedor aunque tengan clientes.edit.
+  const isAdmin = roleName === 'superadmin' || roleName === 'admin';
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
   const canCreate = hasPermission('clientes.create');
   const canEdit = hasPermission('clientes.edit');
   const canDelete = hasPermission('clientes.delete');
+  const [unlinkingVehicle, setUnlinkingVehicle] = useState<Vehicle | null>(null);
+  const [unlinkSaving, setUnlinkSaving] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -667,6 +673,40 @@ const AdminClientes = () => {
     setVFormMileage('0'); setVFormPurchaseDate(''); setVFormWarranty(true);
     setVFormManualBrand(''); setVFormManualModel('');
     setVehicleDialogOpen(true);
+  };
+
+  const handleUnlinkVehicle = async () => {
+    if (!unlinkingVehicle) return;
+    const vehicleId = unlinkingVehicle.id;
+    const clientId = unlinkingVehicle.client_id;
+    setUnlinkSaving(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)('admin_unlink_vehicle_from_client', {
+      p_vehicle_id: vehicleId,
+    });
+    setUnlinkSaving(false);
+    setUnlinkingVehicle(null);
+
+    if (error) {
+      console.error(error);
+      toast.error(
+        (error.message || '').includes('not_authorized')
+          ? 'No se pudo desvincular: tu usuario no tiene permisos para esta acción.'
+          : 'Error al desvincular el vehículo',
+      );
+      return;
+    }
+
+    // Mismo criterio que el resto de esta pantalla: se actualiza el estado local en vez de
+    // refetchear todo — el vehiculo ya no es de este cliente, sale de su lista expandida.
+    setClientVehicles(prev => ({
+      ...prev,
+      [clientId]: (prev[clientId] || []).filter(v => v.id !== vehicleId),
+    }));
+    setClients(prev => prev.map(c => c.id === clientId
+      ? { ...c, vehicles: (c.vehicles || []).filter(v => v.id !== vehicleId) }
+      : c));
+    toast.success('Vehículo desvinculado. Sigue existiendo en el sistema, sin cliente asignado.');
   };
 
   const openEditVehicle = (vehicle: Vehicle) => {
@@ -1229,6 +1269,15 @@ const AdminClientes = () => {
                                     <Pencil className="w-3 h-3" />
                                   </Button>
                                 )}
+                                {isAdmin && (
+                                  <Button
+                                    variant="ghost" size="icon" className="h-6 w-6 text-red-600 hover:text-red-700"
+                                    title="Desvincular vehículo del cliente"
+                                    onClick={e => { e.stopPropagation(); setUnlinkingVehicle(v); }}
+                                  >
+                                    <Link2Off className="w-3 h-3" />
+                                  </Button>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -1425,6 +1474,15 @@ const AdminClientes = () => {
                                   {canEdit && (
                                     <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); openEditVehicle(v); }}>
                                       <Pencil className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                  {isAdmin && (
+                                    <Button
+                                      variant="ghost" size="sm" className="text-red-600 hover:text-red-700"
+                                      title="Desvincular vehículo del cliente"
+                                      onClick={e => { e.stopPropagation(); setUnlinkingVehicle(v); }}
+                                    >
+                                      <Link2Off className="w-3 h-3" />
                                     </Button>
                                   )}
                                 </div>
@@ -1897,6 +1955,34 @@ const AdminClientes = () => {
             <AlertDialogCancel disabled={bulkLoading}>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={executeBulkDelete} disabled={bulkLoading} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               {bulkLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : `Eliminar ${selectedIds.size}`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!unlinkingVehicle} onOpenChange={open => !open && setUnlinkingVehicle(null)}>
+        <AlertDialogContent className="w-[calc(100vw-2rem)] max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Desvincular este vehículo del cliente?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {unlinkingVehicle && (
+                <>
+                  {unlinkingVehicle.vehicle_models?.brand} {unlinkingVehicle.vehicle_models?.name} {unlinkingVehicle.year}
+                  {unlinkingVehicle.plate ? ` · ${unlinkingVehicle.plate}` : ''} dejará de estar afiliado a este
+                  cliente y desaparecerá de su ficha. El vehículo NO se elimina — sigue existiendo
+                  en el sistema, sin cliente asignado. Esta acción no se puede deshacer desde aquí.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={unlinkSaving}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleUnlinkVehicle}
+              disabled={unlinkSaving}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {unlinkSaving ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : 'Desvincular'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
