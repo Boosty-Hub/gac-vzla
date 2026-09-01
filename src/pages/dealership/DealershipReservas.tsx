@@ -450,7 +450,13 @@ const DealershipReservas = () => {
       ]);
       const results: UnifiedResult[] = [];
       const vehicleRow = ((vehicleRes.data || []) as any[])[0];
-      if (vehicleRow) {
+      // staff_lookup_vehicle_by_plate hace LEFT JOIN a clients (vehicles.client_id ahora
+      // admite NULL — ver 20260901130000_unlink_vehicle_from_client.sql), asi que un
+      // vehiculo desvinculado SI aparece en `vehicleRow` pero sin datos de cliente. Sin este
+      // chequeo se armaba un `clients` falso con id null que despues se podia "seleccionar"
+      // como si fuera un cliente real. Mismo criterio que ya usa AdminReservas.tsx
+      // (`if (v.clients) results.set(...)`) para esta misma situacion.
+      if (vehicleRow && vehicleRow.client_id) {
         const pr: PlateResult = {
           id: vehicleRow.vehicle_id,
           plate: vehicleRow.plate,
@@ -994,7 +1000,16 @@ const DealershipReservas = () => {
         .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
         .eq('id', r.vehicle_id)
         .single();
-      if (data) { setPlateResult(data as any); setPlateSearched(true); setUnifiedSearch((data as any).plate || ''); }
+      if (data) {
+        // El vehiculo pudo haberse desvinculado de su cliente DESPUES de que esta reserva se
+        // creo (ver 20260901130000_unlink_vehicle_from_client.sql) — su client_id ya seria
+        // null aca. Sin este fallback, re-guardar esta reserva (aunque sea solo para cambiar
+        // la hora) pisaria reservations.client_id con null via resolveReservationAssignment,
+        // perdiendo la asociacion que la reserva SI tenia. La propia fila de la reserva
+        // (`r.client_id`) todavia guarda el cliente correcto.
+        const merged = { ...(data as any), client_id: (data as any).client_id ?? r.client_id };
+        setPlateResult(merged); setPlateSearched(true); setUnifiedSearch(merged.plate || '');
+      }
     } else if (r.client_id) {
       prefillingEditRef.current = true;
       setUnifiedClientId(r.client_id);
@@ -1033,7 +1048,16 @@ const DealershipReservas = () => {
         .select('id, plate, year, color, client_id, vehicle_models(name, brand), clients(id, full_name, phone, cedula)')
         .eq('id', r.vehicle_id)
         .single();
-      if (data) { setPlateResult(data as any); setPlateSearched(true); setUnifiedSearch((data as any).plate || ''); }
+      if (data) {
+        // El vehiculo pudo haberse desvinculado de su cliente DESPUES de que esta reserva se
+        // creo (ver 20260901130000_unlink_vehicle_from_client.sql) — su client_id ya seria
+        // null aca. Sin este fallback, re-guardar esta reserva (aunque sea solo para cambiar
+        // la hora) pisaria reservations.client_id con null via resolveReservationAssignment,
+        // perdiendo la asociacion que la reserva SI tenia. La propia fila de la reserva
+        // (`r.client_id`) todavia guarda el cliente correcto.
+        const merged = { ...(data as any), client_id: (data as any).client_id ?? r.client_id };
+        setPlateResult(merged); setPlateSearched(true); setUnifiedSearch(merged.plate || '');
+      }
     } else if (r.client_id) {
       // Skip the single-vehicle auto-select: this reservation deliberately had no vehicle.
       prefillingEditRef.current = true;

@@ -9,7 +9,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus, User, Wrench } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus, User, Wrench, Link2Off } from 'lucide-react';
 import { phoneMatchSuffix } from '@/lib/phone';
 import { normalizeSoldPlate } from '@/lib/plate';
 import {
@@ -127,7 +131,11 @@ function buildWaHref(phone: string | null): string | null {
 }
 
 const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: ClientDetailDialogProps) => {
-  const { hasPermission } = useAuth();
+  const { hasPermission, role } = useAuth();
+  const roleName = role?.name?.toLowerCase() || '';
+  // Pedido explicito del admin: "SOLO PARA ADMIN" — sin excepcion para concesionario/vendedor,
+  // a diferencia de la asignacion de chofer (esa si les da alcance sobre sus propios clientes).
+  const isAdmin = roleName === 'superadmin' || roleName === 'admin';
   const [loading, setLoading] = useState(false);
   const [vehicles, setVehicles] = useState<DialogVehicle[]>([]);
   const [surveys, setSurveys] = useState<SurveyRow[]>([]);
@@ -156,6 +164,8 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
   const [reloadKey, setReloadKey] = useState(0);
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
   const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(null);
+  const [unlinking, setUnlinking] = useState<DialogVehicle | null>(null);
+  const [unlinkSaving, setUnlinkSaving] = useState(false);
 
   // R5 is scoped to fleet clients: a single-vehicle owner drives their own car, so showing
   // a driver picker there is noise. `is_fleet` is optional on the Client interface, so a
@@ -345,6 +355,33 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
 
     setVehicles(prev => prev.map(v => (v.id === vehicleId ? { ...v, driver_id: nextDriverId } : v)));
     toast.success(nextDriverId ? 'Chofer asignado' : 'Chofer removido');
+  };
+
+  const handleUnlinkVehicle = async () => {
+    if (!unlinking) return;
+    const vehicleId = unlinking.id;
+    setUnlinkSaving(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (supabase.rpc as any)('admin_unlink_vehicle_from_client', {
+      p_vehicle_id: vehicleId,
+    });
+    setUnlinkSaving(false);
+    setUnlinking(null);
+
+    if (error) {
+      console.error(error);
+      toast.error(
+        (error.message || '').includes('not_authorized')
+          ? 'No se pudo desvincular: tu usuario no tiene permisos para esta acción.'
+          : 'Error al desvincular el vehículo',
+      );
+      return;
+    }
+
+    // El vehiculo ya no es de este cliente — sale de la lista sin refetch, misma logica que
+    // el resto del dialogo usa para reflejar un cambio puntual.
+    setVehicles(prev => prev.filter(v => v.id !== vehicleId));
+    toast.success('Vehículo desvinculado. Sigue existiendo en el sistema, sin cliente asignado.');
   };
 
   const buildPdfProps = (survey: SurveyRow): SurveyResponsePdfProps | null => {
@@ -540,16 +577,29 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                 <div className="space-y-1.5">
                   {vehicles.map(v => (
                     <div key={v.id} className="bg-muted/50 rounded-md p-2 border space-y-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Car className="w-4 h-4 text-muted-foreground shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium truncate">
-                            {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {v.plate && `${v.plate} · `}{v.color && `${v.color} · `}{v.mileage.toLocaleString()} km
-                          </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Car className="w-4 h-4 text-muted-foreground shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium truncate">
+                              {v.vehicle_models?.brand} {v.vehicle_models?.name} {v.year}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              {v.plate && `${v.plate} · `}{v.color && `${v.color} · `}{v.mileage.toLocaleString()} km
+                            </p>
+                          </div>
                         </div>
+                        {isAdmin && (
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-red-600 hover:text-red-700 shrink-0"
+                            onClick={() => setUnlinking(v)}
+                            title="Desvincular vehículo del cliente"
+                          >
+                            <Link2Off className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
                       </div>
 
                       {/* R5 — assigned driver. A Select, never a text input: free text is
@@ -822,6 +872,38 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
       models={models}
       onSuccess={() => setReloadKey(k => k + 1)}
     />
+
+    <AlertDialog open={!!unlinking} onOpenChange={open => !open && setUnlinking(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Desvincular este vehículo de {client?.full_name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {unlinking && (
+              <>
+                {unlinking.vehicle_models?.brand} {unlinking.vehicle_models?.name} {unlinking.year}
+                {unlinking.plate ? ` · ${unlinking.plate}` : ''} dejará de estar afiliado a este
+                cliente y desaparecerá de esta ficha. El vehículo NO se elimina — sigue existiendo
+                en el sistema, sin cliente asignado. Esta acción no se puede deshacer desde aquí.
+              </>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={unlinkSaving}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-red-600 hover:bg-red-700"
+            disabled={unlinkSaving}
+            onClick={handleUnlinkVehicle}
+          >
+            {unlinkSaving ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              'Desvincular'
+            )}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     </>
   );
 };
