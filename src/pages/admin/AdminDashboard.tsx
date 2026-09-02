@@ -104,11 +104,17 @@ const COLORS = [
 
 const AdminDashboard = () => {
   const { statuses: PROSPECT_STATUSES } = useProspectStatuses();
-  const { hasPermission } = useAuth();
+  const { role, hasPermission } = useAuth();
   const canSeeProspects = hasPermission('prospectos.view');
   const canSeeReservations = hasPermission('reservas.view');
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+  // Esta pantalla también se monta en /concesionario/dashboard-global (permiso
+  // dashboard_global.view, para dar vista global sin cambiar el rol a admin) — el drill-down
+  // a "Prospectos" tiene que quedarse en el portal de quien está mirando, o el click rebota a
+  // /admin/prospectos, que ese rol no puede abrir, y lo devuelve a su propio dashboard sin
+  // explicación.
+  const prospectosBasePath = role?.redirect_portal === 'admin' ? '/admin/prospectos' : '/concesionario/prospectos';
   // Cómo se ve y dónde está cada gráfico, guardado por usuario.
   const layout = useDashboardLayout();
   const [prospects, setProspects] = useState<Prospect[]>([]);
@@ -483,7 +489,7 @@ const AdminDashboard = () => {
                   <div
                     key={sp.name}
                     className="flex items-center gap-3 px-6 py-2.5 cursor-pointer hover:bg-muted/50 transition-colors"
-                    onClick={() => navigate(`/admin/prospectos?salesperson=${encodeURIComponent(sp.name)}${rankingSource !== 'todos' ? `&source=${rankingSource}` : ''}${rankingDealership !== 'todos' ? `&dealership=${rankingDealership}` : ''}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
+                    onClick={() => navigate(`${prospectosBasePath}?salesperson=${encodeURIComponent(sp.name)}${rankingSource !== 'todos' ? `&source=${rankingSource}` : ''}${rankingDealership !== 'todos' ? `&dealership=${rankingDealership}` : ''}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
                     title={`Ver ${sp.total} prospectos de ${sp.name}`}
                   >
                     <span className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0",
@@ -670,7 +676,7 @@ const AdminDashboard = () => {
                 <div
                   key={ev.name}
                   className="flex items-center justify-between px-6 py-3 cursor-pointer hover:bg-muted/50 transition-colors"
-                  onClick={() => navigate(`/admin/prospectos?event_name=${encodeURIComponent(ev.name)}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
+                  onClick={() => navigate(`${prospectosBasePath}?event_name=${encodeURIComponent(ev.name)}&fecha_desde=${fechaDesde}&fecha_hasta=${fechaHasta}`)}
                   title={`Ver ${ev.total} prospectos del evento`}
                 >
                   <div className="flex items-center gap-3 min-w-0">

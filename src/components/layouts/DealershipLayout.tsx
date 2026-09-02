@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import {
   CalendarDays, LogOut, Users, LayoutDashboard, ShieldCheck, ClipboardList,
-  Car, BookOpen, MapPin, UserCheck, KeyRound, CalendarCheck,
+  Car, BookOpen, MapPin, UserCheck, KeyRound, CalendarCheck, Globe,
 } from 'lucide-react';
 import imbLogo from '@/assets/imb-logo.png';
 
@@ -26,6 +26,7 @@ const menuGroups = [
     group: 'General',
     items: [
       { label: 'Inicio',               icon: LayoutDashboard, path: '/concesionario',             module: 'dashboard'      },
+      { label: 'Dashboard Global',     icon: Globe,           path: '/concesionario/dashboard-global', module: 'dashboard_global' },
     ],
   },
   {

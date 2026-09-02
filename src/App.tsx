@@ -108,6 +108,11 @@ const App = () => (
             <Route path="/concesionario/usuarios" element={<DealershipRoute module="usuarios"><AdminUsuarios /></DealershipRoute>} />
             <Route path="/concesionario/roles" element={<DealershipRoute module="roles"><AdminRoles /></DealershipRoute>} />
             <Route path="/concesionario/eventos" element={<DealershipRoute module="eventos"><AdminEventos /></DealershipRoute>} />
+            {/* Dashboard GLOBAL (todos los concesionarios, el mismo que usa Admin) dentro del
+                portal de concesionario — para dar vista global a un usuario sin cambiarle el
+                rol a admin (perdería la lógica de "solo lo mío" en todo lo demás). Gateado por
+                el permiso dashboard_global.view, no por rol. */}
+            <Route path="/concesionario/dashboard-global" element={<DealershipRoute module="dashboard_global"><AdminDashboard /></DealershipRoute>} />
 
             {/* Admin routes with sidebar layout */}
             <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
