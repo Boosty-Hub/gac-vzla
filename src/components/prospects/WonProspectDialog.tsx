@@ -213,6 +213,12 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   const [formError, setFormError] = useState<string | null>(null);
   // Decisión obligatoria sobre la encuesta de venta. `null` = todavía no eligió.
   const [surveyChoice, setSurveyChoice] = useState<ServiceSurveyChoice>(null);
+  // Cliente existente que matchea por cédula/teléfono/correo (no por placa — eso ya lo
+  // cubre `row.match`). `null` = no hay coincidencia o todavía no se chequeó.
+  const [identityMatch, setIdentityMatch] = useState<{ clientId: string; clientName: string; reason: string } | null>(null);
+  // 'same' = el vendedor confirmó que es el mismo cliente. 'different' = es otra persona/
+  // empresa, forzar cliente nuevo. `null` = todavía sin decidir (bloquea el envío).
+  const [identityResolution, setIdentityResolution] = useState<'same' | 'different' | null>(null);
   // Si la encuesta de venta está prendida. Se avisa apenas marca "sí" y no cuando ya
   // confirmó, porque enterarse después de cerrar la venta no sirve de nada.
   const [salesSurveyEnabled, setSalesSurveyEnabled] = useState(true);
@@ -254,6 +260,8 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
     // Sin elegir, en CADA apertura. Arrastrar la decisión del prospecto anterior es
     // exactamente cómo se manda una encuesta que nadie pidió.
     setSurveyChoice(null);
+    setIdentityMatch(null);
+    setIdentityResolution(null);
     attemptedPreselectRef.current = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase.rpc as any)('get_survey_delivery_config')
@@ -280,6 +288,51 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
       setPreselectHint(`${match.brand} ${match.name}`);
     }
   }, [prospectId, models, modelInterest]);
+
+  // Chequeo de identidad por cédula/teléfono/correo — SOLO tiene sentido cuando la placa del
+  // primer vehículo quedó libre (`match === null`): es esa placa la que decide el cliente en
+  // el trigger (`link_client_on_won` usa el primer plate de la venta), y si ya existe bajo
+  // otro dueño la tarjeta ámbar de abajo ya avisa sobre ESE conflicto — no hace falta
+  // duplicarlo acá. `staff_check_prospect_client_identity` también se resigna sola si el
+  // prospecto ya tiene client_id (nada que avisar).
+  const firstPlate = rows[0]?.plate;
+  const firstMatch = rows[0]?.match;
+  useEffect(() => {
+    if (!prospectId || firstMatch !== null) {
+      setIdentityMatch(null);
+      setIdentityResolution(null);
+      return;
+    }
+    let active = true;
+    const plate = normalizeSoldPlate(firstPlate || '');
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    (supabase.rpc as any)('staff_check_prospect_client_identity', {
+      p_prospect_id: prospectId,
+      p_first_plate: plate || null,
+    }).then(({ data, error }: { data: unknown; error: unknown }) => {
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+      if (!active) return;
+      if (error) {
+        console.error('Error checking prospect identity:', error);
+        setIdentityMatch(null);
+        return;
+      }
+      const row = (Array.isArray(data) ? data[0] : data) as
+        | { matched_client_id?: string; matched_client_name?: string; match_reason?: string }
+        | undefined;
+      setIdentityMatch(
+        row?.matched_client_id
+          ? { clientId: row.matched_client_id, clientName: row.matched_client_name ?? 'Cliente', reason: row.match_reason ?? '' }
+          : null,
+      );
+      setIdentityResolution(null);
+    });
+    return () => { active = false; };
+  }, [prospectId, firstMatch, firstPlate]);
+
+  const identityReasonLabel = identityMatch?.reason === 'cedula' ? 'esta cédula'
+    : identityMatch?.reason === 'email' ? 'este correo'
+    : 'este teléfono';
 
   const brands = Array.from(new Set(models.map(m => m.brand)));
 
@@ -382,7 +435,8 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   const duplicatePlates = hasDuplicatePlates(rows);
   // `surveyChoice !== null` es la parte obligatoria: sin elegir no se puede confirmar.
   const canSubmit =
-    !saving && rows.length > 0 && rows.every(isRowValid) && !duplicatePlates && surveyChoice !== null;
+    !saving && rows.length > 0 && rows.every(isRowValid) && !duplicatePlates && surveyChoice !== null &&
+    (!identityMatch || identityResolution !== null);
 
   const handleConfirm = async () => {
     if (!prospectId || !canSubmit) return;
@@ -400,6 +454,7 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
       p_prospect_id: prospectId,
       p_vehicles: payload,
       p_is_fleet: isFleet,
+      p_force_new_client: identityMatch !== null && identityResolution === 'different',
     });
     if (error) {
       setSaving(false);
@@ -602,6 +657,38 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
             <Button type="button" variant="outline" size="sm" className="w-full" onClick={addRow}>
               <Plus className="h-3.5 w-3.5 mr-1" /> Agregar vehículo
             </Button>
+          )}
+
+          {identityMatch && (
+            <div className="rounded-md border border-sky-300 bg-sky-50 p-2 space-y-1.5">
+              <p className="text-[11px] text-sky-800 leading-snug">
+                Ya existe un cliente registrado con {identityReasonLabel}: <strong>{identityMatch.clientName}</strong>.
+                Esta venta se registrará bajo su ficha. ¿Es la misma persona o empresa que este prospecto?
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={identityResolution === 'same' ? 'default' : 'outline'}
+                  className="h-7 text-[11px]"
+                  onClick={() => setIdentityResolution('same')}
+                >
+                  Sí, es el mismo
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={identityResolution === 'different' ? 'default' : 'outline'}
+                  className="h-7 text-[11px]"
+                  onClick={() => setIdentityResolution('different')}
+                >
+                  No, es otro — crear cliente nuevo
+                </Button>
+              </div>
+              {!identityResolution && (
+                <p className="text-[10px] text-sky-700">Confirma para poder cerrar la venta.</p>
+              )}
+            </div>
           )}
 
           <ServiceSurveyDecision
