@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
-import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle, Mail, Phone, Trash2 } from 'lucide-react';
+import { Search, UserPlus, Pencil, Shield, Users, Plus, Eye, EyeOff, Link2, Copy, Check as CheckIcon, KeyRound, AlertTriangle, Mail, Phone, Trash2, Globe, Building } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { toast } from 'sonner';
@@ -118,6 +118,9 @@ const AdminUsuarios = () => {
   const [userRolePermIds, setUserRolePermIds] = useState<Set<string>>(new Set()); // baseline from role
   const [loadingUserPerms, setLoadingUserPerms] = useState(false);
   const [savingUserPerms, setSavingUserPerms] = useState(false);
+  const [userModuleScopes, setUserModuleScopes] = useState<Record<string, 'own' | 'all'>>({}); // effective (rol + override)
+  const [userRoleModuleScopes, setUserRoleModuleScopes] = useState<Record<string, 'own' | 'all'>>({}); // baseline from role
+  const [scopeCatalog, setScopeCatalog] = useState<Record<string, string>>({});
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -405,22 +408,34 @@ const AdminUsuarios = () => {
     const perms = (allPerms || []) as Permission[];
     setAllPermissions(perms);
 
+    // Qué módulos ofrecen Alcance no se decide acá — sale de module_scope_catalog, igual
+    // que en Roles y Permisos (ver AdminRoles.tsx).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: catalogRes } = await (supabase as any).from('module_scope_catalog').select('module, note').order('sort_order');
+    setScopeCatalog(Object.fromEntries(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((catalogRes as any[]) || []).map(c => [c.module as string, (c.note as string) || '']),
+    ));
+
     // 2. Role baseline
     let roleIds = new Set<string>();
+    const roleScopes: Record<string, 'own' | 'all'> = {};
     if (u.role_id) {
-      const { data: rp } = await supabase
-        .from('role_permissions')
-        .select('permission_id')
-        .eq('role_id', u.role_id);
+      const [{ data: rp }, { data: rms }] = await Promise.all([
+        supabase.from('role_permissions').select('permission_id').eq('role_id', u.role_id),
+        supabase.from('role_module_scopes' as any).select('module, scope').eq('role_id', u.role_id),
+      ]);
       if (rp) roleIds = new Set(rp.map((r: any) => r.permission_id));
+      if (rms) for (const s of rms as any[]) roleScopes[s.module] = s.scope;
     }
     setUserRolePermIds(roleIds);
+    setUserRoleModuleScopes(roleScopes);
 
-    // 3. User overrides
-    const { data: ups } = await supabase
-      .from('user_permissions' as any)
-      .select('permission_id, granted')
-      .eq('profile_id', u.id);
+    // 3. User overrides (permisos + alcance)
+    const [{ data: ups }, { data: ums }] = await Promise.all([
+      supabase.from('user_permissions' as any).select('permission_id, granted').eq('profile_id', u.id),
+      supabase.from('user_module_scopes' as any).select('module, scope').eq('profile_id', u.id),
+    ]);
 
     // Build effective set
     const effective = new Set(roleIds);
@@ -431,7 +446,16 @@ const AdminUsuarios = () => {
       }
     }
     setUserPermChecked(effective);
+
+    const effectiveScopes = { ...roleScopes };
+    if (ums) for (const s of ums as any[]) effectiveScopes[s.module] = s.scope;
+    setUserModuleScopes(effectiveScopes);
+
     setLoadingUserPerms(false);
+  };
+
+  const toggleUserScope = (mod: string) => {
+    setUserModuleScopes(prev => ({ ...prev, [mod]: prev[mod] === 'all' ? 'own' : 'all' }));
   };
 
   const toggleUserPerm = (permId: string) => {
@@ -473,6 +497,25 @@ const AdminUsuarios = () => {
       if (error) {
         toast.error('Error al guardar permisos');
         console.error(error);
+        setSavingUserPerms(false);
+        return;
+      }
+    }
+
+    // Alcance: mismo criterio que permisos — solo se guarda lo que DIFIERE del rol, y solo
+    // para módulos escaleables (module_scope_catalog) que además tienen algún permiso activo
+    // para este usuario (igual que en Roles y Permisos: un alcance sin permiso no tiene caso).
+    await supabase.from('user_module_scopes' as any).delete().eq('profile_id', userPermUser.id);
+    const activeModulesForScope = [...new Set(allPermissions.filter(p => userPermChecked.has(p.id)).map(p => p.module))]
+      .filter(mod => mod in scopeCatalog);
+    const scopeInserts = activeModulesForScope
+      .map(mod => ({ profile_id: userPermUser.id, module: mod, scope: userModuleScopes[mod] ?? 'own' }))
+      .filter(row => row.scope !== (userRoleModuleScopes[row.module] ?? 'own'));
+    if (scopeInserts.length > 0) {
+      const { error: scopeError } = await supabase.from('user_module_scopes' as any).insert(scopeInserts);
+      if (scopeError) {
+        toast.error('Error al guardar el alcance');
+        console.error(scopeError);
         setSavingUserPerms(false);
         return;
       }
@@ -1073,12 +1116,21 @@ const AdminUsuarios = () => {
                     );
                   })}
                   <TableHead className="text-center w-[60px]">Todos</TableHead>
+                  <TableHead className="text-center w-[110px]">
+                    <span title="Por defecto este usuario ve solo lo del rol. 'Ver todo' le da acceso a todos los datos del sistema, solo a él.">
+                      Alcance ⓘ
+                    </span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {[...new Set(allPermissions.map(p => p.module))].map(mod => {
                   const modPerms = allPermissions.filter(p => p.module === mod);
                   const allChecked = modPerms.every(p => userPermChecked.has(p.id));
+                  const hasAnyPerm = modPerms.some(p => userPermChecked.has(p.id));
+                  const isScopeable = mod in scopeCatalog;
+                  const scope = userModuleScopes[mod] ?? 'own';
+                  const scopeFromRole = (userRoleModuleScopes[mod] ?? 'own') === scope;
                   return (
                     <TableRow key={mod} className="[&>td]:py-2">
                       <TableCell className="font-medium">{MODULE_LABELS[mod] || mod}</TableCell>
@@ -1112,6 +1164,35 @@ const AdminUsuarios = () => {
                           onCheckedChange={() => toggleUserModule(mod)}
                           className="mx-auto"
                         />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        {isScopeable && hasAnyPerm ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleUserScope(mod)}
+                            className={cn(
+                              "text-[10px] px-2 py-0.5 rounded-full border font-medium inline-flex items-center gap-1 transition-colors",
+                              scope === 'all'
+                                ? "bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100"
+                                : "bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100",
+                              !scopeFromRole && "ring-1 ring-green-500",
+                            )}
+                            title={
+                              (scope === 'all'
+                                ? 'Ve todo el sistema — clic para restringir a su concesionario'
+                                : 'Ve solo lo de su concesionario — clic para dar acceso a todo')
+                              + (scopeCatalog[mod] ? `\n${scopeCatalog[mod]}` : '')
+                              + (!scopeFromRole ? '\nDistinto del rol base (override solo para este usuario)' : '')
+                            }
+                          >
+                            {scope === 'all'
+                              ? <><Globe className="w-2.5 h-2.5" /> Ver todo</>
+                              : <><Building className="w-2.5 h-2.5" /> Solo propio</>
+                            }
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground/30">—</span>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

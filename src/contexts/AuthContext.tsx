@@ -101,6 +101,18 @@ async function loadUserProfile(userId: string) {
     }
   }
 
+  // 5. Per-user scope overrides (mismo patrón que 3: pisan lo que diga el rol para ESTE
+  // usuario puntual, sin tocar a nadie más con el mismo rol).
+  const { data: userScopes } = await supabase
+    .from('user_module_scopes' as any)
+    .select('module, scope')
+    .eq('profile_id', userId);
+  if (userScopes) {
+    for (const s of userScopes as any[]) {
+      moduleScopes[s.module] = s.scope;
+    }
+  }
+
   return {
     profile: profileOnly as Profile,
     role: roleData as RoleData | null,
