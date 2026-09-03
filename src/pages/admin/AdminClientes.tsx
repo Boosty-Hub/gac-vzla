@@ -105,6 +105,19 @@ interface ServiceRecord {
   dealerships: { name: string } | null;
 }
 
+/** Una fila tal como la devuelve `vehicle_service_history`. */
+interface VehicleHistoryRow {
+  id: string;
+  reservation_date: string;
+  reservation_time: string;
+  service_type: string;
+  current_mileage: number | null;
+  status: string;
+  service_notes: string | null;
+  completed_at: string | null;
+  dealership_name: string | null;
+}
+
 interface ClientVehicleInfo {
   id: string;
   warranty_active: boolean;
@@ -288,13 +301,26 @@ const AdminClientes = () => {
     setVDetailHistory([]);
     setVDetailOpen(true);
     setVDetailLoading(true);
-    const { data } = await supabase
-      .from('reservations')
-      .select('id, reservation_date, reservation_time, service_type, current_mileage, status, service_notes, completed_at, dealerships(name)')
-      .eq('vehicle_id', v.id)
-      .order('reservation_date', { ascending: false })
-      .limit(50);
-    setVDetailHistory((data || []) as ServiceRecord[]);
+    // `vehicle_service_history` y no un select sobre `reservations`: la policy de reservas
+    // recorta por concesionario, así que el select directo sólo mostraba los servicios del
+    // centro de quien mira. Ver
+    // supabase/migrations/20260827200000_historial_del_vehiculo_entre_centros.sql.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (supabase.rpc as any)('vehicle_service_history', {
+      p_vehicle_id: v.id,
+    });
+    if (error) console.error('Error cargando el historial del vehículo:', error);
+    setVDetailHistory(((data as VehicleHistoryRow[]) || []).map(h => ({
+      id: h.id,
+      reservation_date: h.reservation_date,
+      reservation_time: h.reservation_time,
+      service_type: h.service_type,
+      current_mileage: h.current_mileage ?? 0,
+      status: h.status,
+      service_notes: h.service_notes,
+      completed_at: h.completed_at,
+      dealerships: h.dealership_name ? { name: h.dealership_name } : null,
+    })));
     setVDetailLoading(false);
   };
 

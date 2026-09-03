@@ -41,6 +41,10 @@ export const WarrantyChip = ({ vehicleId, className }: Props) => {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      // `vehicle_service_history` y no un select/count sobre `reservations`: la policy de
+      // reservas recorta por concesionario, así que el count directo sólo contaba los
+      // servicios del centro de quien mira. Ver
+      // supabase/migrations/20260827200000_historial_del_vehiculo_entre_centros.sql.
       const [vehRes, condsRes, servicesRes] = await Promise.all([
         supabase
           .from('vehicles')
@@ -48,14 +52,16 @@ export const WarrantyChip = ({ vehicleId, className }: Props) => {
           .eq('id', vehicleId)
           .maybeSingle(),
         supabase.from('warranty_conditions').select('id, name, max_km, max_months, service_interval_km, is_active'),
-        supabase.from('reservations').select('id', { count: 'exact', head: true }).eq('vehicle_id', vehicleId).eq('status', 'completada'),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (supabase.rpc as any)('vehicle_service_history', { p_vehicle_id: vehicleId }),
       ]);
 
       if (cancelled) return;
 
       const vehicle = (vehRes.data ?? null) as VehicleData | null;
       const conditions = ((condsRes.data ?? []) as WarrantyConditionRef[]).filter(c => c.is_active);
-      const completed = servicesRes.count ?? 0;
+      const completed = ((servicesRes.data ?? []) as { status: string }[])
+        .filter(r => r.status === 'completada').length;
 
       if (!vehicle) {
         setEvaluation(null);

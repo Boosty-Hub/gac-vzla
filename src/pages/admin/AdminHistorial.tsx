@@ -321,23 +321,28 @@ const AdminHistorial = () => {
     setDetailOpen(true);
     setVehServiceCount(0);
     if (entry.vehicle_id) {
-      const { data } = await supabase
-        .from('reservations')
-        .select('service_type')
-        .eq('vehicle_id', entry.vehicle_id)
-        // DELIBERATELY still only 'completada' — do NOT widen this to HISTORY_STATUSES.
-        // This is the count of services actually PERFORMED on the vehicle and it feeds the
-        // warranty evaluation. A cancelled appointment is not a service; counting it would
-        // corrupt the warranty math.
-        .eq('status', 'completada');
+      // `vehicle_service_history` y no un select sobre `reservations`: la policy de reservas
+      // recorta por concesionario, así que el select directo sólo contaba los servicios del
+      // centro de quien mira. Ver
+      // supabase/migrations/20260827200000_historial_del_vehiculo_entre_centros.sql.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase.rpc as any)('vehicle_service_history', {
+        p_vehicle_id: entry.vehicle_id,
+      });
+      if (error) console.error('Error cargando el historial del vehículo:', error);
+      // DELIBERATELY still only 'completada' — do NOT widen this to HISTORY_STATUSES.
+      // This is the count of services actually PERFORMED on the vehicle and it feeds the
+      // warranty evaluation. A cancelled appointment is not a service; counting it would
+      // corrupt the warranty math.
       // Por la misma razón se descuentan las gestiones internas (Solicitud de Repuestos):
       // son un pedido a planta, no un servicio hecho sobre el vehículo. Eran 3 filas
       // completadas contando como mantenimientos. La cuenta sigue en JS y no en un
       // `head: true` porque la lista de servicios internos es configurable.
       setVehServiceCount(
-        ((data || []) as { service_type: string | null }[]).filter(
-          r => !isInternalServiceName(r.service_type, internalServiceNames),
-        ).length,
+        ((data || []) as { service_type: string | null; status: string }[])
+          .filter(r => r.status === 'completada')
+          .filter(r => !isInternalServiceName(r.service_type, internalServiceNames))
+          .length,
       );
     }
   };
