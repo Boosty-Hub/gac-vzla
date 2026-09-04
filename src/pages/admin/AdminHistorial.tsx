@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText, X, Pencil, AlertTriangle, Send, Clock, Star, Minus } from 'lucide-react';
+import { Search, ClipboardList, Car, MapPin, Hash, User, ShieldCheck, ShieldX, Wrench, ClipboardCheck, Phone, FileText, X, Pencil, AlertTriangle, Send, Clock, Star, Minus, Lock } from 'lucide-react';
 import { TechnicalReportUploader } from '@/components/TechnicalReportUploader';
 import { cn } from '@/lib/utils';
 import {
@@ -825,6 +825,33 @@ const AdminHistorial = () => {
                       {e.completed_at && (
                         <p className="text-green-600 text-[10px] mt-2">Completado: {new Date(e.completed_at).toLocaleString('es-VE')}</p>
                       )}
+                    </div>
+                  </>
+                )}
+
+                {/* Mismos campos que ya guarda "Editar" (recommendation / internal_notes),
+                    pero esta vista de solo lectura nunca los pintaba: se podían cargar y
+                    quedaban invisibles hasta volver a abrir el diálogo de edición. */}
+                {e.recommendation && (
+                  <>
+                    <Separator />
+                    <div className="bg-amber-50 border border-amber-200 rounded-md p-3 text-xs">
+                      <p className="font-semibold text-amber-800 mb-1 flex items-center gap-1">
+                        <Star className="w-3 h-3" /> Recomendación (visible para el cliente)
+                      </p>
+                      <p className="text-amber-700 whitespace-pre-wrap">{e.recommendation}</p>
+                    </div>
+                  </>
+                )}
+
+                {e.internal_notes && (
+                  <>
+                    <Separator />
+                    <div className="bg-slate-50 border border-slate-200 rounded-md p-3 text-xs">
+                      <p className="font-semibold text-slate-800 mb-1 flex items-center gap-1">
+                        <Lock className="w-3 h-3" /> Notas internas (solo equipo GAC)
+                      </p>
+                      <p className="text-slate-700 whitespace-pre-wrap">{e.internal_notes}</p>
                     </div>
                   </>
                 )}
