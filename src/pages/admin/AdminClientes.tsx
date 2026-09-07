@@ -20,7 +20,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import SatisfactionOverview from '@/components/satisfaction/SatisfactionOverview';
 import ServiceSatisfactionOverview from '@/components/satisfaction/ServiceSatisfactionOverview';
 import ClientDetailDialog from '@/components/clients/ClientDetailDialog';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench, Link2Off } from 'lucide-react';
+import LinkVehicleDialog, { type LinkedVehicleSummary } from '@/components/clients/LinkVehicleDialog';
+import VehicleOwnerHistory from '@/components/clients/VehicleOwnerHistory';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench, Link2Off, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { invokeAdminFunction } from '@/lib/adminFunctions';
@@ -181,6 +183,9 @@ const AdminClientes = () => {
   const canDelete = hasPermission('clientes.delete');
   const [unlinkingVehicle, setUnlinkingVehicle] = useState<Vehicle | null>(null);
   const [unlinkSaving, setUnlinkSaving] = useState(false);
+  // Cliente al que se le está vinculando un vehículo existente. Es el estado que abre el
+  // diálogo: no hay un booleano aparte porque los dos siempre cambian juntos.
+  const [linkVehicleClient, setLinkVehicleClient] = useState<Client | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [models, setModels] = useState<VehicleModel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -735,6 +740,45 @@ const AdminClientes = () => {
     toast.success('Vehículo desvinculado. Sigue existiendo en el sistema, sin cliente asignado.');
   };
 
+  /**
+   * Un vehículo cambió de dueño desde el diálogo de vincular. Se refleja acá a mano, igual
+   * que hace `handleUnlinkVehicle`: esta pantalla nunca reconsulta sola (ver `toggleExpand`),
+   * así que un cambio que no se parchee deja los contadores y los badges de la fila
+   * mintiendo hasta recargar la página. Y vincular mueve el vehículo ENTRE dos fichas, así
+   * que hay que tocar las dos: la que lo recibe y la que lo pierde.
+   */
+  const handleVehicleLinked = (targetClientId: string, linked: LinkedVehicleSummary) => {
+    // Fuente autoritativa para la lista expandida: el resumen no trae modelo, VIN ni km.
+    fetchVehicles(targetClientId);
+
+    const previousId = linked.previousClientId;
+    if (previousId && previousId !== targetClientId) {
+      setClientVehicles(prev => (prev[previousId]
+        ? { ...prev, [previousId]: prev[previousId].filter(v => v.id !== linked.id) }
+        : prev));
+    }
+
+    setClients(prev => prev.map(c => {
+      if (c.id === targetClientId) {
+        if ((c.vehicles || []).some(v => v.id === linked.id)) return c;
+        return {
+          ...c,
+          vehicles: [...(c.vehicles || []), {
+            id: linked.id,
+            warranty_active: linked.warranty_active,
+            is_manual: linked.is_manual,
+            plate: linked.plate,
+            vehicle_models: linked.brand ? { brand: linked.brand } : null,
+          }],
+        };
+      }
+      if (previousId && c.id === previousId) {
+        return { ...c, vehicles: (c.vehicles || []).filter(v => v.id !== linked.id) };
+      }
+      return c;
+    }));
+  };
+
   const openEditVehicle = (vehicle: Vehicle) => {
     setEditingVehicle(vehicle);
     setVehicleClientId(vehicle.client_id);
@@ -799,7 +843,6 @@ const AdminClientes = () => {
     }
 
     const payload = {
-      client_id: vehicleClientId,
       model_id: modelId,
       year: parseInt(vFormYear),
       plate: vFormPlate.trim().toUpperCase() || null,
@@ -815,11 +858,17 @@ const AdminClientes = () => {
     };
 
     if (editingVehicle) {
+      // `client_id` queda FUERA del update a propósito. El dueño de un vehículo sólo se
+      // cambia por `admin_set_vehicle_client` (botón "Vincular vehículo"): desde el blindaje
+      // del 2026-09-07 un trigger BEFORE UPDATE rechaza cualquier otro camino con un 42501, y
+      // este formulario no es un selector de cliente — mandarlo acá sólo podía romper un
+      // guardado normal si `vehicleClientId` quedaba desfasado del vehículo editado.
       const { error } = await (supabase as any).from('vehicles').update(payload).eq('id', editingVehicle.id);
       if (error) { toast.error('Error al actualizar vehículo'); console.error(error); }
       else { toast.success('Vehículo actualizado'); setVehicleDialogOpen(false); fetchVehicles(vehicleClientId); }
     } else {
-      const { error } = await (supabase as any).from('vehicles').insert(payload);
+      // El INSERT sí lleva el dueño: el trigger es BEFORE UPDATE, no toca las altas.
+      const { error } = await (supabase as any).from('vehicles').insert({ ...payload, client_id: vehicleClientId });
       if (error) { toast.error('Error al crear vehículo'); console.error(error); }
       else { toast.success('Vehículo registrado'); setVehicleDialogOpen(false); fetchVehicles(vehicleClientId); }
     }
@@ -942,8 +991,22 @@ const AdminClientes = () => {
     setBulkLoading(true);
     const ids = [...selectedIds];
     const { error } = await supabase.from('clients').delete().in('id', ids);
-    if (error) toast.error('Error al eliminar clientes');
-    else { toast.success(`${ids.length} cliente(s) eliminados`); setSelectedIds(new Set()); setBulkConfirmDeleteOpen(false); fetchClients(); refreshCounters(); }
+    if (error) {
+      console.error(error);
+      // Desde el blindaje del 2026-09-07 un cliente con vehículos, reservas o encuestas no se
+      // puede borrar (antes se llevaba sus vehículos por cascada, en silencio). Es un borrado
+      // en lote: si UNO está protegido no se borra ninguno, así que el mensaje tiene que
+      // explicar qué pasó y cuál es la salida real.
+      toast.error((error.message || '').includes('client_delete_denied')
+        ? 'No se eliminó ninguno: al menos uno tiene vehículos, reservas o encuestas. Desactívalo (Estado → Inactivo) o fusiónalo con su ficha real desde "Ver detalle".'
+        : 'Error al eliminar clientes');
+    } else {
+      toast.success(`${ids.length} cliente(s) eliminados`);
+      setSelectedIds(new Set());
+      setBulkConfirmDeleteOpen(false);
+      fetchClients();
+      refreshCounters();
+    }
     setBulkLoading(false);
   };
 
@@ -1266,9 +1329,22 @@ const AdminClientes = () => {
                     <div className="mt-2 pt-2 border-t space-y-2" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-between">
                         <p className="text-xs font-semibold flex items-center gap-1"><Car className="w-3.5 h-3.5" /> Vehículos</p>
-                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddVehicle(c.id, c.is_manual)}>
-                          <Plus className="w-3 h-3 mr-1" /> Agregar
-                        </Button>
+                        <div className="flex items-center gap-1.5">
+                          {/* "Agregar" crea un vehículo nuevo; "Vincular" trae uno que ya existe.
+                              Es la contraparte del botón de desvincular de cada fila. */}
+                          {isAdmin && (
+                            <Button
+                              size="sm" variant="outline" className="h-7 text-xs"
+                              onClick={() => setLinkVehicleClient(c)}
+                              title="Traer a este cliente un vehículo que ya está en el sistema"
+                            >
+                              <Link2 className="w-3 h-3 mr-1" /> Vincular
+                            </Button>
+                          )}
+                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddVehicle(c.id, c.is_manual)}>
+                            <Plus className="w-3 h-3 mr-1" /> Agregar
+                          </Button>
+                        </div>
                       </div>
                       {!clientVehicles[c.id] ? (
                         <p className="text-xs text-muted-foreground">Cargando...</p>
@@ -1465,9 +1541,22 @@ const AdminClientes = () => {
                           <h4 className="text-sm font-semibold flex items-center gap-2">
                             <Car className="w-4 h-4" /> Vehículos del cliente
                           </h4>
-                          <Button size="sm" variant="outline" onClick={() => openAddVehicle(c.id, c.is_manual)}>
-                            <Plus className="w-3 h-3 mr-1" /> Agregar Vehículo
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            {/* Gemelo del botón de la vista móvil: este archivo duplica el
+                                markup a propósito, así que todo cambio va en las dos ramas. */}
+                            {isAdmin && (
+                              <Button
+                                size="sm" variant="outline"
+                                onClick={() => setLinkVehicleClient(c)}
+                                title="Traer a este cliente un vehículo que ya está en el sistema"
+                              >
+                                <Link2 className="w-3 h-3 mr-1" /> Vincular Vehículo
+                              </Button>
+                            )}
+                            <Button size="sm" variant="outline" onClick={() => openAddVehicle(c.id, c.is_manual)}>
+                              <Plus className="w-3 h-3 mr-1" /> Agregar Vehículo
+                            </Button>
+                          </div>
                         </div>
                         {!clientVehicles[c.id] ? (
                           <p className="text-xs text-muted-foreground">Cargando...</p>
@@ -1854,6 +1943,12 @@ const AdminClientes = () => {
                     })}
                   </div>
                 )}
+
+                {/* Doble gate, igual que Vincular y Desvincular: la policy admin-only de
+                    `vehicle_owner_audit` es la que manda, pero esta pantalla también es
+                    /concesionario/clientes y el historial no es para ese personal. Adentro se
+                    esconde solo cuando el vehículo nunca cambió de dueño. */}
+                {isAdmin && <VehicleOwnerHistory vehicleId={v.id} />}
               </div>
             );
           })()}
@@ -1974,7 +2069,10 @@ const AdminClientes = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>¿Eliminar {selectedIds.size} cliente(s)?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción eliminará permanentemente <strong>{selectedIds.size}</strong> cliente(s) y sus datos asociados. No se puede deshacer.
+              Esta acción eliminará permanentemente <strong>{selectedIds.size}</strong> cliente(s). No se
+              puede deshacer. Un cliente que tenga vehículos, reservas o encuestas <strong>no se
+              elimina</strong>: en ese caso no se borra ninguno de los seleccionados, y hay que
+              desactivarlo o fusionarlo con su ficha real.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2013,6 +2111,13 @@ const AdminClientes = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <LinkVehicleDialog
+        client={linkVehicleClient}
+        open={!!linkVehicleClient}
+        onOpenChange={open => { if (!open) setLinkVehicleClient(null); }}
+        onSuccess={linked => { if (linkVehicleClient) handleVehicleLinked(linkVehicleClient.id, linked); }}
+      />
 
       {/* Vehicle Dialog */}
       <Dialog open={vehicleDialogOpen} onOpenChange={setVehicleDialogOpen}>
@@ -2144,6 +2249,18 @@ const AdminClientes = () => {
           }
         }}
         models={models}
+        // Fusionar duplicados o vincular un vehículo desde la ficha cambia el conjunto de
+        // clientes y el reparto de sus vehículos: el listado se recarga entero en vez de
+        // parchearse, porque una fusión toca dos fichas que pueden estar las dos en pantalla.
+        onClientsChanged={() => {
+          fetchClients();
+          refreshCounters();
+          // El cache de vehículos por cliente se arma una sola vez (ver `toggleExpand`), así
+          // que una fusión o una vinculación hecha desde la ficha lo deja viejo: se tira
+          // entero y se vuelve a pedir sólo el del cliente que esté expandido.
+          setClientVehicles({});
+          if (expandedClient) fetchVehicles(expandedClient);
+        }}
         // `tab=postservicio` abre la ficha en Encuestas con la sub-pestaña de taller ya
         // seleccionada: es adonde apunta el listado del panel Post Servicio.
         defaultTab={

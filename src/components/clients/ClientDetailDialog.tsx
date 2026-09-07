@@ -13,7 +13,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus, User, Wrench, Link2Off } from 'lucide-react';
+import { Car, Mail, Phone, Hash, Smile, ThumbsUp, MessageSquare, MessageCircle, Send, Plus, User, Wrench, Link2Off, Link2, GitMerge } from 'lucide-react';
 import { phoneMatchSuffix } from '@/lib/phone';
 import { normalizeSoldPlate } from '@/lib/plate';
 import {
@@ -24,6 +24,8 @@ import { driverLabel, type DriverOption } from '@/lib/drivers';
 import DriversManager from './DriversManager';
 import type { SurveyResponsePdfProps } from '@/components/satisfaction/SurveyResponsePdf';
 import RepurchaseDialog, { type RepurchaseVehicleModelOption } from './RepurchaseDialog';
+import LinkVehicleDialog from './LinkVehicleDialog';
+import MergeClientsDialog from './MergeClientsDialog';
 import { deliverSatisfactionSurvey, describeSkippedDelivery } from './surveyDelivery';
 import { sendSalesSurveyNow } from './manualSurveySend';
 
@@ -109,6 +111,10 @@ interface ClientDetailDialogProps {
   /** Opens the dialog directly on a given tab (deep link from the Satisfacción
    *  dashboard: `?client=<id>&tab=encuestas`). Undefined = default "Info" tab. */
   defaultTab?: 'info' | 'vehiculos' | 'encuesta' | 'postservicio';
+  /** Se llama cuando una acción de acá cambió el CONJUNTO de clientes o el reparto de sus
+   *  vehículos (hoy: la fusión de duplicados), para que el listado que montó este diálogo
+   *  se recargue en vez de quedar mostrando datos que ya no son. */
+  onClientsChanged?: () => void;
 }
 
 // Radix Select cannot hold an empty-string value, so "no driver" needs a sentinel that can
@@ -130,7 +136,7 @@ function buildWaHref(phone: string | null): string | null {
   return `https://wa.me/${normalized}`;
 }
 
-const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: ClientDetailDialogProps) => {
+const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab, onClientsChanged }: ClientDetailDialogProps) => {
   const { hasPermission, role } = useAuth();
   const roleName = role?.name?.toLowerCase() || '';
   // Pedido explicito del admin: "SOLO PARA ADMIN" — sin excepcion para concesionario/vendedor,
@@ -161,6 +167,8 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
     defaultTab === 'postservicio' ? 'postservicio' : 'venta',
   );
   const [repurchaseOpen, setRepurchaseOpen] = useState(false);
+  const [linkVehicleOpen, setLinkVehicleOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [drivers, setDrivers] = useState<DriverOption[]>([]);
   const [assigningVehicleId, setAssigningVehicleId] = useState<string | null>(null);
@@ -555,15 +563,50 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
                   <User className="w-3 h-3" /> Cliente de flota
                 </Badge>
               )}
+
+              {/* La fusión exige is_admin_user() en la base: un botón visible para el resto
+                  siempre respondería "no autorizado", que es peor que no tenerlo. */}
+              {isAdmin && (
+                <div className="pt-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-xs"
+                    onClick={() => setMergeOpen(true)}
+                    title="Unificar esta ficha con otra del mismo cliente real"
+                  >
+                    <GitMerge className="w-3.5 h-3.5 mr-1" /> Fusionar con otro cliente
+                  </Button>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Para cuando el mismo cliente quedó cargado dos veces. El duplicado no se borra:
+                    queda desactivado.
+                  </p>
+                </div>
+              )}
             </TabsContent>
 
             {/* Vehículos tab */}
             <TabsContent value="vehiculos" className="space-y-2">
-              {canAddVehicle && (
-                <div className="flex justify-end">
-                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setRepurchaseOpen(true)}>
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Agregar vehículo
-                  </Button>
+              {(canAddVehicle || isAdmin) && (
+                <div className="flex flex-wrap justify-end gap-2">
+                  {/* "Agregar" CREA un vehículo nuevo; "Vincular" MUEVE uno que ya existe, con
+                      su historial. Son acciones distintas y por eso son dos botones. */}
+                  {isAdmin && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => setLinkVehicleOpen(true)}
+                      title="Traer a esta ficha un vehículo que ya está en el sistema"
+                    >
+                      <Link2 className="w-3.5 h-3.5 mr-1" /> Vincular vehículo
+                    </Button>
+                  )}
+                  {canAddVehicle && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setRepurchaseOpen(true)}>
+                      <Plus className="w-3.5 h-3.5 mr-1" /> Agregar vehículo
+                    </Button>
+                  )}
                 </div>
               )}
               {loading ? (
@@ -871,6 +914,32 @@ const ClientDetailDialog = ({ client, open, onOpenChange, models, defaultTab }: 
       onOpenChange={setRepurchaseOpen}
       models={models}
       onSuccess={() => setReloadKey(k => k + 1)}
+    />
+
+    <LinkVehicleDialog
+      client={client}
+      open={linkVehicleOpen}
+      onOpenChange={setLinkVehicleOpen}
+      onSuccess={() => {
+        // El vehículo también salió de la ficha de su dueño anterior, así que el listado que
+        // montó este diálogo tiene que recargarse, no sólo esta ficha.
+        setReloadKey(k => k + 1);
+        onClientsChanged?.();
+      }}
+    />
+
+    <MergeClientsDialog
+      clientId={client?.id ?? null}
+      clientName={client?.full_name ?? ''}
+      open={mergeOpen}
+      onOpenChange={setMergeOpen}
+      onSuccess={({ dupId }) => {
+        onClientsChanged?.();
+        // Si la ficha abierta es la que quedó desactivada, seguir mostrándola sería mentir:
+        // sus vehículos y reservas ya están en la otra. Se cierra.
+        if (dupId === client?.id) onOpenChange(false);
+        else setReloadKey(k => k + 1);
+      }}
     />
 
     <AlertDialog open={!!unlinking} onOpenChange={open => !open && setUnlinking(null)}>
