@@ -18,4 +18,12 @@ regexes = [
   # compilado, así que cualquiera la lee desde el navegador. Marcarla sería pedir
   # que se esconda algo que por diseño se publica.
   '''bw_pk_887c9a608806a32b74f2f7dc2531e5b2''',
+  # UUIDs en formato canonico (8-4-4-4-12 hex). Las migraciones de reparacion de
+  # datos citan ids de filas explicitos a proposito -- un UPDATE con heuristica
+  # adentro es justamente lo que causo el incidente del 2026-09-07 -- y la regla
+  # generic-api-key los marca por entropia. Ninguna credencial de los proveedores
+  # que usa el proyecto tiene esta forma: todas llevan prefijo (sbp_, sb_publishable_,
+  # bw_pk_) o son JWT. Acotado al formato, no a la carpeta: un secreto de verdad
+  # dentro de una migracion se sigue detectando.
+  '''\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b''',
 ]
