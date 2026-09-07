@@ -45,6 +45,16 @@ import WonProspectDialog, { type WonProspectResult } from '@/components/prospect
 import ProspectSurveyDecision from '@/components/prospects/ProspectSurveyDecision';
 import { deliverSatisfactionSurvey, describeSkippedDelivery } from '@/components/clients/surveyDelivery';
 
+/**
+ * Único estado que no se puede escribir con un UPDATE suelto. Sin la placa vendida el
+ * trigger de la base tiene que adivinar quién compró (cédula, teléfono, correo) y con los
+ * correos de relleno y los teléfonos de intermediario de Kommo la venta termina colgando de
+ * otro cliente, al que además le arranca el vehículo. Todo camino a "ganado" pasa por
+ * WonProspectDialog, que sí pide la placa.
+ */
+const WON_STATUS = 'ganado';
+const WON_NEEDS_PLATE_MESSAGE =
+  'Marcar como Ganado necesita la placa vendida. Hazlo prospecto por prospecto desde el botón de venta ganada.';
 
 interface Dealership {
   id: string;
@@ -594,7 +604,18 @@ const AdminProspectos = () => {
         // body while a modal is open).
         if (duplicate) { setDialogOpen(false); setDuplicateMatch(duplicate); setSaving(false); return; }
       }
-      const { error } = await supabase.from('prospects').update(payload).eq('id', editing.id);
+      // Pasar a "ganado" desde el diálogo de edición guarda todo lo demás y deja el estado
+      // como estaba: el salto a ganado lo completa WonProspectDialog, que pide la placa.
+      const deferWon = payload.status === WON_STATUS && editing.status !== WON_STATUS;
+      const editPayload = deferWon ? { ...payload, status: editing.status } : payload;
+      // `trg_link_client_on_won` es BEFORE UPDATE OF status y dispara con WHEN
+      // (NEW.status = 'ganado'), aunque el valor no cambie: reescribir "ganado" en un
+      // prospecto que ya está ganado y todavía no tiene placa vuelve a resolver el comprador
+      // a ciegas (por cédula/teléfono/correo) cada vez que alguien corrige un nombre o una
+      // nota. No hay razón para reescribir un valor que no cambió.
+      const writePayload: Partial<typeof editPayload> = { ...editPayload };
+      if (writePayload.status === editing.status) delete writePayload.status;
+      const { error } = await supabase.from('prospects').update(writePayload).eq('id', editing.id);
       if (error) { toast.error('Error al actualizar prospecto'); console.error(error); }
       else {
         await syncProspectVehicles(editing.id, pUnits, true);
@@ -604,9 +625,13 @@ const AdminProspectos = () => {
           // Always push all fields to Kommo on edit
           updateKommoLeadFields(editing.id, editing.kommo_lead_id).catch(console.error);
           // Also update stage if it changed
-          if (payload.status !== editing.status) {
-            updateKommoLeadStage(editing.id, editing.kommo_lead_id, payload.status).catch(console.error);
+          if (editPayload.status !== editing.status) {
+            updateKommoLeadStage(editing.id, editing.kommo_lead_id, editPayload.status).catch(console.error);
           }
+        }
+        if (deferWon) {
+          toast.info('Falta la placa del vehículo vendido para marcarlo como Ganado.');
+          setSoldPlateTarget(editing.id);
         }
       }
     } else {
@@ -614,14 +639,25 @@ const AdminProspectos = () => {
         const duplicate = await checkDuplicatePhone(payload.phone);
         if (duplicate) { setDialogOpen(false); setDuplicateMatch(duplicate); setSaving(false); return; }
       }
-      const { data: inserted, error } = await supabase.from('prospects').insert(payload).select().single();
+      // Crear un prospecto ya marcado "ganado" es un INSERT: no dispara el trigger, así que
+      // no engancha mal a nadie, pero deja una venta sin cliente y sin placa que después
+      // alguien "arregla" tocando el estado — y ahí sí adivina. Se crea en el estado de
+      // entrada y se pide la placa enseguida.
+      const createWon = payload.status === WON_STATUS;
+      const insertPayload = createWon ? { ...payload, status: ENTRY_STATUS } : payload;
+      const { data: inserted, error } = await supabase.from('prospects').insert(insertPayload).select().single();
       if (error) { toast.error('Error al crear prospecto'); console.error(error); }
       else {
         await syncProspectVehicles(inserted.id, pUnits, false);
         toast.success('Prospecto creado');
-        setDialogOpen(false); setConfirmOpen(false); resetForm(); fetchProspects();
+        setDialogOpen(false); setConfirmOpen(false); resetForm();
+        await fetchProspects();
         // Fire-and-forget: create lead in Kommo
         createKommoLead(inserted.id).catch(console.error);
+        if (createWon) {
+          toast.info('Falta la placa del vehículo vendido para marcarlo como Ganado.');
+          setSoldPlateTarget(inserted.id);
+        }
       }
     }
     setSaving(false);
@@ -673,9 +709,15 @@ const AdminProspectos = () => {
   const handleWonProspectConfirmed = (result: WonProspectResult) => {
     const id = soldPlateTarget;
     fetchProspects();
-    const p = id ? prospects.find(x => x.id === id) : undefined;
-    if (id && p?.kommo_lead_id) {
-      updateKommoLeadStage(id, p.kommo_lead_id, 'ganado').catch(console.error);
+    // El `kommo_lead_id` se lee fresco de la base y no del estado local: un prospecto creado
+    // ya marcado "ganado" entra en el estado de entrada y su lead se crea después, así que
+    // `prospects` todavía lo tiene en null y el lead se quedaría para siempre en la etapa de
+    // entrada con la venta cerrada acá.
+    if (id) {
+      supabase.from('prospects').select('kommo_lead_id').eq('id', id).maybeSingle()
+        .then(({ data }) => {
+          if (data?.kommo_lead_id) updateKommoLeadStage(id, data.kommo_lead_id, 'ganado').catch(console.error);
+        });
     }
 
     toast.success(`Venta registrada (${result.vehiclesCreated} vehículo${result.vehiclesCreated === 1 ? '' : 's'}).`);
@@ -1269,6 +1311,12 @@ const AdminProspectos = () => {
 
   const handleBulkApply = async () => {
     if (!bulkAction) return;
+    // Cinturón: "ganado" ya no figura en el selector, pero un valor arrastrado de una acción
+    // anterior tampoco puede colarse. La placa es de cada venta, no del lote.
+    if (bulkAction === 'status' && bulkValue === WON_STATUS) {
+      toast.error(WON_NEEDS_PLATE_MESSAGE);
+      return;
+    }
     let payload: Record<string, any> = {};
     switch (bulkAction) {
       case 'status': if (!bulkValue || bulkValue === '__none') return; payload = { status: bulkValue }; break;
@@ -2517,16 +2565,22 @@ const AdminProspectos = () => {
           <div className="py-1 space-y-3">
             <p className="text-xs text-muted-foreground">Se aplicará a <strong>{selectedIds.size}</strong> prospecto(s) seleccionado(s).</p>
             {bulkAction === 'status' && (
-              <Select value={bulkValue} onValueChange={setBulkValue}>
-                <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
-                <SelectContent>
-                  {PROSPECT_STATUSES.map(s => (
-                    <SelectItem key={s.name} value={s.name}>
-                      <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <>
+                <Select value={bulkValue} onValueChange={setBulkValue}>
+                  <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Seleccionar estado" /></SelectTrigger>
+                  <SelectContent>
+                    {PROSPECT_STATUSES.filter(s => s.name !== WON_STATUS).map(s => (
+                      <SelectItem key={s.name} value={s.name}>
+                        <Badge className={cn("text-[10px] px-1.5 py-0", s.color)}>{s.label}</Badge>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground leading-snug">
+                  «Ganado» no está en esta lista: cada venta tiene su propia placa. Márcalo prospecto por
+                  prospecto desde el botón de venta ganada.
+                </p>
+              </>
             )}
             {bulkAction === 'estadoVzla' && (
               <Select value={bulkValue} onValueChange={setBulkValue}>

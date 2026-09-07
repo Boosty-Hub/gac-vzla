@@ -573,7 +573,7 @@ Deno.serve(async (req) => {
 
       const { data: prospect } = await supabase
         .from('prospects')
-        .select('id, status')
+        .select('id, status, sold_plate')
         .eq('kommo_lead_id', parseInt(statusLeadId))
         .single()
 
@@ -592,7 +592,31 @@ Deno.serve(async (req) => {
         return new Response('OK', { status: 200 })
       }
 
-      if (ourStatus && prospect.status !== ourStatus) {
+      // "ganado" SIN placa vendida es exactamente lo que le cambió el dueño a 12 vehículos:
+      // el trigger link_client_on_won tiene que adivinar el comprador por cédula, teléfono o
+      // correo, y los leads de Ventas traen correos de relleno (na@na.com) y teléfonos de
+      // intermediario compartidos. Los leads de Ventas tampoco tienen custom field de placa,
+      // así que acá no hay forma de capturarla: el prospecto se queda en su estado actual y
+      // el pendiente queda registrado para que alguien cierre la venta desde el portal, con
+      // WonProspectDialog, que sí pide la placa. Sigue devolviendo 200 — rechazar el evento
+      // haría que Kommo reintente para siempre y ensucie todo.
+      const wonWithoutPlate = ourStatus === 'ganado' && !prospect.sold_plate
+
+      if (wonWithoutPlate && prospect.status !== ourStatus) {
+        await supabase.from('integration_logs').insert({
+          integration_name: 'kommo', event_type: 'webhook_won_needs_plate',
+          prospect_id: prospect.id, kommo_lead_id: parseInt(statusLeadId),
+          status: 'warning',
+          details: {
+            reason: 'sold_plate not captured on webhook path',
+            blocked: true,
+            kept_status: prospect.status,
+            kommo_status_id: statusId,
+          },
+        })
+      }
+
+      if (ourStatus && prospect.status !== ourStatus && !wonWithoutPlate) {
         await supabase.from('prospects').update({ status: ourStatus }).eq('id', prospect.id)
         await supabase.from('integration_logs').insert({
           integration_name: 'kommo', event_type: 'webhook_status_update',
@@ -602,18 +626,14 @@ Deno.serve(async (req) => {
         })
 
         if (ourStatus === 'ganado') {
-          // Plate is NOT capturable here (no plate CF on Ventas leads) and MUST NOT block:
-          // Kommo already moved the lead, so refusing would permanently desync CRM and DB
-          // (design.md D5). The client + satisfaction_surveys row already exist by this point —
-          // trg_link_client_on_won (BEFORE) and trg_create_satisfaction_survey_on_won (AFTER)
-          // both fired inside the UPDATE above, in the same transaction. This only delivers
-          // what already exists.
-          await supabase.from('integration_logs').insert({
-            integration_name: 'kommo', event_type: 'webhook_won_needs_plate',
-            prospect_id: prospect.id, kommo_lead_id: parseInt(statusLeadId),
-            status: 'warning', details: { reason: 'sold_plate not captured on webhook path' },
-          })
-
+          // Sólo se llega acá cuando el prospecto YA tiene sold_plate (el caso sin placa se
+          // corta arriba, sin escribir el estado). Con placa, link_client_on_won resuelve el
+          // comprador por el criterio absoluto — el vehículo facturado — y no adivina nada.
+          // El cliente + la fila de satisfaction_surveys ya existen en este punto:
+          // trg_link_client_on_won (BEFORE) y trg_create_satisfaction_survey_on_won (AFTER)
+          // dispararon dentro del UPDATE de arriba, en la misma transacción. Esto sólo
+          // entrega lo que ya existe.
+          //
           // Nested inside the status-CHANGE guard above (prospect.status !== ourStatus), not a
           // bare `ourStatus === 'ganado'` check: deliver_satisfaction_survey has no "already
           // delivered" gate of its own beyond the 24h claim recorded at survey creation (design.md

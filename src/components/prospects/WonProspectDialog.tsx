@@ -79,6 +79,38 @@ const PLATE_LOOKUP_DEBOUNCE_MS = 350;
 /** Matches the 3-character floor enforced inside `staff_search_vehicles_by_plate`. */
 const MIN_PLATE_LOOKUP_LENGTH = 3;
 
+/**
+ * Un teléfono cargado en dos o más fichas de cliente (la empresa y su contacto, familiares,
+ * el intermediario que aparece en cientos de leads de Kommo) no identifica a nadie. Es
+ * exactamente la llave que enganchó ventas al comprador equivocado, así que a partir de este
+ * número el aviso deja de ser informativo y pasa a ser una advertencia.
+ */
+const SHARED_PHONE_OWNERS_MIN = 2;
+
+/** Último tramo nacional del teléfono: así conviven "04122846405" y "+584122846405". */
+const lastTenDigits = (value: string | null | undefined): string =>
+  (value || '').replace(/\D/g, '').slice(-10);
+
+/**
+ * Señales que hacen (o no) creíble al cliente existente que la base eligió como comprador.
+ * Todo se lee de fuentes ya existentes: `staff_search_clients` y `staff_lookup_client_vehicles`
+ * son SECURITY DEFINER (el vendedor no ve `clients` por RLS) y la lista de correos de relleno
+ * vive en `identity_blocklist_emails`, administrable, nunca quemada en el código.
+ */
+interface IdentityRisk {
+  /** `false` cuando no se pudo leer la ficha: no se afirma nada sobre ella. */
+  clientRead: boolean;
+  cedula: string | null;
+  vehicleCount: number | null;
+  /** `false` cuando no se pudo leer la lista de correos de relleno: no hay señal, ni buena
+   *  ni mala, y callarse equivaldría a decir que el correo está limpio. */
+  blocklistRead: boolean;
+  /** Correo de relleno con el que se está identificando al comprador, si lo hay. */
+  blockedEmail: string | null;
+  /** Cuántas fichas de cliente comparten ese teléfono. `null` = no se pudo contar. */
+  phoneOwners: number | null;
+}
+
 interface VehicleModelOption {
   id: string;
   brand: string;
@@ -219,6 +251,8 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   // 'same' = el vendedor confirmó que es el mismo cliente. 'different' = es otra persona/
   // empresa, forzar cliente nuevo. `null` = todavía sin decidir (bloquea el envío).
   const [identityResolution, setIdentityResolution] = useState<'same' | 'different' | null>(null);
+  // Qué tan confiable es ese cliente como identidad. `null` = todavía sin leer.
+  const [identityRisk, setIdentityRisk] = useState<IdentityRisk | null>(null);
   // Si la encuesta de venta está prendida. Se avisa apenas marca "sí" y no cuando ya
   // confirmó, porque enterarse después de cerrar la venta no sirve de nada.
   const [salesSurveyEnabled, setSalesSurveyEnabled] = useState(true);
@@ -262,6 +296,7 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
     setSurveyChoice(null);
     setIdentityMatch(null);
     setIdentityResolution(null);
+    setIdentityRisk(null);
     attemptedPreselectRef.current = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (supabase.rpc as any)('get_survey_delivery_config')
@@ -292,7 +327,7 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   // Chequeo de identidad por cédula/teléfono/correo — SOLO tiene sentido cuando la placa del
   // primer vehículo quedó libre (`match === null`): es esa placa la que decide el cliente en
   // el trigger (`link_client_on_won` usa el primer plate de la venta), y si ya existe bajo
-  // otro dueño la tarjeta ámbar de abajo ya avisa sobre ESE conflicto — no hace falta
+  // otro dueño la tarjeta de la placa ya avisa sobre ESE conflicto — no hace falta
   // duplicarlo acá. `staff_check_prospect_client_identity` también se resigna sola si el
   // prospecto ya tiene client_id (nada que avisar).
   const firstPlate = rows[0]?.plate;
@@ -333,6 +368,90 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
   const identityReasonLabel = identityMatch?.reason === 'cedula' ? 'esta cédula'
     : identityMatch?.reason === 'email' ? 'este correo'
     : 'este teléfono';
+
+  // Con quién se va a enganchar la venta, y qué tan poco confiable es el dato que produjo esa
+  // coincidencia. `clients` es invisible por RLS para un vendedor, así que todo pasa por las
+  // RPC SECURITY DEFINER que ya usa el resto del portal.
+  const identityClientId = identityMatch?.clientId ?? null;
+  const identityClientName = identityMatch?.clientName ?? null;
+  useEffect(() => {
+    // Se limpia ANTES de salir a buscar: si la placa corregida resuelve otro cliente, la
+    // tarjeta mostraría el nombre nuevo junto a la cédula y el conteo de vehículos del
+    // anterior durante todo el viaje de red, y es justo el cartel que dice a qué ficha se le
+    // engancha la venta.
+    setIdentityRisk(null);
+    if (!prospectId || !identityClientId) return;
+    let active = true;
+    (async () => {
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      const [prospectRes, vehiclesRes, blocklistRes] = await Promise.all([
+        supabase.from('prospects').select('email, phone').eq('id', prospectId).maybeSingle(),
+        (supabase.rpc as any)('staff_lookup_client_vehicles', { p_client_id: identityClientId }),
+        supabase.from('identity_blocklist_emails' as any).select('email'),
+      ]);
+
+      const prospect = prospectRes.data as { email?: string | null; phone?: string | null } | null;
+
+      // La ficha se resuelve por ID exacto: `staff_lookup_client_vehicles` devuelve
+      // `client_cedula` y `client_phone` del cliente que se le pidió. Buscarla por nombre
+      // apagaba la señal justo en el caso peligroso: `staff_search_clients` corta en 20 filas
+      // y exige 3 caracteres, así que con un nombre genérico de empresa —el molde de los
+      // clientes-balde de Kommo— la ficha quedaba fuera del resultado, `clientRead` caía en
+      // false y el aviso de «sin cédula» desaparecía solo.
+      const vehicleRows = (vehiclesRes.error ? [] : (vehiclesRes.data || [])) as Array<Record<string, unknown>>;
+      let clientRead = !vehiclesRes.error && vehicleRows.length > 0;
+      let cedula = ((vehicleRows[0]?.client_cedula as string | null | undefined) || '').trim() || null;
+      let clientPhone = (vehicleRows[0]?.client_phone as string | null | undefined) ?? null;
+
+      // Un cliente sin vehículos no aparece en esa RPC, y es un caso frecuente acá (la ficha
+      // recién creada por un prospecto anterior): ahí sí hace falta el fallback por nombre,
+      // el único camino que un vendedor tiene a `clients`.
+      if (!clientRead && identityClientName) {
+        const { data: byName } = await (supabase.rpc as any)('staff_search_clients', { p_query: identityClientName });
+        const clientRow = ((byName || []) as Array<Record<string, unknown>>)
+          .find(r => String(r.client_id) === identityClientId);
+        if (clientRow) {
+          clientRead = true;
+          cedula = ((clientRow.cedula as string | null | undefined) || '').trim() || null;
+          clientPhone = (clientRow.phone as string | null | undefined) ?? null;
+        }
+      }
+
+      const phone10 = lastTenDigits(clientPhone ?? prospect?.phone);
+      let phoneOwners: number | null = null;
+      if (phone10.length === 10) {
+        const { data: sharing } = await (supabase.rpc as any)('staff_search_clients', { p_query: phone10 });
+        phoneOwners = ((sharing || []) as Array<Record<string, unknown>>)
+          .filter(r => lastTenDigits(r.phone as string | null) === phone10).length;
+      }
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+
+      if (!active) return;
+      const prospectEmail = (prospect?.email || '').trim().toLowerCase();
+      // Una lectura que falló no es una lista vacía: decir nada equivale a decir «ese correo
+      // está limpio», y es la señal que delata al cliente-balde.
+      const blocked = blocklistRes.error
+        ? null
+        : new Set(
+          ((blocklistRes.data || []) as Array<{ email?: string | null }>)
+            .map(r => (r.email || '').trim().toLowerCase())
+            .filter(Boolean),
+        );
+      setIdentityRisk({
+        clientRead,
+        cedula,
+        vehicleCount: vehiclesRes.error ? null : vehicleRows.length,
+        blocklistRead: !blocklistRes.error,
+        blockedEmail: blocked && prospectEmail && blocked.has(prospectEmail) ? prospectEmail : null,
+        phoneOwners,
+      });
+    })();
+    return () => { active = false; };
+  }, [prospectId, identityClientId, identityClientName]);
+
+  const identityPhoneShared = (identityRisk?.phoneOwners ?? 0) >= SHARED_PHONE_OWNERS_MIN;
+  const identityNoCedula = !!identityRisk?.clientRead && !identityRisk.cedula;
+  const identityWeak = !!identityRisk && (!!identityRisk.blockedEmail || identityPhoneShared || identityNoCedula);
 
   const brands = Array.from(new Set(models.map(m => m.brand)));
 
@@ -660,10 +779,56 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
           )}
 
           {identityMatch && (
-            <div className="rounded-md border border-sky-300 bg-sky-50 p-2 space-y-1.5">
-              <p className="text-[11px] text-sky-800 leading-snug">
-                Ya existe un cliente registrado con {identityReasonLabel}: <strong>{identityMatch.clientName}</strong>.
-                Esta venta se registrará bajo su ficha. ¿Es la misma persona o empresa que este prospecto?
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-2 space-y-1.5">
+              <p className="text-[11px] text-amber-900 leading-snug">
+                Esta venta se registrará bajo un cliente que <strong>ya existe</strong>, porque coincide{' '}
+                {identityReasonLabel}: <strong>{identityMatch.clientName}</strong>
+                {identityRisk?.cedula
+                  ? <> · cédula/RIF <strong>{identityRisk.cedula}</strong></>
+                  : identityRisk?.clientRead ? <> · sin cédula ni RIF registrado</> : null}
+                {!!identityRisk?.vehicleCount && (
+                  <> · ya tiene {identityRisk.vehicleCount} vehículo{identityRisk.vehicleCount === 1 ? '' : 's'} a su nombre</>
+                )}.
+              </p>
+
+              {identityRisk && !identityRisk.blocklistRead && (
+                <p className="text-[10px] text-amber-900 leading-snug">
+                  No se pudo verificar si el correo del prospecto es uno de relleno: revisa el dato de
+                  contacto a mano antes de confirmar.
+                </p>
+              )}
+
+              {identityWeak && (
+                <div className="rounded border border-amber-500 bg-amber-100 p-1.5 space-y-1">
+                  <p className="text-[11px] font-semibold text-amber-900 leading-snug">
+                    Ese dato de contacto es poco confiable como identidad.
+                  </p>
+                  <ul className="text-[10px] text-amber-900 leading-snug list-disc pl-4 space-y-0.5">
+                    {identityRisk?.blockedEmail && (
+                      <li>
+                        <strong>{identityRisk.blockedEmail}</strong> es un correo de relleno: lo comparten
+                        cientos de prospectos y no identifica a nadie.
+                      </li>
+                    )}
+                    {identityPhoneShared && (
+                      <li>
+                        Ese teléfono está cargado en <strong>{identityRisk?.phoneOwners}</strong> fichas de
+                        cliente distintas (una empresa y su contacto, familiares, intermediarios).
+                      </li>
+                    )}
+                    {identityNoCedula && (
+                      <li>La ficha no tiene cédula ni RIF: no hay forma de comprobar que sea la misma persona o empresa.</li>
+                    )}
+                  </ul>
+                  <p className="text-[10px] text-amber-900 leading-snug">
+                    Si no tienes certeza, elige «No, es otro»: se crea una ficha nueva. Enganchar la venta a
+                    la ficha equivocada le mueve el vehículo a un dueño que no es.
+                  </p>
+                </div>
+              )}
+
+              <p className="text-[11px] text-amber-900 leading-snug">
+                ¿Es la misma persona o empresa que este prospecto?
               </p>
               <div className="flex gap-2">
                 <Button
@@ -686,7 +851,7 @@ export default function WonProspectDialog({ prospectId, modelInterest, onOpenCha
                 </Button>
               </div>
               {!identityResolution && (
-                <p className="text-[10px] text-sky-700">Confirma para poder cerrar la venta.</p>
+                <p className="text-[10px] text-amber-700">Confirma para poder cerrar la venta.</p>
               )}
             </div>
           )}
