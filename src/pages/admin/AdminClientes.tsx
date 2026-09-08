@@ -22,7 +22,8 @@ import ServiceSatisfactionOverview from '@/components/satisfaction/ServiceSatisf
 import ClientDetailDialog from '@/components/clients/ClientDetailDialog';
 import LinkVehicleDialog, { type LinkedVehicleSummary } from '@/components/clients/LinkVehicleDialog';
 import VehicleOwnerHistory from '@/components/clients/VehicleOwnerHistory';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench, Link2Off, Link2 } from 'lucide-react';
+import DuplicateClientsPanel from '@/components/clients/DuplicateClientsPanel';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench, Link2Off, Link2, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { invokeAdminFunction } from '@/lib/adminFunctions';
@@ -199,7 +200,10 @@ const AdminClientes = () => {
   const [totalCount, setTotalCount] = useState(0);
 
   // Filters
-  const [filterStatus, setFilterStatus] = useState('todos');
+  // Arranca en "activo" y no en "todos": una ficha desactivada es, casi siempre, el duplicado
+  // que alguien ya fusionó. Mostrarla al lado de la real hace parecer que la fusión no hizo
+  // nada. Se siguen pudiendo ver con el filtro Estado.
+  const [filterStatus, setFilterStatus] = useState('activo');
   const [filterWarranty, setFilterWarranty] = useState('todos');
   const [filterCity, setFilterCity] = useState('todos');
   // Manual (third-party/service-only) clients are excluded by default so they
@@ -212,7 +216,7 @@ const AdminClientes = () => {
   // así que "Externos" muestra externos o muestra vacío, pero nunca miente.
   // La pestaña ES el filtro. Antes era un desplegable aparte: dos fuentes de verdad para lo
   // mismo, y los externos quedaban escondidos detrás de un combo que había que saber abrir.
-  const [tab, setTab] = useState<'clientes' | 'externos' | 'satisfaccion'>('clientes');
+  const [tab, setTab] = useState<'clientes' | 'externos' | 'duplicados' | 'satisfaccion'>('clientes');
   const filterKind: 'propios' | 'externos' = tab === 'externos' ? 'externos' : 'propios';
   // Cuántos hay de cada tipo, para el número al lado de cada pestaña.
   const [kindCounts, setKindCounts] = useState<{ propios: number; externos: number } | null>(null);
@@ -444,13 +448,13 @@ const AdminClientes = () => {
   };
 
   /**
-   * Totales de cada pestaña. Son GLOBALES a propósito: no los tocan la búsqueda ni los
-   * filtros, así que sólo hace falta recalcularlos cuando se crea, borra o re-marca un
-   * cliente — no en cada tecla. Por eso no vive dentro de `fetchClients`.
+   * Totales de cada pestaña. No los tocan la búsqueda ni los demás filtros — así no hay que
+   * recalcularlos en cada tecla —, pero SÍ el filtro de estado: si el listado esconde a los
+   * desactivados, un contador que los siga sumando dice un número que no está en la tabla.
    */
   const fetchKindCounts = async () => {
     const one = (kind: 'propios' | 'externos') => (supabase as any).rpc('search_clients_page', {
-      p_query: '', p_kind: kind, p_status: 'todos', p_city: 'todos',
+      p_query: '', p_kind: kind, p_status: filterStatus, p_city: 'todos',
       p_warranty: 'todos', p_source: 'todos', p_limit: 1, p_offset: 0,
     });
     const [p, e] = await Promise.all([one('propios'), one('externos')]);
@@ -463,11 +467,17 @@ const AdminClientes = () => {
 
   useEffect(() => {
     fetchModels();
-    refreshCounters();
+    fetchExternalSources();
     // Sólo al montar: son catálogos, no dependen de los filtros. Las mutaciones que sí los
     // cambian llaman a refreshCounters() explícitamente.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Los totales de las pestañas se recalculan con el filtro de estado para que digan lo mismo
+  // que muestra la tabla. Cubre también el montaje inicial.
+  useEffect(() => {
+    fetchKindCounts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterStatus]);
 
   // Deep link from the Satisfacción dashboard: `?client=<id>&tab=encuestas`. Works
   // identically at both /admin/clientes and /concesionario/clientes (this component
@@ -1058,6 +1068,14 @@ const AdminClientes = () => {
           Clientes externos
           {kindCounts && <span className="text-[10px] opacity-70 tabular-nums">{kindCounts.externos}</span>}
         </TabsTrigger>
+        {/* Sólo para admin: fusionar exige is_admin_user() en la base, así que para el resto
+            la pestaña sería una lista de duplicados que no pueden resolver. */}
+        {isAdmin && (
+          <TabsTrigger value="duplicados" className="gap-1.5">
+            <Copy className="w-3 h-3" />
+            Duplicados
+          </TabsTrigger>
+        )}
         <TabsTrigger value="satisfaccion">Satisfacción</TabsTrigger>
       </TabsList>
 
@@ -1066,7 +1084,7 @@ const AdminClientes = () => {
           para cambiar un booleano es la forma segura de que las dos copias se despeguen.
           Radix además desmonta el panel inactivo, así que dos TabsContent recargarían la
           tabla entera en cada cambio de pestaña. */}
-      {tab !== 'satisfaccion' && (
+      {(tab === 'clientes' || tab === 'externos') && (
       <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -2207,6 +2225,20 @@ const AdminClientes = () => {
       </Dialog>
 
       </div>
+      )}
+
+      {isAdmin && (
+        <TabsContent value="duplicados">
+          <DuplicateClientsPanel
+            // Una fusión desactiva una de las dos fichas: el listado y los totales de las
+            // pestañas quedan viejos hasta que se recargan.
+            onClientsChanged={() => {
+              fetchClients();
+              refreshCounters();
+              setClientVehicles({});
+            }}
+          />
+        </TabsContent>
       )}
 
       <TabsContent value="satisfaccion">

@@ -58,6 +58,10 @@ interface MergeClientsDialogProps {
    *  la que se conserva. */
   clientId: string | null;
   clientName: string;
+  /** La otra ficha, cuando quien abre el diálogo ya sabe cuál es (pestaña Duplicados). Se
+   *  saltea la búsqueda y se muestran las dos tarjetas directamente. Sin esto habría que
+   *  volver a buscar a mano una ficha que el sistema ya identificó. */
+  candidateId?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSuccess: (result: MergeResult) => void;
@@ -132,7 +136,7 @@ const countFor = async (
 };
 
 export default function MergeClientsDialog({
-  clientId, clientName, open, onOpenChange, onSuccess,
+  clientId, clientName, candidateId = null, open, onOpenChange, onSuccess,
 }: MergeClientsDialogProps) {
   const [term, setTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
@@ -161,7 +165,7 @@ export default function MergeClientsDialog({
     // Descarta lo que quedó volando de la apertura anterior.
     searchSeq.current += 1;
     cardsSeq.current += 1;
-  }, [open, clientId]);
+  }, [open, clientId, candidateId]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedTerm(term), 300);
@@ -216,8 +220,8 @@ export default function MergeClientsDialog({
     })();
   }, [debouncedTerm, open, clientId]);
 
-  const chooseCandidate = async (candidate: ClientSummary) => {
-    if (!clientId || loadingCards) return;
+  const loadPair = async (otherId: string) => {
+    if (!clientId) return;
     // Guard de secuencia propio (no el de la búsqueda, que se mueve solo con el debounce):
     // dos clics seguidos sobre candidatos distintos lanzan dos cargas y gana la que responda
     // última, que puede no ser la que se eligió.
@@ -228,7 +232,7 @@ export default function MergeClientsDialog({
     const { data, error } = await supabase
       .from('clients')
       .select('id, full_name, cedula, phone, email, city, is_active, created_at')
-      .in('id', [clientId, candidate.id]);
+      .in('id', [clientId, otherId]);
 
     if (seq !== cardsSeq.current) return;
 
@@ -241,7 +245,7 @@ export default function MergeClientsDialog({
 
     const rows = data as ClientSummary[];
     const base = rows.find(r => r.id === clientId);
-    const other = rows.find(r => r.id === candidate.id);
+    const other = rows.find(r => r.id === otherId);
     if (!base || !other) {
       setLoadingCards(false);
       setFormError('Uno de los dos clientes ya no existe. Actualiza la página e inténtalo de nuevo.');
@@ -272,6 +276,15 @@ export default function MergeClientsDialog({
     setKeepId(pickDefaultKeepId(base, other));
     setLoadingCards(false);
   };
+
+  // Va después del efecto que limpia el estado al abrir: React corre los efectos en orden de
+  // declaración, así que primero se descarta lo de la apertura anterior y recién ahí se carga
+  // el par. Al revés, el reset borraría las dos tarjetas apenas cargadas.
+  useEffect(() => {
+    if (!open || !clientId || !candidateId || candidateId === clientId) return;
+    loadPair(candidateId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, clientId, candidateId]);
 
   const keep = cards ? (keepId === cards.base.id ? cards.base : cards.other) : null;
   const dup = cards ? (keepId === cards.base.id ? cards.other : cards.base) : null;
@@ -361,8 +374,17 @@ export default function MergeClientsDialog({
 
         <div className="py-1 space-y-3">
           <p className="text-xs text-muted-foreground">
-            Busca la otra ficha del mismo cliente real. Se unifican en una sola:{' '}
-            <strong>{clientName}</strong> es una de las dos candidatas, y tú eliges cuál se conserva.
+            {cards ? (
+              <>
+                Revisa las dos fichas y elige cuál se conserva. Todo lo de la otra pasa a esa.
+              </>
+            ) : (
+              <>
+                Busca la otra ficha del mismo cliente real. Se unifican en una sola:{' '}
+                <strong>{clientName}</strong> es una de las dos candidatas, y tú eliges cuál se
+                conserva.
+              </>
+            )}
           </p>
 
           {!cards && (
@@ -396,7 +418,10 @@ export default function MergeClientsDialog({
                   <button
                     key={row.id}
                     type="button"
-                    onClick={() => chooseCandidate(row)}
+                    // El "ocupado" se corta acá y no dentro de `loadPair`: el par preseleccionado
+                    // se carga desde un efecto, donde `loadingCards` puede venir de un render
+                    // anterior y dejaría el diálogo sin cargar nada.
+                    onClick={() => { if (!loadingCards) loadPair(row.id); }}
                     className="w-full text-left rounded-md border bg-muted/40 hover:bg-muted p-2 transition-colors"
                   >
                     <div className="flex items-center justify-between gap-2">
