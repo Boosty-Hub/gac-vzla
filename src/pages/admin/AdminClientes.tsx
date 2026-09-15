@@ -22,8 +22,7 @@ import ServiceSatisfactionOverview from '@/components/satisfaction/ServiceSatisf
 import ClientDetailDialog from '@/components/clients/ClientDetailDialog';
 import LinkVehicleDialog, { type LinkedVehicleSummary } from '@/components/clients/LinkVehicleDialog';
 import VehicleOwnerHistory from '@/components/clients/VehicleOwnerHistory';
-import DuplicateClientsPanel from '@/components/clients/DuplicateClientsPanel';
-import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench, Link2Off, Link2, Copy } from 'lucide-react';
+import { Search, Plus, Pencil, Users, Car, ChevronDown, ChevronRight, Trash2, UserPlus, Eye, EyeOff, Mail, ShieldCheck, ShieldX, Hash, CalendarDays, Clock, MapPin, ClipboardCheck, MessageCircle, X, Power, KeyRound, Repeat, Wrench, Link2Off, Link2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { invokeAdminFunction } from '@/lib/adminFunctions';
@@ -216,7 +215,7 @@ const AdminClientes = () => {
   // así que "Externos" muestra externos o muestra vacío, pero nunca miente.
   // La pestaña ES el filtro. Antes era un desplegable aparte: dos fuentes de verdad para lo
   // mismo, y los externos quedaban escondidos detrás de un combo que había que saber abrir.
-  const [tab, setTab] = useState<'clientes' | 'externos' | 'duplicados' | 'satisfaccion'>('clientes');
+  const [tab, setTab] = useState<'clientes' | 'externos' | 'satisfaccion'>('clientes');
   const filterKind: 'propios' | 'externos' = tab === 'externos' ? 'externos' : 'propios';
   // Cuántos hay de cada tipo, para el número al lado de cada pestaña.
   const [kindCounts, setKindCounts] = useState<{ propios: number; externos: number } | null>(null);
@@ -1068,14 +1067,6 @@ const AdminClientes = () => {
           Clientes externos
           {kindCounts && <span className="text-[10px] opacity-70 tabular-nums">{kindCounts.externos}</span>}
         </TabsTrigger>
-        {/* Sólo para admin: fusionar exige is_admin_user() en la base, así que para el resto
-            la pestaña sería una lista de duplicados que no pueden resolver. */}
-        {isAdmin && (
-          <TabsTrigger value="duplicados" className="gap-1.5">
-            <Copy className="w-3 h-3" />
-            Duplicados
-          </TabsTrigger>
-        )}
         <TabsTrigger value="satisfaccion">Satisfacción</TabsTrigger>
       </TabsList>
 
@@ -2225,20 +2216,6 @@ const AdminClientes = () => {
       </Dialog>
 
       </div>
-      )}
-
-      {isAdmin && (
-        <TabsContent value="duplicados">
-          <DuplicateClientsPanel
-            // Una fusión desactiva una de las dos fichas: el listado y los totales de las
-            // pestañas quedan viejos hasta que se recargan.
-            onClientsChanged={() => {
-              fetchClients();
-              refreshCounters();
-              setClientVehicles({});
-            }}
-          />
-        </TabsContent>
       )}
 
       <TabsContent value="satisfaccion">
