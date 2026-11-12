@@ -39,6 +39,8 @@
 - [x] **0.4** `.env` y `.env.*` añadidos al `.gitignore`; `.env` destrackeado (`git rm --cached`); creado `.env.example`.
 - [ ] **0.5** Purgar `.env` y el token del **historial de git** (`git filter-repo` o BFG) y forzar push. **Baja prioridad ahora** (el token está revocado y la anon key es pública), pero recomendable como higiene. Comando preparado abajo.
 - [ ] **0.6** Migrar a las nuevas API keys de Supabase (`sb_publishable_...` para frontend, `sb_secret_...` para servidor). Requiere generarlas en el dashboard.
+- [ ] **0.8** (PEN-15045) Rotar el access_token de Kommo (long-lived, cuenta `gacvenezuelait`, vence 2028-03-30): fue commiteado en `supabase/migrations/20260420000001_kommo_integration.sql` (commit `1f91b92`), salió de HEAD en `a6ad96d` pero sigue en el historial público. Generar uno nuevo en Kommo (integración privada → Keys and scopes) y actualizar `integration_configs.config.access_token`.
+- [~] **0.9** (PEN-15045) Registro público cerrado en el frontend (sin "Regístrate" ni `signUp`). Pendiente en Supabase: Authentication → Sign In / Providers → desactivar "Allow new users to sign up". Las cuentas creadas por admin (`create-user`, `create-client-user`) y por placa usan la Admin API y siguen funcionando.
 - [x] **0.7** `client.ts` ahora lee `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` del entorno (con fallback al valor actual). Al generar la nueva key en 0.6, basta ponerla en `.env`/host sin tocar código. Build verificado ✓.
 
 **Validación:** el token viejo devuelve 401 en la Management API ✓ (revocado); `git grep` del token → 0 ocurrencias ✓; build en verde ✓. Pendiente: `git log -S` limpio tras purga de historial (0.5).
@@ -49,7 +51,7 @@
 # Opción A (recomendada): git-filter-repo
 pip install git-filter-repo
 git filter-repo --path .env --invert-paths
-git filter-repo --replace-text <(echo 'sbp_b715f486726674624577159f19c827fc1a9d7d4c==>REDACTED')
+git filter-repo --replace-text <(echo '<token-revocado-completo>==>REDACTED')
 git remote add origin https://github.com/Boosty-Hub/gac-vzla.git
 git push origin --force --all
 git push origin --force --tags
