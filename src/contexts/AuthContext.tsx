@@ -31,7 +31,6 @@ interface AuthContextType {
   moduleScopes: Record<string, 'own' | 'all'>;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, fullName: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   hasPermission: (permission: string) => boolean;
   getModuleScope: (module: string) => 'own' | 'all';
@@ -282,15 +281,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   };
 
-  const signUp = async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
-    });
-    return { error: error as Error | null };
-  };
-
   const signOut = async () => {
     clearProfile();
     await supabase.auth.signOut();
@@ -324,7 +314,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         moduleScopes,
         loading,
         signIn,
-        signUp,
         signOut,
         hasPermission,
         getModuleScope,

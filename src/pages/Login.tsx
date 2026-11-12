@@ -12,11 +12,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 
 const Login = () => {
-  const { user, role, loading, signIn, signUp } = useAuth();
-  const [isLogin, setIsLogin] = useState(true);
+  const { user, role, loading, signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -54,29 +52,16 @@ const Login = () => {
     e.preventDefault();
     setSubmitting(true);
 
+    // Public self-registration is closed: accounts are created only by an admin
+    // (create-user / create-client-user edge functions) or by the plate login.
     try {
-      if (isLogin) {
-        const { error } = await signIn(email, password);
-        if (error) {
-          toast.error(error.message === 'Invalid login credentials'
-            ? 'Credenciales incorrectas'
-            : error.message);
-        } else {
-          toast.success('Sesión iniciada correctamente');
-        }
+      const { error } = await signIn(email, password);
+      if (error) {
+        toast.error(error.message === 'Invalid login credentials'
+          ? 'Credenciales incorrectas'
+          : error.message);
       } else {
-        if (!fullName.trim()) {
-          toast.error('Por favor ingresa tu nombre completo');
-          setSubmitting(false);
-          return;
-        }
-        const { error } = await signUp(email, password, fullName);
-        if (error) {
-          toast.error(error.message);
-        } else {
-          toast.success('Cuenta creada. Revisa tu correo para confirmar tu cuenta.');
-          setIsLogin(true);
-        }
+        toast.success('Sesión iniciada correctamente');
       }
     } finally {
       setSubmitting(false);
@@ -235,24 +220,6 @@ const Login = () => {
 
               <TabsContent value="credentials">
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  {!isLogin && (
-                    <div className="space-y-2">
-                      <Label htmlFor="fullName">Nombre Completo</Label>
-                      <div className="relative">
-                        <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                          id="fullName"
-                          type="text"
-                          placeholder="Juan Pérez"
-                          value={fullName}
-                          onChange={(e) => setFullName(e.target.value)}
-                          className="pl-9"
-                          required={!isLogin}
-                        />
-                      </div>
-                    </div>
-                  )}
-
                   <div className="space-y-2">
                     <Label htmlFor="email">Correo Electrónico</Label>
                     <div className="relative">
@@ -296,23 +263,11 @@ const Login = () => {
                   <Button type="submit" className="w-full bg-foreground text-background hover:bg-foreground/90" disabled={submitting}>
                     {submitting ? (
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    ) : isLogin ? (
-                      'Iniciar Sesión'
                     ) : (
-                      'Crear Cuenta'
+                      'Iniciar Sesión'
                     )}
                   </Button>
                 </form>
-
-                <div className="mt-4 text-center">
-                  <button
-                    type="button"
-                    onClick={() => setIsLogin(!isLogin)}
-                    className="text-sm text-primary hover:underline"
-                  >
-                    {isLogin ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia sesión'}
-                  </button>
-                </div>
               </TabsContent>
 
               <TabsContent value="plate">
